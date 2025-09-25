@@ -1,0 +1,35 @@
+{
+  "extends": "../tsconfig.json",
+  "exclude": [],
+  "include": [
+    "**/*.js",
+    "**/*.jsx",
+    "**/*.mjs",
+    "**/*.cjs",
+    "**/*.ts",
+    "**/*.tsx",
+    "../src/**/*.ts",
+    "../src/**/*.tsx",
+    "next.config.mjs",
+    ".next/types/**/*.ts"
+  ],
+  "compilerOptions": {
+    "baseUrl": "./",
+    "paths": {
+      "@payload-config": [
+        "./payload.config.ts"
+      ],
+      "payloadcms-vectorize": [
+        "../src/index.ts"
+      ],
+      "payloadcms-vectorize/client": [
+        "../src/exports/client.ts"
+      ],
+      "payloadcms-vectorize/rsc": [
+        "../src/exports/rsc.ts"
+      ]
+    },
+    "noEmit": true,
+    "emitDeclarationOnly": false,
+  }
+}
