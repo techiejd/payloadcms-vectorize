@@ -1,7 +1,7 @@
 {
   "name": "payloadcms-vectorize",
   "version": "1.0.0",
-  "description": "A blank template to get started with Payload 3.0",
+  "description": "A plugin to vectorize collections for RAG in Payload 3.0",
   "license": "MIT",
   "type": "module",
   "exports": {
@@ -41,13 +41,14 @@
     "lint": "eslint",
     "lint:fix": "eslint ./src --fix",
     "prepublishOnly": "pnpm clean && pnpm build",
+    "test:setup": "docker-compose -f dev/docker-compose.test.yml up -d",
+    "test:teardown": "docker-compose -f dev/docker-compose.test.yml down",
     "test": "pnpm test:int && pnpm test:e2e",
     "test:e2e": "playwright test",
     "test:int": "vitest"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
-    "@payloadcms/db-mongodb": "3.37.0",
     "@payloadcms/db-postgres": "3.37.0",
     "@payloadcms/db-sqlite": "3.37.0",
     "@payloadcms/eslint-config": "3.9.0",
@@ -57,6 +58,7 @@
     "@playwright/test": "^1.52.0",
     "@swc-node/register": "1.10.9",
     "@swc/cli": "0.6.0",
+    "@testcontainers/postgresql": "^11.6.0",
     "@types/node": "^22.5.4",
     "@types/react": "19.1.8",
     "@types/react-dom": "19.1.6",
@@ -65,7 +67,6 @@
     "eslint": "^9.23.0",
     "eslint-config-next": "15.4.4",
     "graphql": "^16.8.1",
-    "mongodb-memory-server": "10.1.4",
     "next": "15.4.4",
     "open": "^10.1.0",
     "payload": "3.37.0",
@@ -115,6 +116,5 @@
       "unrs-resolver"
     ]
   },
-  "registry": "https://registry.npmjs.org/",
-  "dependencies": {}
+  "registry": "https://registry.npmjs.org/"
 }

@@ -1,9 +1,9 @@
-import { mongooseAdapter } from '@payloadcms/db-mongodb'
+import { postgresAdapter } from '@payloadcms/db-postgres'
 import { lexicalEditor } from '@payloadcms/richtext-lexical'
-import { MongoMemoryReplSet } from 'mongodb-memory-server'
 import path from 'path'
 import { buildConfig } from 'payload'
 import { payloadcmsVectorize } from 'payloadcms-vectorize'
+import { makeEmbed } from './helpers/embed.js'
 import sharp from 'sharp'
 import { fileURLToPath } from 'url'
 
@@ -17,18 +17,7 @@ if (!process.env.ROOT_DIR) {
   process.env.ROOT_DIR = dirname
 }
 
-const buildConfigWithMemoryDB = async () => {
-  if (process.env.NODE_ENV === 'test') {
-    const memoryDB = await MongoMemoryReplSet.create({
-      replSet: {
-        count: 3,
-        dbName: 'payloadmemory',
-      },
-    })
-
-    process.env.DATABASE_URI = `${memoryDB.getUri()}&retryWrites=true`
-  }
-
+const buildConfigWithPostgres = async () => {
   return buildConfig({
     admin: {
       importMap: {
@@ -38,7 +27,10 @@ const buildConfigWithMemoryDB = async () => {
     collections: [
       {
         slug: 'posts',
-        fields: [],
+        fields: [
+          { name: 'title', type: 'text' },
+          { name: 'content', type: 'textarea' },
+        ],
       },
       {
         slug: 'media',
@@ -48,9 +40,11 @@ const buildConfigWithMemoryDB = async () => {
         },
       },
     ],
-    db: mongooseAdapter({
-      ensureIndexes: true,
-      url: process.env.DATABASE_URI || '',
+    db: postgresAdapter({
+      pool: {
+        connectionString:
+          process.env.DATABASE_URI || 'postgresql://postgres:password@localhost:5433/payload_test',
+      },
     }),
     editor: lexicalEditor(),
     email: testEmailAdapter,
@@ -60,8 +54,16 @@ const buildConfigWithMemoryDB = async () => {
     plugins: [
       payloadcmsVectorize({
         collections: {
-          posts: true,
+          posts: {
+            fields: {
+              title: true,
+              content: true,
+            },
+          },
         },
+        embed: makeEmbed(8),
+        dims: 8,
+        embeddingVersion: 'test-v1',
       }),
     ],
     secret: process.env.PAYLOAD_SECRET || 'test-secret_key',
@@ -72,4 +74,4 @@ const buildConfigWithMemoryDB = async () => {
   })
 }
 
-export default buildConfigWithMemoryDB()
+export default buildConfigWithPostgres()

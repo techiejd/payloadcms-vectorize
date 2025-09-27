@@ -1,52 +1,73 @@
 import type { Payload } from 'payload'
 
 import config from '@payload-config'
-import { createPayloadRequest, getPayload } from 'payload'
+import { getPayload } from 'payload'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
-
-import { customEndpointHandler } from '../src/endpoints/customEndpointHandler.js'
 
 let payload: Payload
 
-afterAll(async () => {
-  await payload.destroy()
-})
+afterAll(async () => {})
 
 beforeAll(async () => {
   payload = await getPayload({ config })
 })
 
 describe('Plugin integration tests', () => {
-  test('should query custom endpoint added by plugin', async () => {
-    const request = new Request('http://localhost:3000/api/my-plugin-endpoint', {
-      method: 'GET',
-    })
-
-    const payloadRequest = await createPayloadRequest({ config, request })
-    const response = await customEndpointHandler(payloadRequest)
-    expect(response.status).toBe(200)
-
-    const data = await response.json()
-    expect(data).toMatchObject({
-      message: 'Hello from custom endpoint',
-    })
-  })
-
-  test('can create post with custom text field added by plugin', async () => {
+  test('creates embeddings on create', async () => {
     const post = await payload.create({
       collection: 'posts',
       data: {
-        addedByPlugin: 'added by plugin',
+        title: 'Hello world',
+        content: 'This is a test post for vectorization.',
       },
     })
-    expect(post.addedByPlugin).toBe('added by plugin')
+
+    const { totalDocs } = await payload.count({
+      collection: 'embeddings',
+      where: {
+        and: [{ sourceCollection: { equals: 'posts' } }, { docId: { equals: String(post.id) } }],
+      },
+    })
+
+    // Expect one chunk per field with default chunker
+    expect(totalDocs).toBe(2)
+
+    // Save for follow-up tests
+    ;(globalThis as any).__testPostId = String(post.id)
   })
 
-  test('plugin creates and seeds plugin-collection', async () => {
-    expect(payload.collections['plugin-collection']).toBeDefined()
+  test('replaces embeddings on update', async () => {
+    const id = (globalThis as any).__testPostId
+    const post = await payload.update({
+      id,
+      collection: 'posts',
+      data: {
+        title: 'Updated title',
+        content: 'Updated content for vectorization behavior.',
+      },
+    })
 
-    const { docs } = await payload.find({ collection: 'plugin-collection' })
+    const { totalDocs } = await payload.count({
+      collection: 'embeddings',
+      where: {
+        and: [{ sourceCollection: { equals: 'posts' } }, { docId: { equals: String(post.id) } }],
+      },
+    })
 
-    expect(docs).toHaveLength(1)
+    expect(totalDocs).toBe(2)
+  })
+
+  test('removes embeddings on delete', async () => {
+    const id = (globalThis as any).__testPostId
+    await payload.delete({ collection: 'posts', id })
+
+    const { totalDocs } = await payload.count({
+      collection: 'embeddings',
+      where: {
+        and: [{ sourceCollection: { equals: 'posts' } }, { docId: { equals: String(id) } }],
+      },
+    })
+
+    expect(totalDocs).toBe(0)
   })
 })
