@@ -3,7 +3,7 @@ import { lexicalEditor } from '@payloadcms/richtext-lexical'
 import path from 'path'
 import { buildConfig } from 'payload'
 import { payloadcmsVectorize } from 'payloadcms-vectorize'
-import { makeEmbed } from './helpers/embed.js'
+import { makeEmbed, embeddingVersion } from './helpers/embed.js'
 import sharp from 'sharp'
 import { fileURLToPath } from 'url'
 
@@ -63,7 +63,7 @@ const buildConfigWithPostgres = async () => {
         },
         embed: makeEmbed(8),
         dims: 8,
-        embeddingVersion: 'test-v1',
+        embeddingVersion,
       }),
     ],
     secret: process.env.PAYLOAD_SECRET || 'test-secret_key',

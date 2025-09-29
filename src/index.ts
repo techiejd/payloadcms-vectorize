@@ -262,11 +262,14 @@ async function runVectorizeTask(args: {
   const fieldsConfig = job.fieldsConfig
 
   const isPostgres = isPostgresPayload(payload)
+  if (!isPostgres) {
+    throw new Error('[payloadcms-vectorize] Only works with Postgres')
+  }
   const runSQL = async (sql: string, params?: any[]) => {
-    if (!isPostgres) return
     const postgresPayload = payload as PostgresPayload
     if (postgresPayload.db.pool?.query) return postgresPayload.db.pool.query(sql, params)
     if (postgresPayload.db.drizzle?.execute) return postgresPayload.db.drizzle.execute(sql)
+    throw new Error('[payloadcms-vectorize] Failed to persist vector column')
   }
 
   for (const [fieldPath, fieldCfg] of Object.entries(fieldsConfig)) {
@@ -304,20 +307,15 @@ async function runVectorizeTask(args: {
         },
       })
 
-      // Best-effort: write vector column directly when Postgres is in use
-      if (isPostgres && Array.isArray(vector)) {
-        const id = String(created.id)
-        const literal = `[${Array.from(vector).join(',')}]`
-        const sql =
-          `UPDATE "${embeddingsSlug}" SET embedding = '${literal}', embedding_version = $1 WHERE id = $2` as string
-        try {
-          await runSQL(sql, [embeddingVersion, id])
-        } catch (e) {
-          payload.logger.warn(
-            '[payloadcms-vectorize] Failed to persist vector column; continuing without vector',
-            e as Error,
-          )
-        }
+      const id = String(created.id)
+      const literal = `[${Array.from(vector).join(',')}]`
+      const sql =
+        `UPDATE "${embeddingsSlug}" SET embedding = '${literal}', embedding_version = $1 WHERE id = $2` as string
+      try {
+        await runSQL(sql, [embeddingVersion, id])
+      } catch (e) {
+        payload.logger.error('[payloadcms-vectorize] Failed to persist vector column', e as Error)
+        throw new Error(`[payloadcms-vectorize] Failed to persist vector column: ${e}`)
       }
 
       chunkIndex += 1
