@@ -12,6 +12,16 @@ export type CollectionVectorizeOption = {
   fields: Record<string, true | FieldVectorizeOption>
 }
 
+/** Note current limitation: needs a migration in order to change after initial creation */
+export type StaticIntegrationConfig = {
+  /** Name of the embeddings collection created by the plugin */
+  embeddingsSlugOverride?: string
+  /** Vector dimensions for pgvector column */
+  dims: number
+  /** IVFFLAT lists parameter used when creating the index */
+  ivfflatLists?: number
+}
+
 export type PayloadcmsVectorizeConfig = {
   /** Collections and fields to vectorize */
   collections: Partial<Record<CollectionSlug, CollectionVectorizeOption>>
@@ -21,14 +31,6 @@ export type PayloadcmsVectorizeConfig = {
   embeddingVersion: string
   /** Default chunker used for all fields unless overridden */
   chunker?: (text: string) => string[]
-  /** Name of the embeddings collection created by the plugin */
-  embeddingsSlugOverride?: string
-  /** Vector dimensions for pgvector column */
-  /** Note current limitation: not allowed to be changed after initial creation */
-  dims: number
-  /** IVFFLAT lists parameter used when creating the index */
-  /** Note current limitation: not allowed to be changed after initial creation */
-  ivfflatLists?: number
   /** Set true to disable runtime behavior but keep schema */
   disabled?: boolean
 }

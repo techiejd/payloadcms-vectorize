@@ -2,7 +2,7 @@ import { postgresAdapter } from '@payloadcms/db-postgres'
 import { lexicalEditor } from '@payloadcms/richtext-lexical'
 import path from 'path'
 import { buildConfig } from 'payload'
-import { payloadcmsVectorize } from 'payloadcms-vectorize'
+import { createVectorizeIntegration, StaticIntegrationConfig } from 'payloadcms-vectorize'
 import { makeEmbed, embeddingVersion } from './helpers/embed.js'
 import sharp from 'sharp'
 import { fileURLToPath } from 'url'
@@ -17,6 +17,17 @@ if (!process.env.ROOT_DIR) {
   process.env.ROOT_DIR = dirname
 }
 
+const EMBEDDINGS_SLUG = 'embeddings'
+const DIMS = 8
+
+const integrationConfig: StaticIntegrationConfig = {
+  embeddingsSlugOverride: EMBEDDINGS_SLUG,
+  dims: DIMS,
+  ivfflatLists: 100,
+}
+
+const { afterSchemaInitHook, payloadcmsVectorize } = createVectorizeIntegration(integrationConfig)
+
 const buildConfigWithPostgres = async () => {
   return buildConfig({
     admin: {
@@ -29,7 +40,7 @@ const buildConfigWithPostgres = async () => {
         slug: 'posts',
         fields: [
           { name: 'title', type: 'text' },
-          { name: 'content', type: 'textarea' },
+          { name: 'content', type: 'richText' },
         ],
       },
       {
@@ -41,6 +52,8 @@ const buildConfigWithPostgres = async () => {
       },
     ],
     db: postgresAdapter({
+      extensions: ['vector'],
+      afterSchemaInit: [afterSchemaInitHook],
       pool: {
         connectionString:
           process.env.DATABASE_URI || 'postgresql://postgres:password@localhost:5433/payload_test',
@@ -61,8 +74,7 @@ const buildConfigWithPostgres = async () => {
             },
           },
         },
-        embed: makeEmbed(8),
-        dims: 8,
+        embed: makeEmbed(DIMS),
         embeddingVersion,
       }),
     ],
