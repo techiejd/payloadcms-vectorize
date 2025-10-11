@@ -9,6 +9,7 @@ import type {
   DeleteTaskArgs,
   JobContext,
   StaticIntegrationConfig,
+  FieldVectorizeOption,
 } from './types.js'
 import { isPostgresPayload } from './types.js'
 import type { PostgresAdapterArgs } from '@payloadcms/db-postgres'
@@ -17,29 +18,6 @@ export type * from './types.js'
 
 const DEFAULT_EMBEDDINGS_COLLECTION = 'embeddings'
 const DEFAULT_IVFFLAT_LISTS = 100
-
-function defaultChunker(text: string): string[] {
-  // Naive sentence-based chunker with ~1,000 char soft cap per chunk
-  if (!text) return []
-  const sentences = text
-    .replace(/\s+/g, ' ')
-    .split(/(?<=[.!?])\s+/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-
-  const chunks: string[] = []
-  let current = ''
-  for (const sentence of sentences) {
-    if ((current + ' ' + sentence).trim().length > 1000) {
-      if (current) chunks.push(current)
-      current = sentence
-    } else {
-      current = current ? current + ' ' + sentence : sentence
-    }
-  }
-  if (current) chunks.push(current)
-  return chunks.length > 0 ? chunks : [text]
-}
 
 async function ensurePgvectorArtifacts(args: {
   payload: Payload
@@ -84,15 +62,6 @@ async function ensurePgvectorArtifacts(args: {
   }
 }
 
-function getFieldChunker(
-  fieldCfg: true | import('./types.js').FieldVectorizeOption | undefined,
-  fallback: (text: string) => string[],
-): (text: string) => string[] {
-  if (fieldCfg && fieldCfg !== true && typeof fieldCfg.chunker === 'function')
-    return fieldCfg.chunker
-  return fallback
-}
-
 // ==================
 // Plugin entry point
 // ==================
@@ -131,8 +100,6 @@ export const createVectorizeIntegration = (
   const payloadcmsVectorize =
     (pluginOptions: PayloadcmsVectorizeConfig) =>
     (config: Config): Config => {
-      const globalChunker = pluginOptions.chunker || defaultChunker
-
       // Ensure collections array exists
       config.collections = [...(config.collections || [])]
 
@@ -291,7 +258,7 @@ async function runVectorizeTask(args: {
   job: {
     doc: Record<string, any>
     collection: string
-    fieldsConfig: Record<string, true | import('./types.js').FieldVectorizeOption>
+    fieldsConfig: Record<string, FieldVectorizeOption>
   }
 }) {
   const { payload, pluginOptions, job } = args
@@ -326,10 +293,8 @@ async function runVectorizeTask(args: {
       },
     })
     const value = getByPath(sourceDoc, fieldPath)
-    if (typeof value !== 'string' || !value) continue
-
-    const chunker = getFieldChunker(fieldCfg, pluginOptions.chunker || defaultChunker)
-    const chunks = chunker(value)
+    const chunker = fieldCfg.chunker
+    const chunks = await chunker(value, payload)
 
     let chunkIndex = 0
     for (const chunkText of chunks) {

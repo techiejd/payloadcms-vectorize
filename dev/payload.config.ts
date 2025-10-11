@@ -9,6 +9,7 @@ import { fileURLToPath } from 'url'
 
 import { testEmailAdapter } from './helpers/testEmailAdapter.js'
 import { seed } from './seed.js'
+import { chunkRichText, chunkText } from './helpers/chunkers.js'
 
 const filename = fileURLToPath(import.meta.url)
 const dirname = path.dirname(filename)
@@ -69,8 +70,8 @@ const buildConfigWithPostgres = async () => {
         collections: {
           posts: {
             fields: {
-              title: true,
-              content: true,
+              title: { chunker: chunkText },
+              content: { chunker: chunkRichText },
             },
           },
         },

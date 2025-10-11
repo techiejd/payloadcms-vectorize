@@ -14,5 +14,4 @@ export function makeEmbed(dims: number) {
     return vector
   }
 }
-
 export const embeddingVersion = 'test-v1'

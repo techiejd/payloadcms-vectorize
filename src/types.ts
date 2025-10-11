@@ -1,15 +1,22 @@
-import type { CollectionSlug } from 'payload'
+import type { CollectionSlug, Payload } from 'payload'
+import type { SerializedEditorState } from '@payloadcms/richtext-lexical/lexical'
 
 export type EmbedFn = (text: string) => Promise<number[] | Float32Array>
 
+export type ChunkerFn =
+  | ((text: string, payload: Payload) => string[])
+  | ((text: string, payload: Payload) => Promise<string[]>)
+  | ((richText: SerializedEditorState, payload: Payload) => string[])
+  | ((richText: SerializedEditorState, payload: Payload) => Promise<string[]>)
+
 export type FieldVectorizeOption = {
-  /** Optional per-field chunker override */
-  chunker?: (text: string) => string[]
+  /** Required per-field chunker override */
+  chunker: ChunkerFn
 }
 
 export type CollectionVectorizeOption = {
   /** Map of field paths to enable vectorization. `true` uses default settings. */
-  fields: Record<string, true | FieldVectorizeOption>
+  fields: Record<string, FieldVectorizeOption>
 }
 
 /** Note current limitation: needs a migration in order to change after initial creation */
@@ -29,8 +36,6 @@ export type PayloadcmsVectorizeConfig = {
   embed: EmbedFn
   /** Version string to track embedding model/version - stored in each embedding document */
   embeddingVersion: string
-  /** Default chunker used for all fields unless overridden */
-  chunker?: (text: string) => string[]
   /** Set true to disable runtime behavior but keep schema */
   disabled?: boolean
 }
@@ -62,7 +67,7 @@ export type VectorizeTaskArgs = {
   pluginOptions: PayloadcmsVectorizeConfig & { embeddingsCollectionSlug?: string }
   doc: Record<string, any>
   collection: string
-  fieldsConfig: Record<string, true | FieldVectorizeOption>
+  fieldsConfig: Record<string, FieldVectorizeOption>
 }
 
 export type DeleteTaskArgs = {
