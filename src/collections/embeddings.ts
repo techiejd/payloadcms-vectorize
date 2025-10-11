@@ -3,8 +3,12 @@ import type { CollectionConfig } from 'payload'
 export const createEmbeddingsCollection = (slug: string = 'embeddings'): CollectionConfig => ({
   slug,
   admin: {
-    useAsTitle: 'fieldPath',
-    description: 'Vector embeddings for search and similarity queries',
+    description:
+      'Vector embeddings for search and similarity queries. Created by the payloadcms-vectorize plugin. Embeddings cannot be added or modified, only deleted, through the admin panel. No other restrictions enforced.',
+  },
+  access: {
+    create: () => false, // Cannot add new embeddings through admin panel
+    update: () => false, // Cannot modify any embeddings field through admin panel
   },
   fields: [
     {
