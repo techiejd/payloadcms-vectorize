@@ -1,4 +1,4 @@
-import type { CollectionSlug, Payload } from 'payload'
+import type { CollectionSlug, Payload, Config } from 'payload'
 import type { SerializedEditorState } from '@payloadcms/richtext-lexical/lexical'
 
 export type EmbedFn = (text: string) => Promise<number[] | Float32Array>
@@ -15,7 +15,7 @@ export type FieldVectorizeOption = {
 }
 
 export type CollectionVectorizeOption = {
-  /** Map of field paths to enable vectorization. `true` uses default settings. */
+  /** Map of field paths to enable vectorization */
   fields: Record<string, FieldVectorizeOption>
 }
 
@@ -29,6 +29,13 @@ export type StaticIntegrationConfig = {
   ivfflatLists?: number
 }
 
+/** PayloadCMS does not expose this type so we need to define it ourselves */
+type InferredCronConfig = {
+  cron?: string
+  limit?: number
+  queue?: string
+}
+
 export type PayloadcmsVectorizeConfig = {
   /** Collections and fields to vectorize */
   collections: Partial<Record<CollectionSlug, CollectionVectorizeOption>>
@@ -36,6 +43,8 @@ export type PayloadcmsVectorizeConfig = {
   embed: EmbedFn
   /** Version string to track embedding model/version - stored in each embedding document */
   embeddingVersion: string
+  /** Task queue name, cron job configuration. Default is every 5 seconds for a cron job named 'payloadcms-vectorize:vectorize' */
+  queueNameOrCronJob?: string | InferredCronConfig
   /** Set true to disable runtime behavior but keep schema */
   disabled?: boolean
 }
@@ -83,3 +92,5 @@ export type JobContext = {
   req: any
   tasks: any
 }
+
+export const DEFAULT_EMBEDDINGS_COLLECTION = 'embeddings'

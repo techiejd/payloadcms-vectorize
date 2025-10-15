@@ -1,18 +1,15 @@
-import type { Config, Payload, Plugin } from 'payload'
+import type { Config, Payload } from 'payload'
 import { customType } from '@payloadcms/db-postgres/drizzle/pg-core'
 
 import { createEmbeddingsCollection } from './collections/embeddings.js'
 import type {
   PayloadcmsVectorizeConfig,
   PostgresPayload,
-  VectorizeTaskArgs,
-  DeleteTaskArgs,
-  JobContext,
   StaticIntegrationConfig,
-  FieldVectorizeOption,
 } from './types.js'
 import { isPostgresPayload } from './types.js'
 import type { PostgresAdapterArgs } from '@payloadcms/db-postgres'
+import { createVectorizeTask } from './tasks/vectorize.js'
 
 export type * from './types.js'
 
@@ -114,79 +111,80 @@ export const createVectorizeIntegration = (
       // Exit early if disabled, but keep embeddings collection present for migrations
       if (pluginOptions.disabled) return config
 
-      // Register tasks using Payload Jobs (best-effort, with inline fallback in hooks)
-      const incomingJobs = (config as any).jobs || {}
-      ;(config as any).jobs = {
+      // Register tasks using Payload Jobs
+      const incomingJobs = config.jobs || { tasks: [] }
+      const incomingAutoRun = config.jobs?.autoRun
+      const newAutoRun = (() => {
+        const vectorizeCronJob =
+          pluginOptions.queueNameOrCronJob && typeof pluginOptions.queueNameOrCronJob === 'object'
+            ? pluginOptions.queueNameOrCronJob
+            : false
+        if (!vectorizeCronJob) {
+          return undefined
+        }
+        if (!incomingAutoRun) {
+          return [vectorizeCronJob]
+        }
+        if (Array.isArray(incomingAutoRun)) {
+          return [...incomingAutoRun, vectorizeCronJob]
+        }
+        return (payload: Payload) => {
+          const autoRun = incomingAutoRun(payload)
+          if (Array.isArray(autoRun)) {
+            return [...autoRun, vectorizeCronJob]
+          }
+          return autoRun.then((autoRun) => {
+            return [...autoRun, vectorizeCronJob]
+          })
+        }
+      })()
+
+      const vectorizeTask = createVectorizeTask({
+        integrationConfig,
+        opts: pluginOptions,
+        collections: pluginOptions.collections,
+      })
+      config.jobs = {
         ...incomingJobs,
-        tasks: {
-          ...(incomingJobs.tasks || {}),
-          'payloadcms-vectorize:vectorize': async (args: VectorizeTaskArgs, ctx: JobContext) => {
-            const { payload, pluginOptions: opts, doc, collection, fieldsConfig } = args
-            await runVectorizeTask({
-              payload,
-              pluginOptions: { ...opts, ...integrationConfig },
-              job: { doc, collection, fieldsConfig },
-            })
-          },
-          'payloadcms-vectorize:delete': async (args: DeleteTaskArgs, ctx: JobContext) => {
-            const { payload, embeddingsSlug: slug, collection, docId } = args
-            await payload.delete({
-              collection: slug,
-              where: {
-                and: [{ sourceCollection: { equals: collection } }, { docId: { equals: docId } }],
-              },
-            })
-          },
-        },
-        workflows: { ...(incomingJobs.workflows || {}) },
+        tasks: [...incomingJobs.tasks, vectorizeTask],
+        autoRun: newAutoRun ?? incomingAutoRun,
       }
 
       // Extend configured collections with hooks
-      for (const [collectionSlug, cv] of Object.entries(pluginOptions.collections || {})) {
+      for (const [collectionSlug, cv] of Object.entries(pluginOptions.collections)) {
         const collection = config.collections.find((c) => c.slug === collectionSlug)
-        if (!collection) continue
+        if (!collection) {
+          throw new Error(`[payloadcms-vectorize] Collection ${collectionSlug} not found`)
+        }
+        if (!cv) {
+          throw new Error(`[payloadcms-vectorize] Collection ${collectionSlug} not found`)
+        }
 
         collection.hooks = {
           ...(collection.hooks || {}),
           afterChange: [
             ...((collection.hooks?.afterChange as any[]) || []),
             async (args) => {
-              const { doc, req } = args as any
-              const payload = (args as any).payload || req?.payload
-              const fieldsConfig =
-                (cv as import('./types.js').CollectionVectorizeOption).fields || {}
-              const jobPayload = {
-                payload,
-                pluginOptions: {
-                  ...pluginOptions,
-                  embeddingsCollectionSlug: embeddingsSlug,
-                },
-                doc,
-                collection: collectionSlug,
-                fieldsConfig,
-              }
+              const { doc, req } = args
+              const payload = req.payload
+              const fieldsConfig = cv.fields
 
-              try {
-                const jobsApi = (payload as any)?.jobs
-                if (jobsApi && typeof jobsApi.enqueue === 'function') {
-                  await jobsApi.enqueue('payloadcms-vectorize:vectorize', jobPayload)
-                  return
-                }
-                if (jobsApi && typeof jobsApi.queue === 'function') {
-                  await jobsApi.queue('payloadcms-vectorize:vectorize', jobPayload)
-                  return
-                }
-              } catch (e) {
-                payload?.logger?.warn?.(
-                  '[payloadcms-vectorize] Jobs enqueue failed, running inline',
-                  e as Error,
-                )
-              }
-              await runVectorizeTask({
-                payload,
-                pluginOptions: pluginOptions as any,
-                job: jobPayload,
+              const queueName = pluginOptions.queueNameOrCronJob
+                ? typeof pluginOptions.queueNameOrCronJob === 'string'
+                  ? pluginOptions.queueNameOrCronJob
+                  : pluginOptions.queueNameOrCronJob.queue
+                : undefined
+              await payload.jobs.queue<'payloadcms-vectorize:vectorize'>({
+                task: 'payloadcms-vectorize:vectorize',
+                input: {
+                  doc,
+                  collection: collectionSlug,
+                  fieldsConfig,
+                },
+                req: req,
+                ...(queueName ? { queue: queueName } : {}),
               })
+              return
             },
           ],
           afterDelete: [
@@ -194,21 +192,15 @@ export const createVectorizeIntegration = (
             async ({ id, payload: pld, req }: any) => {
               const payload = (pld as any) || (req as any)?.payload
               try {
-                const jobsApi = (payload as any)?.jobs
-                const args = {
-                  payload,
-                  embeddingsSlug,
-                  collection: collectionSlug,
-                  docId: String(id),
-                }
-                if (jobsApi && typeof jobsApi.enqueue === 'function') {
-                  await jobsApi.enqueue('payloadcms-vectorize:delete', args)
-                  return
-                }
-                if (jobsApi && typeof jobsApi.queue === 'function') {
-                  await jobsApi.queue('payloadcms-vectorize:delete', args)
-                  return
-                }
+                await payload.delete({
+                  collection: embeddingsSlug,
+                  where: {
+                    and: [
+                      { sourceCollection: { equals: collectionSlug } },
+                      { docId: { equals: String(id) } },
+                    ],
+                  },
+                })
               } catch (e) {
                 payload?.logger?.warn?.(
                   '[payloadcms-vectorize] Jobs enqueue failed (delete), running inline',
@@ -246,88 +238,4 @@ export const createVectorizeIntegration = (
     afterSchemaInitHook,
     payloadcmsVectorize,
   }
-}
-
-// ============
-// Task runners
-// ============
-
-async function runVectorizeTask(args: {
-  payload: Payload
-  pluginOptions: PayloadcmsVectorizeConfig & StaticIntegrationConfig
-  job: {
-    doc: Record<string, any>
-    collection: string
-    fieldsConfig: Record<string, FieldVectorizeOption>
-  }
-}) {
-  const { payload, pluginOptions, job } = args
-  const embeddingsSlug = pluginOptions.embeddingsSlugOverride || DEFAULT_EMBEDDINGS_COLLECTION
-  const embeddingVersion = pluginOptions.embeddingVersion
-  const sourceDoc = job.doc
-  const collection = job.collection
-  const fieldsConfig = job.fieldsConfig
-
-  const isPostgres = isPostgresPayload(payload)
-  if (!isPostgres) {
-    throw new Error('[payloadcms-vectorize] Only works with Postgres')
-  }
-  const runSQL = async (sql: string, params?: any[]) => {
-    const postgresPayload = payload as PostgresPayload
-    if (postgresPayload.db.pool?.query) return postgresPayload.db.pool.query(sql, params)
-    if (postgresPayload.db.drizzle?.execute) return postgresPayload.db.drizzle.execute(sql)
-    throw new Error('[payloadcms-vectorize] Failed to persist vector column')
-  }
-
-  for (const [fieldPath, fieldCfg] of Object.entries(fieldsConfig)) {
-    // Delete existing embeddings for this doc/field combination to keep one set per doc/field
-    // The embeddingVersion is stored in each document and can be updated by re-vectorizing
-    await payload.delete({
-      collection: embeddingsSlug,
-      where: {
-        and: [
-          { sourceCollection: { equals: collection } },
-          { docId: { equals: String(sourceDoc.id) } },
-          { fieldPath: { equals: fieldPath } },
-        ],
-      },
-    })
-    const value = getByPath(sourceDoc, fieldPath)
-    const chunker = fieldCfg.chunker
-    const chunks = await chunker(value, payload)
-
-    let chunkIndex = 0
-    for (const chunkText of chunks) {
-      const vector = await pluginOptions.embed(chunkText)
-      const created = await payload.create({
-        collection: embeddingsSlug,
-        data: {
-          sourceCollection: collection,
-          docId: String(sourceDoc.id),
-          fieldPath,
-          chunkIndex,
-          chunkText,
-          embeddingVersion,
-          embedding: Array.isArray(vector) ? vector : Array.from(vector),
-        },
-      })
-
-      const id = String(created.id)
-      const literal = `[${Array.from(vector).join(',')}]`
-      const sql = `UPDATE "${embeddingsSlug}" SET embedding = $1 WHERE id = $2` as string
-      try {
-        await runSQL(sql, [literal, id])
-      } catch (e) {
-        payload.logger.error('[payloadcms-vectorize] Failed to persist vector column', e as Error)
-        throw new Error(`[payloadcms-vectorize] Failed to persist vector column: ${e}`)
-      }
-
-      chunkIndex += 1
-    }
-  }
-}
-
-function getByPath(obj: any, path: string): any {
-  if (!obj) return undefined
-  return path.split('.').reduce((acc, key) => (acc == null ? acc : acc[key]), obj)
 }

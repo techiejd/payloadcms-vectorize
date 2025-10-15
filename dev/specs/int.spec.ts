@@ -4,7 +4,7 @@ import config from '@payload-config'
 import { getPayload } from 'payload'
 import { beforeAll, describe, expect, test } from 'vitest'
 import { makeEmbed, embeddingVersion } from 'helpers/embed.js'
-import { chunkText, chunkRichText } from 'helpers/chunkers.js'
+import { chunkRichText } from 'helpers/chunkers.js'
 import { createHeadlessEditor } from '@payloadcms/richtext-lexical/lexical/headless'
 import {
   $getRoot,
@@ -13,81 +13,56 @@ import {
   type SerializedEditorState,
 } from '@payloadcms/richtext-lexical/lexical'
 import { $createHeadingNode } from '@payloadcms/richtext-lexical/lexical/rich-text'
-import { PostgresPayload } from '../src/types.js'
+import { PostgresPayload } from '../../src/types.js'
 import { editorConfigFactory, getEnabledNodes } from '@payloadcms/richtext-lexical'
+import { DIMS, getInitialMarkdownContent } from './constants.js'
 
-let payload: Payload
-let postId: string
-let markdownContent: SerializedEditorState // how payloadcms exports the rich text
-const embedFn = makeEmbed(8)
+const embedFn = makeEmbed(DIMS)
 
-beforeAll(async () => {
-  payload = await getPayload({ config })
-})
-
-describe('Chunkers', () => {
-  test('textChunker', () => {
-    const text =
-      '0: This is a test post for vectorization. 1: This is a test post for vectorization. 2: This is a test post for vectorization. 3: This is a test post for vectorization. 4: This is a test post for vectorization. 5: This is a test post for vectorization. 6: This is a test post for vectorization. 7: This is a test post for vectorization. 8: This is a test post for vectorization. 9: This is a test post for vectorization. 10: This is a test post for vectorization. 11: This is a test post for vectorization. 12: This is a test post for vectorization. 13: This is a test post for vectorization. 14: This is a test post for vectorization. 15: This is a test post for vectorization. 16: This is a test post for vectorization. 17: This is a test post for vectorization. 18: This is a test post for vectorization. 19: This is a test post for vectorization. 20: This is a test post for vectorization. 21: This is a test post for vectorization. 22: This is a test post for vectorization. 23: This is a test post for vectorization.'
-    const chunks = chunkText(text)
-    expect(chunks).toEqual([
-      '0: This is a test post for vectorization. 1: This is a test post for vectorization. 2: This is a test post for vectorization. 3: This is a test post for vectorization. 4: This is a test post for vectorization. 5: This is a test post for vectorization. 6: This is a test post for vectorization. 7: This is a test post for vectorization. 8: This is a test post for vectorization. 9: This is a test post for vectorization. 10: This is a test post for vectorization. 11: This is a test post for vectorization. 12: This is a test post for vectorization. 13: This is a test post for vectorization. 14: This is a test post for vectorization. 15: This is a test post for vectorization. 16: This is a test post for vectorization. 17: This is a test post for vectorization. 18: This is a test post for vectorization. 19: This is a test post for vectorization. 20: This is a test post for vectorization. 21: This is a test post for vectorization. 22: This is a test post for vectorization. ',
-      '23: This is a test post for vectorization.',
-    ])
-  })
-
-  test('richTextChunker splits by H2', async () => {
-    const editorConfig = await editorConfigFactory.default({ config: payload.config })
-    const enabledNodes = getEnabledNodes({ editorConfig })
-
-    // Still create editor to resemble runtime environment, but seed with serialized
-    const editor = createHeadlessEditor({
-      nodes: enabledNodes,
+// Helper function to wait for vectorization jobs to complete
+async function waitForVectorizationJobs(payload: Payload, maxWaitMs = 10000) {
+  const startTime = Date.now()
+  while (Date.now() - startTime < maxWaitMs) {
+    const jobs = await payload.find({
+      collection: 'payload-jobs',
+      where: {
+        and: [
+          { taskSlug: { equals: 'payloadcms-vectorize:vectorize' } },
+          { processing: { equals: true } },
+        ],
+      },
     })
-    markdownContent = await new Promise((resolve) => {
-      const unregister = editor.registerUpdateListener(({ editorState }) => {
-        unregister()
-        resolve(editorState.toJSON())
+    if (jobs.totalDocs === 0) {
+      // No running vectorization jobs, check if any are pending
+      const pendingJobs = await payload.find({
+        collection: 'payload-jobs',
+        where: {
+          and: [
+            { taskSlug: { equals: 'payloadcms-vectorize:vectorize' } },
+            { processing: { equals: false } },
+            { completedAt: { equals: null } },
+          ],
+        },
       })
-      editor.update(() => {
-        const root = $getRoot()
-        root.append($createHeadingNode('h1').append($createTextNode('Title')))
-        root.append($createParagraphNode().append($createTextNode('Quote')))
-        root.append($createParagraphNode().append($createTextNode('Paragraph 0')))
-        root.append($createHeadingNode('h2').append($createTextNode('Header 1')))
-        root.append($createParagraphNode().append($createTextNode('Paragraph 1')))
-        root.append($createParagraphNode().append($createTextNode('Paragraph 2')))
-        root.append($createParagraphNode().append($createTextNode('Paragraph 3')))
-        root.append($createHeadingNode('h2').append($createTextNode('Header 2')))
-        root.append($createParagraphNode().append($createTextNode('Paragraph 4')))
-        root.append($createParagraphNode().append($createTextNode('Paragraph 5')))
-        root.append($createParagraphNode().append($createTextNode('Paragraph 6')))
-      })
-    })
-    const chunks = await chunkRichText(markdownContent, payload)
-
-    expect(chunks.length).toBe(3)
-
-    // Intro chunk
-    expect(chunks[0]).toContain('Title')
-    expect(chunks[0]).toContain('Quote')
-    expect(chunks[0]).toContain('Paragraph 0')
-
-    // First H2 section
-    expect(chunks[1]).toContain('## Header 1')
-    expect(chunks[1]).toContain('Paragraph 1')
-    expect(chunks[1]).toContain('Paragraph 2')
-    expect(chunks[1]).toContain('Paragraph 3')
-
-    // Second H2 section
-    expect(chunks[2]).toContain('## Header 2')
-    expect(chunks[2]).toContain('Paragraph 4')
-    expect(chunks[2]).toContain('Paragraph 5')
-    expect(chunks[2]).toContain('Paragraph 6')
-  })
-})
+      if (pendingJobs.totalDocs === 0) {
+        return // All jobs completed
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500)) // Check every 500ms
+  }
+  // Fallback: wait a bit more if we hit the timeout
+  await new Promise((resolve) => setTimeout(resolve, 2000))
+}
 
 describe('Plugin integration tests', () => {
+  let payload: Payload
+  let postId: string
+  let markdownContent: SerializedEditorState
+  beforeAll(async () => {
+    const _config = await config
+    payload = await getPayload({ config: _config })
+    markdownContent = await getInitialMarkdownContent(_config)
+  })
   test('adds embeddings collection with vector column', async () => {
     // Check schema for embeddings collection
     const collections = payload.collections
@@ -150,6 +125,9 @@ describe('Plugin integration tests', () => {
         content: markdownContent as unknown as any,
       },
     })
+
+    // Wait for vectorization jobs to complete
+    await waitForVectorizationJobs(payload)
 
     // Get the actual content chunks to create proper expectations
     const contentChunks = await chunkRichText(markdownContent, payload)
@@ -255,6 +233,9 @@ describe('Plugin integration tests', () => {
         content: updatedContent as unknown as any,
       },
     })
+
+    // Wait for vectorization jobs to complete
+    await waitForVectorizationJobs(payload)
 
     // Get the updated content chunks
     const updatedContentChunks = await chunkRichText(updatedContent, payload)

@@ -18,11 +18,9 @@ if (!process.env.ROOT_DIR) {
   process.env.ROOT_DIR = dirname
 }
 
-const EMBEDDINGS_SLUG = 'embeddings'
 const DIMS = 8
 
 const integrationConfig: StaticIntegrationConfig = {
-  embeddingsSlugOverride: EMBEDDINGS_SLUG,
   dims: DIMS,
   ivfflatLists: 100,
 }
@@ -44,13 +42,6 @@ const buildConfigWithPostgres = async () => {
           { name: 'content', type: 'richText' },
         ],
       },
-      {
-        slug: 'media',
-        fields: [],
-        upload: {
-          staticDir: path.resolve(dirname, 'media'),
-        },
-      },
     ],
     db: postgresAdapter({
       extensions: ['vector'],
@@ -62,6 +53,24 @@ const buildConfigWithPostgres = async () => {
     }),
     editor: lexicalEditor(),
     email: testEmailAdapter,
+    jobs: {
+      tasks: [],
+      autoRun: [
+        {
+          cron: '*/5 * * * * *', // Run every 5 seconds in development
+          limit: 10,
+          queue: 'default',
+        },
+      ],
+      jobsCollectionOverrides: ({ defaultJobsCollection }) => {
+        // Make jobs collection visible in admin for debugging
+        if (!defaultJobsCollection.admin) {
+          defaultJobsCollection.admin = {}
+        }
+        defaultJobsCollection.admin.hidden = false
+        return defaultJobsCollection
+      },
+    },
     onInit: async (payload) => {
       await seed(payload)
     },
