@@ -3,7 +3,12 @@ import { lexicalEditor } from '@payloadcms/richtext-lexical'
 import path from 'path'
 import { buildConfig } from 'payload'
 import { createVectorizeIntegration, StaticIntegrationConfig } from 'payloadcms-vectorize'
-import { makeEmbed, embeddingVersion } from './helpers/embed.js'
+import {
+  makeDummyEmbed,
+  testEmbeddingVersion,
+  voyageEmbed,
+  voyageEmbedDims,
+} from './helpers/embed.js'
 import sharp from 'sharp'
 import { fileURLToPath } from 'url'
 
@@ -18,11 +23,19 @@ if (!process.env.ROOT_DIR) {
   process.env.ROOT_DIR = dirname
 }
 
-const DIMS = 8
+const DIMS = process.env.NODE_ENV === 'test' ? 8 : voyageEmbedDims
+const embed = process.env.NODE_ENV === 'test' ? makeDummyEmbed(DIMS) : voyageEmbed
+const ssl =
+  process.env.NODE_ENV === 'test'
+    ? undefined
+    : {
+        rejectUnauthorized: false,
+        ca: process.env.SSL_CA_CERT,
+      }
 
 const integrationConfig: StaticIntegrationConfig = {
   dims: DIMS,
-  ivfflatLists: 100,
+  ivfflatLists: 10, // Rule of thumb: ivfflatLists = sqrt(total_number_of_vectors). Helps with working memory usage.
 }
 
 const { afterSchemaInitHook, payloadcmsVectorize } = createVectorizeIntegration(integrationConfig)
@@ -49,6 +62,7 @@ const buildConfigWithPostgres = async () => {
       pool: {
         connectionString:
           process.env.DATABASE_URI || 'postgresql://postgres:password@localhost:5433/payload_test',
+        ssl,
       },
     }),
     editor: lexicalEditor(),
@@ -84,8 +98,8 @@ const buildConfigWithPostgres = async () => {
             },
           },
         },
-        embed: makeEmbed(DIMS),
-        embeddingVersion,
+        embed,
+        embeddingVersion: testEmbeddingVersion,
       }),
     ],
     secret: process.env.PAYLOAD_SECRET || 'test-secret_key',

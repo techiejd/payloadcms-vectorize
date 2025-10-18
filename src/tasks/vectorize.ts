@@ -7,7 +7,7 @@ import {
   PayloadcmsVectorizeConfig,
   PostgresPayload,
   StaticIntegrationConfig,
-} from 'src/types.js'
+} from '../types.js'
 
 type VectorizeTaskInput = {
   doc: Record<string, any>
@@ -90,6 +90,7 @@ async function runVectorizeTask(args: {
     throw new Error('[payloadcms-vectorize] Failed to persist vector column')
   }
 
+  const inputs: { chunkText: string; fieldPath: string; chunkIndex: number }[] = []
   for (const [fieldPath, fieldCfg] of Object.entries(fieldsConfig)) {
     // Delete existing embeddings for this doc/field combination to keep one set per doc/field
     // The embeddingVersion is stored in each document and can be updated by re-vectorizing
@@ -106,10 +107,15 @@ async function runVectorizeTask(args: {
     const value = getByPath(sourceDoc, fieldPath)
     const chunker = fieldCfg.chunker
     const chunks = await chunker(value, payload)
-
-    let chunkIndex = 0
-    for (const chunkText of chunks) {
-      const vector = await pluginOptions.embed(chunkText)
+    inputs.push(
+      ...chunks.map((chunk, index) => ({ chunkText: chunk, fieldPath, chunkIndex: index })),
+    )
+  }
+  const chunkTexts = inputs.map((input) => input.chunkText)
+  const vectors = await pluginOptions.embed(chunkTexts)
+  await Promise.all(
+    vectors.map(async (vector, index) => {
+      const { fieldPath, chunkIndex, chunkText } = inputs[index]
       const created = await payload.create({
         collection: embeddingsSlug,
         data: {
@@ -132,10 +138,8 @@ async function runVectorizeTask(args: {
         payload.logger.error('[payloadcms-vectorize] Failed to persist vector column', e as Error)
         throw new Error(`[payloadcms-vectorize] Failed to persist vector column: ${e}`)
       }
-
-      chunkIndex += 1
-    }
-  }
+    }),
+  )
 }
 
 function getByPath(obj: any, path: string): any {

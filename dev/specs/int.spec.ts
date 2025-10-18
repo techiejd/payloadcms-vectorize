@@ -3,7 +3,7 @@ import type { Payload } from 'payload'
 import config from '@payload-config'
 import { getPayload } from 'payload'
 import { beforeAll, describe, expect, test } from 'vitest'
-import { makeEmbed, embeddingVersion } from 'helpers/embed.js'
+import { makeDummyEmbed, testEmbeddingVersion } from 'helpers/embed.js'
 import { chunkRichText } from 'helpers/chunkers.js'
 import { createHeadlessEditor } from '@payloadcms/richtext-lexical/lexical/headless'
 import {
@@ -16,43 +16,10 @@ import { $createHeadingNode } from '@payloadcms/richtext-lexical/lexical/rich-te
 import { PostgresPayload } from '../../src/types.js'
 import { editorConfigFactory, getEnabledNodes } from '@payloadcms/richtext-lexical'
 import { DIMS, getInitialMarkdownContent } from './constants.js'
+import { waitForVectorizationJobs } from './utils.js'
+import { Post } from 'payload-types.js'
 
-const embedFn = makeEmbed(DIMS)
-
-// Helper function to wait for vectorization jobs to complete
-async function waitForVectorizationJobs(payload: Payload, maxWaitMs = 10000) {
-  const startTime = Date.now()
-  while (Date.now() - startTime < maxWaitMs) {
-    const jobs = await payload.find({
-      collection: 'payload-jobs',
-      where: {
-        and: [
-          { taskSlug: { equals: 'payloadcms-vectorize:vectorize' } },
-          { processing: { equals: true } },
-        ],
-      },
-    })
-    if (jobs.totalDocs === 0) {
-      // No running vectorization jobs, check if any are pending
-      const pendingJobs = await payload.find({
-        collection: 'payload-jobs',
-        where: {
-          and: [
-            { taskSlug: { equals: 'payloadcms-vectorize:vectorize' } },
-            { processing: { equals: false } },
-            { completedAt: { equals: null } },
-          ],
-        },
-      })
-      if (pendingJobs.totalDocs === 0) {
-        return // All jobs completed
-      }
-    }
-    await new Promise((resolve) => setTimeout(resolve, 500)) // Check every 500ms
-  }
-  // Fallback: wait a bit more if we hit the timeout
-  await new Promise((resolve) => setTimeout(resolve, 2000))
-}
+const embedFn = makeDummyEmbed(DIMS)
 
 describe('Plugin integration tests', () => {
   let payload: Payload
@@ -131,6 +98,11 @@ describe('Plugin integration tests', () => {
 
     // Get the actual content chunks to create proper expectations
     const contentChunks = await chunkRichText(markdownContent, payload)
+    const contentChunksInputs = contentChunks.map((chunkText, index) => ({
+      chunkText,
+      fieldPath: 'content',
+      chunkIndex: index,
+    }))
 
     const expectedTitleDoc = {
       sourceCollection: 'posts',
@@ -138,7 +110,7 @@ describe('Plugin integration tests', () => {
       fieldPath: 'title',
       chunkIndex: 0,
       chunkText: title,
-      embeddingVersion,
+      embeddingVersion: testEmbeddingVersion,
     }
 
     // Create expected docs for each content chunk
@@ -148,7 +120,7 @@ describe('Plugin integration tests', () => {
       fieldPath: 'content',
       chunkIndex: index,
       chunkText,
-      embeddingVersion,
+      embeddingVersion: testEmbeddingVersion,
     }))
 
     const { totalDocs } = await payload.count({
@@ -173,21 +145,23 @@ describe('Plugin integration tests', () => {
       expect.arrayContaining(expectedContentDocs.map((doc) => expect.objectContaining(doc))),
     )
 
-    for (const doc of embeddings.docs) {
-      expect(doc.chunkText).toBeDefined()
-      const id = String(doc.id)
-      const expectedEmbedding = await embedFn(doc.chunkText as string)
-      const row = await getSQLRow((payload as any).db, id)
+    const expectedEmbeddings = await embedFn(embeddings.docs.map((doc) => doc.chunkText as string))
+    await Promise.all(
+      embeddings.docs.map(async (doc, index) => {
+        expect(doc.chunkText).toBeDefined()
+        const id = String(doc.id)
+        const expectedEmbedding = expectedEmbeddings[index]
+        const row = await getSQLRow((payload as any).db, id)
 
-      expect(row).toBeDefined()
-      expect(row.embedding).toBeDefined()
-      expect(row.t).toBe('vector')
-      const received = JSON.parse(row.embedding)
-      // received is from Postgres, expected is from your embed() in JS
-      for (let i = 0; i < expectedEmbedding.length; i++) {
-        expect(received[i]).toBeCloseTo(expectedEmbedding[i], 5) // 5 decimal places is typical for float4
-      }
-    }
+        expect(row).toBeDefined()
+        expect(row.embedding).toBeDefined()
+        expect(row.t).toBe('vector')
+        const received = JSON.parse(row.embedding)
+        for (let i = 0; i < expectedEmbedding.length; i++) {
+          expect(received[i]).toBeCloseTo(expectedEmbedding[i], 5) // 5 decimal places is typical for float4
+        }
+      }),
+    )
 
     // Save for follow-up tests
     postId = String(post.id)
@@ -260,22 +234,27 @@ describe('Plugin integration tests', () => {
       )
     }
 
-    for (const doc of updatedEmbeddings.docs) {
-      const id = String(doc.id)
-      expect(doc.chunkText).toBeDefined()
-      const expectedEmbedding = await embedFn(doc.chunkText as string)
+    const expectedEmbeddings = await embedFn(
+      updatedEmbeddings.docs.map((doc) => doc.chunkText as string),
+    )
+    await Promise.all(
+      updatedEmbeddings.docs.map(async (doc, index) => {
+        const id = String(doc.id)
+        expect(doc.chunkText).toBeDefined()
+        const expectedEmbedding = expectedEmbeddings[index]
 
-      // now check the DB vector column directly
-      const row = await getSQLRow((payload as any).db, id)
-      expect(row).toBeDefined()
-      expect(row.t).toBe('vector')
-      expect(row.embedding).toBeDefined()
-      const received = JSON.parse(row.embedding)
-      for (let i = 0; i < expectedEmbedding.length; i++) {
-        // We have to use 5 decimal places because float4 is used in pgvector
-        expect(received[i]).toBeCloseTo(expectedEmbedding[i], 5)
-      }
-    }
+        // now check the DB vector column directly
+        const row = await getSQLRow((payload as any).db, id)
+        expect(row).toBeDefined()
+        expect(row.t).toBe('vector')
+        expect(row.embedding).toBeDefined()
+        const received = JSON.parse(row.embedding)
+        for (let i = 0; i < expectedEmbedding.length; i++) {
+          // We have to use 5 decimal places because float4 is used in pgvector
+          expect(received[i]).toBeCloseTo(expectedEmbedding[i], 5)
+        }
+      }),
+    )
   })
 
   test('deletes embeddings on delete', async () => {

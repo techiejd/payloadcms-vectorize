@@ -10,11 +10,11 @@ import type {
 import { isPostgresPayload } from './types.js'
 import type { PostgresAdapterArgs } from '@payloadcms/db-postgres'
 import { createVectorizeTask } from './tasks/vectorize.js'
+import { vectorSearch } from './endpoints/vectorSearch.js'
 
 export type * from './types.js'
 
 const DEFAULT_EMBEDDINGS_COLLECTION = 'embeddings'
-const DEFAULT_IVFFLAT_LISTS = 100
 
 async function ensurePgvectorArtifacts(args: {
   payload: Payload
@@ -70,7 +70,6 @@ export const createVectorizeIntegration = (
   payloadcmsVectorize: (pluginOptions: PayloadcmsVectorizeConfig) => (config: Config) => Config
 } => {
   const embeddingsSlug = integrationConfig.embeddingsSlugOverride || DEFAULT_EMBEDDINGS_COLLECTION
-  const ivfflatLists = integrationConfig.ivfflatLists ?? DEFAULT_IVFFLAT_LISTS
 
   // Augment the generated schema so push/migrations are aware of our custom columns
   const afterSchemaInitHook: Required<PostgresAdapterArgs>['afterSchemaInit'][number] = async ({
@@ -113,31 +112,6 @@ export const createVectorizeIntegration = (
 
       // Register tasks using Payload Jobs
       const incomingJobs = config.jobs || { tasks: [] }
-      const incomingAutoRun = config.jobs?.autoRun
-      const newAutoRun = (() => {
-        const vectorizeCronJob =
-          pluginOptions.queueNameOrCronJob && typeof pluginOptions.queueNameOrCronJob === 'object'
-            ? pluginOptions.queueNameOrCronJob
-            : false
-        if (!vectorizeCronJob) {
-          return undefined
-        }
-        if (!incomingAutoRun) {
-          return [vectorizeCronJob]
-        }
-        if (Array.isArray(incomingAutoRun)) {
-          return [...incomingAutoRun, vectorizeCronJob]
-        }
-        return (payload: Payload) => {
-          const autoRun = incomingAutoRun(payload)
-          if (Array.isArray(autoRun)) {
-            return [...autoRun, vectorizeCronJob]
-          }
-          return autoRun.then((autoRun) => {
-            return [...autoRun, vectorizeCronJob]
-          })
-        }
-      })()
 
       const vectorizeTask = createVectorizeTask({
         integrationConfig,
@@ -147,7 +121,6 @@ export const createVectorizeIntegration = (
       config.jobs = {
         ...incomingJobs,
         tasks: [...incomingJobs.tasks, vectorizeTask],
-        autoRun: newAutoRun ?? incomingAutoRun,
       }
 
       // Extend configured collections with hooks
@@ -169,11 +142,6 @@ export const createVectorizeIntegration = (
               const payload = req.payload
               const fieldsConfig = cv.fields
 
-              const queueName = pluginOptions.queueNameOrCronJob
-                ? typeof pluginOptions.queueNameOrCronJob === 'string'
-                  ? pluginOptions.queueNameOrCronJob
-                  : pluginOptions.queueNameOrCronJob.queue
-                : undefined
               await payload.jobs.queue<'payloadcms-vectorize:vectorize'>({
                 task: 'payloadcms-vectorize:vectorize',
                 input: {
@@ -182,7 +150,7 @@ export const createVectorizeIntegration = (
                   fieldsConfig,
                 },
                 req: req,
-                ...(queueName ? { queue: queueName } : {}),
+                ...(pluginOptions.queueName ? { queue: pluginOptions.queueName } : {}),
               })
               return
             },
@@ -228,8 +196,21 @@ export const createVectorizeIntegration = (
           payload,
           tableName: embeddingsSlug,
           dims: integrationConfig.dims,
-          ivfflatLists,
+          ivfflatLists: integrationConfig.ivfflatLists,
         })
+      }
+
+      if (pluginOptions.endpointOverrides?.enabled !== false) {
+        const path = pluginOptions.endpointOverrides?.path || '/api/vector-search'
+        const inputEndpoints = config.endpoints || []
+        config.endpoints = [
+          ...inputEndpoints,
+          {
+            path,
+            method: 'post',
+            handler: vectorSearch(pluginOptions.embed),
+          },
+        ]
       }
 
       return config

@@ -5,7 +5,7 @@ import { chunkText, chunkRichText } from 'helpers/chunkers.js'
 import type { SerializedEditorState } from '@payloadcms/richtext-lexical/lexical'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { buildDummyConfig, getInitialMarkdownContent, integration, plugin } from './constants.js'
-import { create } from './testDb.js'
+import { createTestDb } from './utils.js'
 
 describe('Queue tests', () => {
   let config: SanitizedConfig
@@ -14,7 +14,7 @@ describe('Queue tests', () => {
   const expectedQueueName = 'queueName'
   const dbName = 'queue_test'
   beforeAll(async () => {
-    await create({ dbName })
+    await createTestDb({ dbName })
     config = await buildDummyConfig({
       collections: [
         {
@@ -34,7 +34,7 @@ describe('Queue tests', () => {
       }),
       plugins: [
         plugin({
-          queueNameOrCronJob: expectedQueueName,
+          queueName: expectedQueueName,
           collections: {
             posts: {
               fields: {
@@ -43,7 +43,7 @@ describe('Queue tests', () => {
               },
             },
           },
-          embed: async () => [0, 0, 0, 0, 0, 0, 0, 0],
+          embed: async () => [[0, 0, 0, 0, 0, 0, 0, 0]],
           embeddingVersion: 'test',
         }),
       ],

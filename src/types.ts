@@ -1,7 +1,7 @@
 import type { CollectionSlug, Payload, Config } from 'payload'
 import type { SerializedEditorState } from '@payloadcms/richtext-lexical/lexical'
 
-export type EmbedFn = (text: string) => Promise<number[] | Float32Array>
+export type EmbedFn = (texts: string[]) => Promise<number[][] | Float32Array[]>
 
 export type ChunkerFn =
   | ((text: string, payload: Payload) => string[])
@@ -26,14 +26,7 @@ export type StaticIntegrationConfig = {
   /** Vector dimensions for pgvector column */
   dims: number
   /** IVFFLAT lists parameter used when creating the index */
-  ivfflatLists?: number
-}
-
-/** PayloadCMS does not expose this type so we need to define it ourselves */
-type InferredCronConfig = {
-  cron?: string
-  limit?: number
-  queue?: string
+  ivfflatLists: number
 }
 
 export type PayloadcmsVectorizeConfig = {
@@ -43,8 +36,18 @@ export type PayloadcmsVectorizeConfig = {
   embed: EmbedFn
   /** Version string to track embedding model/version - stored in each embedding document */
   embeddingVersion: string
-  /** Task queue name, cron job configuration. Default is every 5 seconds for a cron job named 'payloadcms-vectorize:vectorize' */
-  queueNameOrCronJob?: string | InferredCronConfig
+  /** Task queue name.
+   * Default is payloadcms default queue (undefined)
+   * You must setup the job in your payload config
+   * (with either an undefined or defined queue name). */
+  queueName?: string
+  /** Endpoint overrides for searching vectorized content */
+  endpointOverrides?: {
+    // Default is '/api/vector-search'
+    path?: string
+    // Default is true and will not add the endpoint if disabled.
+    enabled?: boolean
+  }
   /** Set true to disable runtime behavior but keep schema */
   disabled?: boolean
 }
@@ -79,11 +82,25 @@ export type VectorizeTaskArgs = {
   fieldsConfig: Record<string, FieldVectorizeOption>
 }
 
-export type DeleteTaskArgs = {
-  payload: any
-  embeddingsSlug: string
-  collection: string
-  docId: string
+export interface VectorSearchResult {
+  id: string
+  similarity: number
+  sourceCollection: string // The collection that this embedding belongs to
+  docId: string // The ID of the source document
+  fieldPath: string // The field path that was vectorized (e.g., "title", "content")
+  chunkIndex: number // The index of this chunk within the field
+  chunkText: string // The original text that was vectorized
+  embeddingVersion: string // The version of the embedding model used
+}
+
+export interface VectorSearchResponse {
+  results: VectorSearchResult[]
+}
+
+export interface VectorSearchQuery {
+  // TODO(techiejd): Expand on query API
+  // add support for particular collections, fields, etc.
+  query: string
 }
 
 export type JobContext = {

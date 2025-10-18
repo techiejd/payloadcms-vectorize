@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, test } from 'vitest'
 import { chunkText, chunkRichText } from 'helpers/chunkers.js'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { buildDummyConfig, getInitialMarkdownContent, integration } from './constants.js'
-import { create } from './testDb.js'
+import { createTestDb } from './utils.js'
 
 describe('Chunkers', () => {
   test('textChunker', () => {
@@ -18,7 +18,7 @@ describe('Chunkers', () => {
 
   test('richTextChunker splits by H2', async () => {
     beforeAll(async () => {
-      create({ dbName: 'chunkers_test' })
+      createTestDb({ dbName: 'chunkers_test' })
     })
     const cfg = await buildDummyConfig({
       db: postgresAdapter({

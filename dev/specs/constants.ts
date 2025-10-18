@@ -46,13 +46,13 @@ export const getInitialMarkdownContent = async (
   })
 }
 
-export const integration = createVectorizeIntegration({ dims: DIMS })
+export const integration = createVectorizeIntegration({ dims: DIMS, ivfflatLists: 1 })
 export const vectorizeCronJob = { cron: '*/10 * * * * *', limit: 5, queue: 'default' }
 export const plugin = integration.payloadcmsVectorize
 
 export const dummyPluginOptions = {
   collections: {},
-  embed: async () => [0, 0, 0, 0, 0, 0, 0, 0],
+  embed: async (texts: string[]) => texts.map(() => [0, 0, 0, 0, 0, 0, 0, 0]),
   embeddingVersion: 'test',
   queueNameOrCronJob: vectorizeCronJob,
 }

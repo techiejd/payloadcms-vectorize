@@ -19,6 +19,8 @@ export const createEmbeddingsCollection = (slug: string = 'embeddings'): Collect
         description: 'The collection that this embedding belongs to',
       },
     },
+    // TODO(techiejd): This could probably be a relationship field to the source document.
+    // Is it possible to use a relationship field to an `ANY` collection?
     {
       name: 'docId',
       type: 'text',
