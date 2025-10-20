@@ -1,218 +1,254 @@
-# Payload Plugin Template
+# PayloadCMS Vectorize
 
-A template repo to create a [Payload CMS](https://payloadcms.com) plugin.
+A Payload CMS plugin that adds vector search capabilities to your collections using PostgreSQL's pgvector extension. Perfect for building RAG (Retrieval-Augmented Generation) applications and semantic search features.
 
-Payload is built with a robust infrastructure intended to support Plugins with ease. This provides a simple, modular, and reusable way for developers to extend the core capabilities of Payload.
+## Features
 
-To build your own Payload plugin, all you need is:
+- 🔍 **Semantic Search**: Vectorize any collection field for intelligent content discovery
+- 🚀 **Automatic Vectorization**: Documents are automatically vectorized when created or updated
+- 📊 **PostgreSQL Integration**: Built on pgvector for high-performance vector operations
+- ⚡ **Background Processing**: Uses Payload's job system for non-blocking vectorization
+- 🎯 **Flexible Chunking**: You provide the custom chunkers for different field types (text, rich text, etc.)
+- 🔧 **Configurable**: Choose which collections and fields to vectorize
+- 🌐 **REST API**: Built-in vector-search endpoint for querying vectorized content
 
-- An understanding of the basic Payload concepts
-- And some JavaScript/Typescript experience
+## Prerequisites
 
-## Background
+- Only tested on Payload CMS 3.37.0+
+- PostgreSQL with pgvector extension
+- Node.js 18+
 
-Here is a short recap on how to integrate plugins with Payload, to learn more visit the [plugin overview page](https://payloadcms.com/docs/plugins/overview).
+## Installation
 
-### How to install a plugin
+```bash
+pnpm add payloadcms-vectorize
+```
 
-To install any plugin, simply add it to your payload.config() in the Plugin array.
+## Quick Start
 
-```ts
-import myPlugin from 'my-plugin'
+### 1. Install pgvector
 
-export const config = buildConfig({
+Make sure your PostgreSQL database has the pgvector extension:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+```
+
+### 2. Configure the Plugin
+
+```typescript
+import { buildConfig } from 'payload'
+import { postgresAdapter } from '@payloadcms/db-postgres'
+import { createVectorizeIntegration } from 'payloadcms-vectorize'
+
+// Configure your embedding functions
+const embedDocs = async (texts: string[]) => {
+  // Your embedding logic here
+  return texts.map(text => /* vector array */)
+}
+
+const embedQuery = async (text: string,
+  payload: Payload,) => {
+  // Your query embedding logic here
+  return /* vector array */
+}
+
+// Configure your chunking functions
+const chunkText = async (text: string,
+  payload: Payload) => {
+  return /* string array */
+}
+
+// See examples under chunkers.ts
+const chunkRichText = async (richText: SerializedEditorState,
+  payload: Payload) => {
+  return /* string array */
+}
+
+// Create the integration
+const { afterSchemaInitHook, payloadcmsVectorize } = createVectorizeIntegration({
+  // Note limitation: Changing these values is currently not supported.
+  // Migration is necessary.
+  dims: 1536, // Vector dimensions
+  ivfflatLists: 100, // IVFFLAT index parameter
+})
+
+export default buildConfig({
+  // ... your existing config
+  db: postgresAdapter({
+    extensions: ['vector'],
+    // afterSchemaInitHook adds 'vector' to your schema
+    afterSchemaInit: [afterSchemaInitHook],
+    // ... your database config
+  }),
   plugins: [
-    // You can pass options to the plugin
-    myPlugin({
-      enabled: true,
+    payloadcmsVectorize({
+      // The collection-fields you want vectorized
+      collections: {
+        posts: {
+          fields: {
+            title: { chunker: chunkText },
+            content: { chunker: chunkRichText },
+          },
+        },
+      },
+      embedDocs,
+      embedQuery,
+      embeddingVersion: 'v1.0.0',
     }),
   ],
 })
 ```
 
-### Initialization
+### 3. Search Your Content
 
-The initialization process goes in the following order:
+The plugin automatically creates a `/api/vector-search` endpoint:
 
-1. Incoming config is validated
-2. **Plugins execute**
-3. Default options are integrated
-4. Sanitization cleans and validates data
-5. Final config gets initialized
-
-## Building the Plugin
-
-When you build a plugin, you are purely building a feature for your project and then abstracting it outside of the project.
-
-### Template Files
-
-In the Payload [plugin template](https://github.com/payloadcms/payload/tree/main/templates/plugin), you will see a common file structure that is used across all plugins:
-
-1. root folder
-2. /src folder
-3. /dev folder
-
-#### Root
-
-In the root folder, you will see various files that relate to the configuration of the plugin. We set up our environment in a similar manner in Payload core and across other projects, so hopefully these will look familiar:
-
-- **README**.md\* - This contains instructions on how to use the template. When you are ready, update this to contain instructions on how to use your Plugin.
-- **package**.json\* - Contains necessary scripts and dependencies. Overwrite the metadata in this file to describe your Plugin.
-- .**eslint**.config.js - Eslint configuration for reporting on problematic patterns.
-- .**gitignore** - List specific untracked files to omit from Git.
-- .**prettierrc**.json - Configuration for Prettier code formatting.
-- **tsconfig**.json - Configures the compiler options for TypeScript
-- .**swcrc** - Configuration for SWC, a fast compiler that transpiles and bundles TypeScript.
-- **vitest**.config.js - Config file for Vitest, defining how tests are run and how modules are resolved
-
-**IMPORTANT\***: You will need to modify these files.
-
-#### Dev
-
-In the dev folder, you’ll find a basic payload project, created with `npx create-payload-app` and the blank template.
-
-**IMPORTANT**: Make a copy of the `.env.example` file and rename it to `.env`. Update the `DATABASE_URI` to match the database you are using and your plugin name. Update `PAYLOAD_SECRET` to a unique string.
-**You will not be able to run `pnpm/yarn dev` until you have created this `.env` file.**
-
-`myPlugin` has already been added to the `payload.config()` file in this project.
-
-```ts
-plugins: [
-  myPlugin({
-    collections: {
-      posts: true,
-    },
-  }),
-]
-```
-
-Later when you rename the plugin or add additional options, **make sure to update it here**.
-
-You may wish to add collections or expand the test project depending on the purpose of your plugin. Just make sure to keep this dev environment as simplified as possible - users should be able to install your plugin without additional configuration required.
-
-When you’re ready to start development, initiate the project with `pnpm/npm/yarn dev` and pull up [http://localhost:3000](http://localhost:3000) in your browser.
-
-#### Src
-
-Now that we have our environment setup and we have a dev project ready to - it’s time to build the plugin!
-
-**index.ts**
-
-The essence of a Payload plugin is simply to extend the payload config - and that is exactly what we are doing in this file.
-
-```ts
-export const myPlugin =
-  (pluginOptions: MyPluginConfig) =>
-  (config: Config): Config => {
-    // do cool stuff with the config here
-
-    return config
-  }
-```
-
-First, we receive the existing payload config along with any plugin options.
-
-From here, you can extend the config as you wish.
-
-Finally, you return the config and that is it!
-
-##### Spread Syntax
-
-Spread syntax (or the spread operator) is a feature in JavaScript that uses the dot notation **(...)** to spread elements from arrays, strings, or objects into various contexts.
-
-We are going to use spread syntax to allow us to add data to existing arrays without losing the existing data. It is crucial to spread the existing data correctly – else this can cause adverse behavior and conflicts with Payload config and other plugins.
-
-Let’s say you want to build a plugin that adds a new collection:
-
-```ts
-config.collections = [
-  ...(config.collections || []),
-  // Add additional collections here
-]
-```
-
-First we spread the `config.collections` to ensure that we don’t lose the existing collections, then you can add any additional collections just as you would in a regular payload config.
-
-This same logic is applied to other properties like admin, hooks, globals:
-
-```ts
-config.globals = [
-  ...(config.globals || []),
-  // Add additional globals here
-]
-
-config.hooks = {
-  ...(incomingConfig.hooks || {}),
-  // Add additional hooks here
-}
-```
-
-Some properties will be slightly different to extend, for instance the onInit property:
-
-```ts
-import { onInitExtension } from './onInitExtension' // example file
-
-config.onInit = async (payload) => {
-  if (incomingConfig.onInit) await incomingConfig.onInit(payload)
-  // Add additional onInit code by defining an onInitExtension function
-  onInitExtension(pluginOptions, payload)
-}
-```
-
-If you wish to add to the onInit, you must include the **async/await**. We don’t use spread syntax in this case, instead you must await the existing `onInit` before running additional functionality.
-
-In the template, we have stubbed out some addition `onInit` actions that seeds in a document to the `plugin-collection`, you can use this as a base point to add more actions - and if not needed, feel free to delete it.
-
-##### Types.ts
-
-If your plugin has options, you should define and provide types for these options.
-
-```ts
-export type MyPluginConfig = {
-  /**
-   * List of collections to add a custom field
-   */
-  collections?: Partial<Record<CollectionSlug, true>>
-  /**
-   * Disable the plugin
-   */
-  disabled?: boolean
-}
-```
-
-If possible, include JSDoc comments to describe the options and their types. This allows a developer to see details about the options in their editor.
-
-##### Testing
-
-Having a test suite for your plugin is essential to ensure quality and stability. **Vitest** is a fast, modern testing framework that works seamlessly with Vite and supports TypeScript out of the box.
-
-Vitest organizes tests into test suites and cases, similar to other testing frameworks. We recommend creating individual tests based on the expected behavior of your plugin from start to finish.
-
-Writing tests with Vitest is very straightforward, and you can learn more about how it works in the [Vitest documentation.](https://vitest.dev/)
-
-For this template, we stubbed out `int.spec.ts` in the `dev` folder where you can write your tests.
-
-```ts
-describe('Plugin tests', () => {
-  // Create tests to ensure expected behavior from the plugin
-  it('some condition that must be met', () => {
-   // Write your test logic here
-   expect(...)
-  })
+```typescript
+const response = await fetch('/api/vector-search', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ query: 'What is machine learning?' }),
 })
+
+const results = await response.json()
+// Returns: { results: [{ id, similarity, sourceCollection, docId, fieldPath, chunkText, ... }] }
 ```
 
-## Best practices
+## Configuration Options
 
-With this tutorial and the plugin template, you should have everything you need to start building your own plugin.
-In addition to the setup, here are other best practices aim we follow:
+### Plugin Options
 
-- **Providing an enable / disable option:** For a better user experience, provide a way to disable the plugin without uninstalling it. This is especially important if your plugin adds additional webpack aliases, this will allow you to still let the webpack run to prevent errors.
-- **Include tests in your GitHub CI workflow**: If you’ve configured tests for your package, integrate them into your workflow to run the tests each time you commit to the plugin repository. Learn more about [how to configure tests into your GitHub CI workflow.](https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-nodejs)
-- **Publish your finished plugin to NPM**: The best way to share and allow others to use your plugin once it is complete is to publish an NPM package. This process is straightforward and well documented, find out more [creating and publishing a NPM package here.](https://docs.npmjs.com/creating-and-publishing-scoped-public-packages/).
-- **Add payload-plugin topic tag**: Apply the tag **payload-plugin **to your GitHub repository. This will boost the visibility of your plugin and ensure it gets listed with [existing payload plugins](https://github.com/topics/payload-plugin).
-- **Use [Semantic Versioning](https://semver.org/) (SemVar)** - With the SemVar system you release version numbers that reflect the nature of changes (major, minor, patch). Ensure all major versions reference their Payload compatibility.
+| Option              | Type                                        | Required | Description                               |
+| ------------------- | ------------------------------------------- | -------- | ----------------------------------------- |
+| `collections`       | `Record<string, CollectionVectorizeOption>` | ✅       | Collections and fields to vectorize       |
+| `embedDocs`         | `EmbedDocsFn`                               | ✅       | Function to embed multiple documents      |
+| `embedQuery`        | `EmbedQueryFn`                              | ✅       | Function to embed search queries          |
+| `embeddingVersion`  | `string`                                    | ✅       | Version string for tracking model changes |
+| `queueName`         | `string`                                    | ❌       | Custom queue name for background jobs     |
+| `endpointOverrides` | `object`                                    | ❌       | Customize the search endpoint             |
+| `disabled`          | `boolean`                                   | ❌       | Disable plugin while keeping schema       |
 
-# Questions
+## Chunkers
 
-Please contact [Payload](mailto:dev@payloadcms.com) with any questions about using this plugin template.
+The plugin includes examples chunkers for common field types:
+// Not yet provided publicly because maintenance is not guaranteed
+
+- `chunkText`: For plain text fields
+- `chunkRichText`: For Lexical rich text fields
+
+You must create (or copy) custom chunkers:
+
+```typescript
+const customChunker = async (value: any, payload: Payload) => {
+  // Your custom chunking logic
+  return ['chunk1', 'chunk2', 'chunk3']
+}
+```
+
+## Example
+
+### Using with Voyage AI
+
+```typescript
+import { voyageEmbedDocs, voyageEmbedQuery } from 'voyage-ai-provider'
+
+export const embedDocs = async (texts: string[]): Promise<number[][]> => {
+  const embedResult = await embedMany({
+    model: voyage.textEmbeddingModel('voyage-3.5-lite'),
+    values: texts,
+    providerOptions: {
+      voyage: { inputType: 'document' },
+    },
+  })
+  return embedResult.embeddings
+}
+export const embedQuery = async (text: string): Promise<number[]> => {
+  const embedResult = await embed({
+    model: voyage.textEmbeddingModel('voyage-3.5-lite'),
+    value: text,
+    providerOptions: {
+      voyage: { inputType: 'query' },
+    },
+  })
+  return embedResult.embedding
+}
+```
+
+## API Reference
+
+### Search Endpoint
+
+**POST** `/api/vector-search`
+
+Search for similar content using vector similarity.
+
+**Request Body:**
+
+```json
+{
+  "query": "Your search query"
+}
+```
+
+**Response:**
+
+```json
+{
+  "results": [
+    {
+      "id": "embedding_id",
+      "similarity": 0.85,
+      "sourceCollection": "posts",
+      "docId": "post_id",
+      "fieldPath": "content",
+      "chunkIndex": 0,
+      "chunkText": "Relevant text chunk",
+      "embeddingVersion": "v1.0.0"
+    }
+  ]
+}
+```
+
+## Requirements
+
+- Payload CMS ^3.37.0
+- PostgreSQL with pgvector extension
+- Node.js ^18.20.2
+
+## License
+
+MIT
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## ⭐ Star This Repository
+
+If you find this plugin useful, please give it a star! Stars help us understand how many developers are using this plugin and directly influence our development priorities. More stars = more features, better performance, and faster bug fixes.
+
+## 🐛 Report Issues & Request Features
+
+Help us prioritize development by opening issues for:
+
+- **Bugs**: Something not working as expected
+- **Feature requests**: New functionality you'd like to see
+- **Improvements**: Ways to make existing features better
+- **Documentation**: Missing or unclear information
+- **Questions**: I'll answer through the issues.
+
+The more detailed your issue, the better I can understand and address your needs. Issues with community engagement (reactions, comments) get higher priority!
+
+## 🗺️ Roadmap
+
+The following features are planned for future releases based on community interest and stars:
+
+- **Migrations for vector dimensions**: Easy migration tools for changing vector dimensions and/or ivfflatLists after initial setup
+- **MongoDB support**: Extend vector search capabilities to MongoDB databases
+- **Vercel support**: Optimized deployment and configuration for Vercel hosting
+- **Batch embedding**: More efficient bulk embedding operations for large datasets
+- **'Embed all' button**: Admin UI button to re-embed all content after embeddingVersion changes
+- **More expressive queries**: Add ability to change query limit, search on certain collections or certain fields.
+
+**Want to see these features sooner?** Star this repository and open issues for the features you need most!
