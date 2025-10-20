@@ -32,7 +32,7 @@
     "build:types": "tsc --outDir dist --rootDir ./src",
     "clean": "rimraf {dist,*.tsbuildinfo}",
     "copyfiles": "copyfiles -u 1 \"src/**/*.{html,css,scss,ttf,woff,woff2,eot,svg,jpg,png,json}\" dist/",
-    "dev": "cross-env DOTENV_CONFIG_PATH=dev/.env.dev NODE_OPTIONS=--require=dotenv/config next dev dev --turbo",
+    "dev": "cross-env DOTENV_CONFIG_PATH=dev/.env.development NODE_OPTIONS=--require=dotenv/config next dev dev --turbo",
     "dev:generate-importmap": "pnpm dev:payload generate:importmap",
     "dev:generate-types": "pnpm dev:payload generate:types",
     "dev:payload": "cross-env PAYLOAD_CONFIG_PATH=./dev/payload.config.ts payload",
@@ -45,7 +45,7 @@
     "test:teardown": "docker-compose -f dev/docker-compose.test.yml down",
     "test": "pnpm test:int && pnpm test:e2e",
     "test:e2e": "playwright test",
-    "test:int": "vitest"
+    "test:int": "cross-env DOTENV_CONFIG_PATH=dev/.env.test NODE_OPTIONS=--require=dotenv/config vitest"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",

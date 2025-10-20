@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { buildDummyConfig } from './constants.js'
+import { buildDummyConfig, dummyPluginOptions, plugin } from './constants.js'
 
 describe('jobs.tasks merging', () => {
   test('adds tasks when none provided', async () => {
@@ -12,9 +12,52 @@ describe('jobs.tasks merging', () => {
   })
 })
 
-function _fakePayload(): any {
-  return {
-    db: {},
-    logger: { info: () => {}, warn: () => {}, error: () => {} },
-  }
-}
+describe('/vector-search endpoint', () => {
+  test('adds the endpoint by default', async () => {
+    const cfg = await buildDummyConfig({})
+    const endpoints = cfg.endpoints
+    console.log('endpoints:', endpoints)
+    expect(Array.isArray(endpoints)).toBe(true)
+    expect(endpoints).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: '/vector-search',
+          method: 'post',
+          handler: expect.any(Function),
+        }),
+      ]),
+    )
+  })
+  test('does not add the endpoint when disabled', async () => {
+    const cfg = await buildDummyConfig({
+      plugins: [plugin({ ...dummyPluginOptions, endpointOverrides: { enabled: false } })],
+    })
+    const endpoints = cfg.endpoints
+    expect(Array.isArray(endpoints)).toBe(true)
+    expect(endpoints).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: '/vector-search',
+          method: 'post',
+          handler: expect.any(Function),
+        }),
+      ]),
+    )
+  })
+  test('uses the custom path when provided', async () => {
+    const cfg = await buildDummyConfig({
+      plugins: [plugin({ ...dummyPluginOptions, endpointOverrides: { path: '/custom-path' } })],
+    })
+    const endpoints = cfg.endpoints
+    expect(Array.isArray(endpoints)).toBe(true)
+    expect(endpoints).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: '/custom-path',
+          method: 'post',
+          handler: expect.any(Function),
+        }),
+      ]),
+    )
+  })
+})

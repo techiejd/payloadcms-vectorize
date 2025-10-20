@@ -43,7 +43,7 @@ export type PayloadcmsVectorizeConfig = {
   queueName?: string
   /** Endpoint overrides for searching vectorized content */
   endpointOverrides?: {
-    // Default is '/api/vector-search'
+    // Default is '/vector-search' (which gets turned into '/api/vector-search')
     path?: string
     // Default is true and will not add the endpoint if disabled.
     enabled?: boolean

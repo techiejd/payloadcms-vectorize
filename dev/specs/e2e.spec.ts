@@ -1,15 +1,46 @@
 import { expect, test } from '@playwright/test'
+import config from '@payload-config'
+import { getPayload } from 'payload'
+import { getInitialMarkdownContent } from './constants.js'
+import { waitForVectorizationJobs } from './utils.js'
+import { testEmbeddingVersion } from 'helpers/embed.js'
 
-// this is an example Playwright e2e test
-test('should render admin panel logo', async ({ page }) => {
-  await page.goto('/admin')
+test('querying the endpoint should return the title when queried', async ({ request }) => {
+  const title = 'test query post title'
+  const _config = await config
+  const payload = await getPayload({ config: _config })
+  const post = await payload.create({
+    collection: 'posts',
+    data: {
+      title,
+      content: (await getInitialMarkdownContent(_config)) as unknown as any,
+    },
+  })
 
-  // login
-  await page.fill('#field-email', 'dev@payloadcms.com')
-  await page.fill('#field-password', 'test')
-  await page.click('.form-submit button')
+  await waitForVectorizationJobs(payload)
 
-  // should show dashboard
-  await expect(page).toHaveTitle(/Dashboard/)
-  await expect(page.locator('.graphic-icon')).toBeVisible()
+  const response = await request.post('/api/vector-search', {
+    data: {
+      query: title,
+    },
+  })
+  if (!response.ok()) {
+    console.error('response:', await response.text())
+  }
+  expect(response.ok()).toBe(true)
+  const json = await response.json()
+  expect(json).toHaveProperty('results')
+  expect(json.results.length).toBeGreaterThan(0)
+  expect(json.results).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        sourceCollection: 'posts',
+        docId: String(post.id),
+        fieldPath: 'title',
+        chunkIndex: 0,
+        chunkText: title,
+        embeddingVersion: testEmbeddingVersion,
+      }),
+    ]),
+  )
 })

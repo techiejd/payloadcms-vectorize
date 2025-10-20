@@ -200,8 +200,11 @@ export const createVectorizeIntegration = (
         })
       }
 
+      console.log('pluginOptions.endpointOverrides:', pluginOptions.endpointOverrides)
+      console.log('should add endpoint:', pluginOptions.endpointOverrides?.enabled !== false)
       if (pluginOptions.endpointOverrides?.enabled !== false) {
-        const path = pluginOptions.endpointOverrides?.path || '/api/vector-search'
+        console.log('adding endpoint')
+        const path = pluginOptions.endpointOverrides?.path || '/vector-search'
         const inputEndpoints = config.endpoints || []
         config.endpoints = [
           ...inputEndpoints,

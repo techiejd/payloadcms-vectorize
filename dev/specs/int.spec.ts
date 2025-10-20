@@ -98,11 +98,6 @@ describe('Plugin integration tests', () => {
 
     // Get the actual content chunks to create proper expectations
     const contentChunks = await chunkRichText(markdownContent, payload)
-    const contentChunksInputs = contentChunks.map((chunkText, index) => ({
-      chunkText,
-      fieldPath: 'content',
-      chunkIndex: index,
-    }))
 
     const expectedTitleDoc = {
       sourceCollection: 'posts',

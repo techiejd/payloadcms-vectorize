@@ -14,7 +14,7 @@ interface SearchResult {
 export default function SearchPage() {
   const [query, setQuery] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [results, setResults] = useState<SearchResult[]>([])
+  const [results, setResults] = useState<SearchResult[] | undefined>(undefined)
   const [error, setError] = useState<string | null>(null)
 
   const handleSearch = async (e: React.FormEvent) => {
@@ -86,7 +86,7 @@ export default function SearchPage() {
             </div>
           )}
 
-          {results.length > 0 && (
+          {results && results.length > 0 && (
             <div className="space-y-6">
               <h2 className="text-xl font-semibold text-gray-900">
                 Search Results ({results.length})
@@ -126,7 +126,7 @@ export default function SearchPage() {
             </div>
           )}
 
-          {!isLoading && results.length === 0 && query && (
+          {!isLoading && results && results.length === 0 && query && (
             <div className="text-center py-8 text-gray-500">
               <p>No results found for "{query}"</p>
             </div>

@@ -88,7 +88,7 @@ async function performCosineSearch(
 
     // Debug: Log what we found
     console.log(`Found ${rows.length} embeddings in database`)
-    console.log('Sample rows:', rows.slice(0, 3))
+    console.log('Sample rows:', rows)
 
     return rows.map((row: any) => ({
       id: String(row.doc_id), // Convert to string for consistency
