@@ -48,7 +48,6 @@ jobs:
       - name: Run tests
         run: pnpm test
         env:
-          DATABASE_URI: postgresql://postgres:password@localhost:5433/payload_test
           PAYLOAD_SECRET: test-secret-key
           DIMS: 8
           IVFFLATLISTS: 1
