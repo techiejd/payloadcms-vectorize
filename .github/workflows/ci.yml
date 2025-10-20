@@ -10,6 +10,20 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: payload_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
     steps:
       - uses: actions/checkout@v4
 
@@ -25,17 +39,16 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Start test database
-        run: pnpm test:setup
+      - name: Install pgvector extension
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-15
+          PGPASSWORD=password psql -h localhost -U postgres -d payload_test -c "CREATE EXTENSION IF NOT EXISTS vector;"
 
       - name: Run tests
         run: pnpm test
         env:
-          DATABASE_URI: postgresql://postgres:password@localhost:5433/payload_test
+          DATABASE_URI: postgresql://postgres:password@localhost:5432/payload_test
           PAYLOAD_SECRET: test-secret-key
           DIMS: 8
           IVFFLATLISTS: 1
-
-      - name: Stop test database
-        if: always()
-        run: pnpm test:teardown
