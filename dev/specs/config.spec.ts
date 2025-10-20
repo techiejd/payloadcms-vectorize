@@ -16,7 +16,6 @@ describe('/vector-search endpoint', () => {
   test('adds the endpoint by default', async () => {
     const cfg = await buildDummyConfig({})
     const endpoints = cfg.endpoints
-    console.log('endpoints:', endpoints)
     expect(Array.isArray(endpoints)).toBe(true)
     expect(endpoints).toEqual(
       expect.arrayContaining([

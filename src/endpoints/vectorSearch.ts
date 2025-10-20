@@ -3,7 +3,6 @@ import type { EmbedQueryFn, VectorSearchResult } from 'payloadcms-vectorize'
 
 export const vectorSearch = (embedFn: EmbedQueryFn) => {
   const _vectorSearch: PayloadHandler = async (req) => {
-    console.log('vectorSearch endpoint hit')
     if (!req || !req.json) {
       return Response.json({ error: 'Request is required' }, { status: 400 })
     }
@@ -26,7 +25,6 @@ export const vectorSearch = (embedFn: EmbedQueryFn) => {
 
       return Response.json({ results })
     } catch (error) {
-      console.error('Search error:', error)
       return Response.json({ error: 'Internal server error' }, { status: 500 })
     }
   }
@@ -79,16 +77,11 @@ async function performCosineSearch(
       FROM "embeddings" 
       ORDER BY "doc_id", "field_path", "chunk_index"
     `)
-    console.log('All embeddings in database:', debugResult.rows || debugResult)
 
     const result = await runSQL(sql, [vectorString, limit])
 
     // Handle different result formats from different database adapters
     const rows = result.rows || result || []
-
-    // Debug: Log what we found
-    console.log(`Found ${rows.length} embeddings in database`)
-    console.log('Sample rows:', rows)
 
     return rows.map((row: any) => ({
       id: String(row.doc_id), // Convert to string for consistency
@@ -101,7 +94,6 @@ async function performCosineSearch(
       embeddingVersion: row.embedding_version,
     }))
   } catch (error) {
-    console.error('Cosine search error:', error)
     throw new Error(`Cosine search failed: ${error}`)
   }
 }

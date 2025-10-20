@@ -24,9 +24,6 @@ test('querying the endpoint should return the title when queried', async ({ requ
       query: title,
     },
   })
-  if (!response.ok()) {
-    console.error('response:', await response.text())
-  }
   expect(response.ok()).toBe(true)
   const json = await response.json()
   expect(json).toHaveProperty('results')

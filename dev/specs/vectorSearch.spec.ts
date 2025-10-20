@@ -99,7 +99,6 @@ describe('Search endpoint integration tests', () => {
     const docs = await payload.find({
       collection: 'embeddings',
     })
-    console.log(docs)
     const response = await performVectorSearch(payload, titleAndQuery)
     const json = await response.json()
 

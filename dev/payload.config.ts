@@ -25,14 +25,6 @@ if (!process.env.ROOT_DIR) {
   process.env.ROOT_DIR = dirname
 }
 
-console.log('process.env.DATABASE_URI', process.env.DATABASE_URI)
-console.log('process.env.NODE_ENV', process.env.NODE_ENV)
-console.log('voyageEmbedDims', voyageEmbedDims)
-console.log('process.env.SSL_CA_CERT', process.env.SSL_CA_CERT)
-console.log('process.env.DIMS', process.env.DIMS)
-console.log('process.env.IVFFLATLISTS', process.env.IVFFLATLISTS)
-console.log('process.env.USE_VOYAGE', process.env.USE_VOYAGE)
-
 if (process.env.NODE_ENV === 'production') {
   // hack for testing atm.
   throw new Error('NODE_ENV should not be production')
