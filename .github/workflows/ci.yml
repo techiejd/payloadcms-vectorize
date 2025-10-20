@@ -12,7 +12,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:15
+        image: pgvector/pgvector:pg15
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: payload_test
@@ -42,7 +42,7 @@ jobs:
       - name: Install pgvector extension
         run: |
           sudo apt-get update
-          sudo apt-get install -y postgresql-client-15
+          sudo apt-get install -y postgresql-client
           PGPASSWORD=password psql -h localhost -U postgres -d payload_test -c "CREATE EXTENSION IF NOT EXISTS vector;"
 
       - name: Run tests
