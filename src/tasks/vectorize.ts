@@ -112,7 +112,7 @@ async function runVectorizeTask(args: {
     )
   }
   const chunkTexts = inputs.map((input) => input.chunkText)
-  const vectors = await pluginOptions.embed(chunkTexts)
+  const vectors = await pluginOptions.embedDocs(chunkTexts)
   await Promise.all(
     vectors.map(async (vector, index) => {
       const { fieldPath, chunkIndex, chunkText } = inputs[index]

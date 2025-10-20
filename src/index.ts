@@ -211,7 +211,7 @@ export const createVectorizeIntegration = (
           {
             path,
             method: 'post',
-            handler: vectorSearch(pluginOptions.embed),
+            handler: vectorSearch(pluginOptions.embedQuery),
           },
         ]
       }

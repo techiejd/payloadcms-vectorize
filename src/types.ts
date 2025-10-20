@@ -1,7 +1,8 @@
 import type { CollectionSlug, Payload, Config } from 'payload'
 import type { SerializedEditorState } from '@payloadcms/richtext-lexical/lexical'
 
-export type EmbedFn = (texts: string[]) => Promise<number[][] | Float32Array[]>
+export type EmbedDocsFn = (texts: string[]) => Promise<number[][] | Float32Array[]>
+export type EmbedQueryFn = (text: string) => Promise<number[] | Float32Array>
 
 export type ChunkerFn =
   | ((text: string, payload: Payload) => string[])
@@ -32,8 +33,10 @@ export type StaticIntegrationConfig = {
 export type PayloadcmsVectorizeConfig = {
   /** Collections and fields to vectorize */
   collections: Partial<Record<CollectionSlug, CollectionVectorizeOption>>
-  /** Embedding function provided by the user */
-  embed: EmbedFn
+  /** Embedding function for document provided by the user */
+  embedDocs: EmbedDocsFn
+  /** Embedding function for query provided by the user */
+  embedQuery: EmbedQueryFn
   /** Version string to track embedding model/version - stored in each embedding document */
   embeddingVersion: string
   /** Task queue name.

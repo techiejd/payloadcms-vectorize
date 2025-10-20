@@ -52,7 +52,8 @@ export const plugin = integration.payloadcmsVectorize
 
 export const dummyPluginOptions = {
   collections: {},
-  embed: async (texts: string[]) => texts.map(() => [0, 0, 0, 0, 0, 0, 0, 0]),
+  embedDocs: async (texts: string[]) => texts.map(() => [0, 0, 0, 0, 0, 0, 0, 0]),
+  embedQuery: async (text: string) => [0, 0, 0, 0, 0, 0, 0, 0],
   embeddingVersion: 'test',
   queueNameOrCronJob: vectorizeCronJob,
 }

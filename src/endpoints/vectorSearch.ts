@@ -1,7 +1,7 @@
 import type { PayloadHandler } from 'payload'
-import type { EmbedFn, VectorSearchResult } from 'payloadcms-vectorize'
+import type { EmbedQueryFn, VectorSearchResult } from 'payloadcms-vectorize'
 
-export const vectorSearch = (embedFn: EmbedFn) => {
+export const vectorSearch = (embedFn: EmbedQueryFn) => {
   const _vectorSearch: PayloadHandler = async (req) => {
     console.log('vectorSearch endpoint hit')
     if (!req || !req.json) {
@@ -17,7 +17,7 @@ export const vectorSearch = (embedFn: EmbedFn) => {
 
       // Generate embedding for the query
       const queryEmbedding = await (async () => {
-        const qE = (await embedFn([query]))[0]
+        const qE = await embedFn(query)
         return Array.isArray(qE) ? qE : Array.from(qE)
       })()
 

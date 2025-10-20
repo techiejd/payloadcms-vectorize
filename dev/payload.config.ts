@@ -4,10 +4,12 @@ import path from 'path'
 import { buildConfig } from 'payload'
 import { createVectorizeIntegration, StaticIntegrationConfig } from 'payloadcms-vectorize'
 import {
-  makeDummyEmbed,
+  makeDummyEmbedDocs,
   testEmbeddingVersion,
-  voyageEmbed,
+  voyageEmbedDocs,
   voyageEmbedDims,
+  voyageEmbedQuery,
+  makeDummyEmbedQuery,
 } from './helpers/embed.js'
 import sharp from 'sharp'
 import { fileURLToPath } from 'url'
@@ -29,6 +31,7 @@ console.log('voyageEmbedDims', voyageEmbedDims)
 console.log('process.env.SSL_CA_CERT', process.env.SSL_CA_CERT)
 console.log('process.env.DIMS', process.env.DIMS)
 console.log('process.env.IVFFLATLISTS', process.env.IVFFLATLISTS)
+console.log('process.env.USE_VOYAGE', process.env.USE_VOYAGE)
 
 if (process.env.NODE_ENV === 'production') {
   // hack for testing atm.
@@ -37,9 +40,11 @@ if (process.env.NODE_ENV === 'production') {
 
 const dims = Number(process.env.DIMS)
 const ivfflatLists = Number(process.env.IVFFLATLISTS)
-const embed = process.env.NODE_ENV === 'production' ? voyageEmbed : makeDummyEmbed(dims)
+const embedDocs = process.env.USE_VOYAGE !== undefined ? voyageEmbedDocs : makeDummyEmbedDocs(dims)
+const embedQuery =
+  process.env.USE_VOYAGE !== undefined ? voyageEmbedQuery : makeDummyEmbedQuery(dims)
 const ssl =
-  process.env.NODE_ENV === 'production'
+  process.env.DATABASE_URI !== undefined
     ? {
         rejectUnauthorized: false,
         ca: process.env.SSL_CA_CERT,
@@ -111,7 +116,8 @@ const buildConfigWithPostgres = async () => {
             },
           },
         },
-        embed,
+        embedDocs,
+        embedQuery,
         embeddingVersion: testEmbeddingVersion,
       }),
     ],

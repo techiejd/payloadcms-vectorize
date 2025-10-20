@@ -1,18 +1,9 @@
 import type { Payload } from 'payload'
 
-import config from '@payload-config'
 import { getPayload } from 'payload'
 import { beforeAll, describe, expect, test } from 'vitest'
-import { makeDummyEmbed, testEmbeddingVersion } from 'helpers/embed.js'
-import { createHeadlessEditor } from '@payloadcms/richtext-lexical/lexical/headless'
-import {
-  $getRoot,
-  $createParagraphNode,
-  $createTextNode,
-  type SerializedEditorState,
-} from '@payloadcms/richtext-lexical/lexical'
-import { $createHeadingNode } from '@payloadcms/richtext-lexical/lexical/rich-text'
-import { editorConfigFactory, getEnabledNodes } from '@payloadcms/richtext-lexical'
+import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
+import { type SerializedEditorState } from '@payloadcms/richtext-lexical/lexical'
 import {
   buildDummyConfig,
   DIMS,
@@ -21,12 +12,11 @@ import {
   plugin,
 } from './constants.js'
 import { createTestDb, waitForVectorizationJobs } from './utils.js'
-import { VectorSearchResponse } from '../../src/types.js'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { chunkRichText, chunkText } from 'helpers/chunkers.js'
 import { vectorSearch } from '../../src/endpoints/vectorSearch.js'
 
-const embedFn = makeDummyEmbed(DIMS)
+const embedFn = makeDummyEmbedQuery(DIMS)
 
 // Helper function to perform vector search directly
 async function performVectorSearch(payload: Payload, query: any): Promise<Response> {
@@ -84,7 +74,8 @@ describe('Search endpoint integration tests', () => {
               },
             },
           },
-          embed: makeDummyEmbed(DIMS),
+          embedDocs: makeDummyEmbedDocs(DIMS),
+          embedQuery: makeDummyEmbedQuery(DIMS),
           embeddingVersion: testEmbeddingVersion,
         }),
       ],

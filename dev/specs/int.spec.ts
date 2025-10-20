@@ -3,7 +3,7 @@ import type { Payload } from 'payload'
 import config from '@payload-config'
 import { getPayload } from 'payload'
 import { beforeAll, describe, expect, test } from 'vitest'
-import { makeDummyEmbed, testEmbeddingVersion } from 'helpers/embed.js'
+import { makeDummyEmbedDocs, testEmbeddingVersion } from 'helpers/embed.js'
 import { chunkRichText } from 'helpers/chunkers.js'
 import { createHeadlessEditor } from '@payloadcms/richtext-lexical/lexical/headless'
 import {
@@ -19,7 +19,7 @@ import { DIMS, getInitialMarkdownContent } from './constants.js'
 import { waitForVectorizationJobs } from './utils.js'
 import { Post } from 'payload-types.js'
 
-const embedFn = makeDummyEmbed(DIMS)
+const embedFn = makeDummyEmbedDocs(DIMS)
 
 describe('Plugin integration tests', () => {
   let payload: Payload
