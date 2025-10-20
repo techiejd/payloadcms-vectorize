@@ -22,7 +22,7 @@ jobs:
           --health-timeout 5s
           --health-retries 5
         ports:
-          - 5432:5432
+          - 5433:5432
 
     steps:
       - uses: actions/checkout@v4
@@ -43,12 +43,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y postgresql-client
-          PGPASSWORD=password psql -h localhost -U postgres -d payload_test -c "CREATE EXTENSION IF NOT EXISTS vector;"
+          PGPASSWORD=password psql -h localhost -p 5433 -U postgres -d payload_test -c "CREATE EXTENSION IF NOT EXISTS vector;"
 
       - name: Run tests
         run: pnpm test
         env:
-          DATABASE_URI: postgresql://postgres:password@localhost:5432/payload_test
+          DATABASE_URI: postgresql://postgres:password@localhost:5433/payload_test
           PAYLOAD_SECRET: test-secret-key
           DIMS: 8
           IVFFLATLISTS: 1
