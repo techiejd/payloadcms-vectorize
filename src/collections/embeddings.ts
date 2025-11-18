@@ -1,6 +1,7 @@
 import type { CollectionConfig } from 'payload'
+import type { KnowledgePoolName } from '../types.js'
 
-export const createEmbeddingsCollection = (slug: string = 'embeddings'): CollectionConfig => ({
+export const createEmbeddingsCollection = (slug: KnowledgePoolName): CollectionConfig => ({
   slug,
   admin: {
     description:

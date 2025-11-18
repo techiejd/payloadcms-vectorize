@@ -15,16 +15,29 @@ import { createTestDb, waitForVectorizationJobs } from './utils.js'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { chunkRichText, chunkText } from 'helpers/chunkers.js'
 import { vectorSearch } from '../../src/endpoints/vectorSearch.js'
+import type { KnowledgePoolDynamicConfig } from 'payloadcms-vectorize'
 
 const embedFn = makeDummyEmbedQuery(DIMS)
 
 // Helper function to perform vector search directly
-async function performVectorSearch(payload: Payload, query: any): Promise<Response> {
-  const searchHandler = vectorSearch(embedFn)
+async function performVectorSearch(
+  payload: Payload,
+  query: any,
+  knowledgePool: string = 'default',
+): Promise<Response> {
+  const knowledgePools: Record<string, KnowledgePoolDynamicConfig> = {
+    default: {
+      collections: {},
+      embedDocs: makeDummyEmbedDocs(DIMS),
+      embedQuery: embedFn,
+      embeddingVersion: testEmbeddingVersion,
+    },
+  }
+  const searchHandler = vectorSearch(knowledgePools)
 
   // Create a mock request object
   const mockRequest = {
-    json: async () => ({ query }),
+    json: async () => ({ query, knowledgePool }),
     payload,
   } as any
 
@@ -66,17 +79,21 @@ describe('Search endpoint integration tests', () => {
       }),
       plugins: [
         plugin({
-          collections: {
-            posts: {
-              fields: {
-                title: { chunker: chunkText },
-                content: { chunker: chunkRichText },
+          knowledgePools: {
+            default: {
+              collections: {
+                posts: {
+                  fields: {
+                    title: { chunker: chunkText },
+                    content: { chunker: chunkRichText },
+                  },
+                },
               },
+              embedDocs: makeDummyEmbedDocs(DIMS),
+              embedQuery: makeDummyEmbedQuery(DIMS),
+              embeddingVersion: testEmbeddingVersion,
             },
           },
-          embedDocs: makeDummyEmbedDocs(DIMS),
-          embedQuery: makeDummyEmbedQuery(DIMS),
-          embeddingVersion: testEmbeddingVersion,
         }),
       ],
     })
@@ -96,9 +113,6 @@ describe('Search endpoint integration tests', () => {
 
     // Wait for vectorization jobs to complete
     await waitForVectorizationJobs(payload)
-    const docs = await payload.find({
-      collection: 'embeddings',
-    })
     const response = await performVectorSearch(payload, titleAndQuery)
     const json = await response.json()
 

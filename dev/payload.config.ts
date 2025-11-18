@@ -2,12 +2,11 @@ import { postgresAdapter } from '@payloadcms/db-postgres'
 import { lexicalEditor } from '@payloadcms/richtext-lexical'
 import path from 'path'
 import { buildConfig } from 'payload'
-import { createVectorizeIntegration, StaticIntegrationConfig } from 'payloadcms-vectorize'
+import { createVectorizeIntegration } from 'payloadcms-vectorize'
 import {
   makeDummyEmbedDocs,
   testEmbeddingVersion,
   voyageEmbedDocs,
-  voyageEmbedDims,
   voyageEmbedQuery,
   makeDummyEmbedQuery,
 } from './helpers/embed.js'
@@ -43,12 +42,12 @@ const ssl =
       }
     : undefined
 
-const integrationConfig: StaticIntegrationConfig = {
-  dims,
-  ivfflatLists, // Rule of thumb: ivfflatLists = sqrt(total_number_of_vectors). Helps with working memory usage.
-}
-
-const { afterSchemaInitHook, payloadcmsVectorize } = createVectorizeIntegration(integrationConfig)
+const { afterSchemaInitHook, payloadcmsVectorize } = createVectorizeIntegration({
+  default: {
+    dims,
+    ivfflatLists, // Rule of thumb: ivfflatLists = sqrt(total_number_of_vectors). Helps with working memory usage.
+  },
+})
 
 const buildConfigWithPostgres = async () => {
   return buildConfig({
@@ -100,17 +99,21 @@ const buildConfigWithPostgres = async () => {
     },
     plugins: [
       payloadcmsVectorize({
-        collections: {
-          posts: {
-            fields: {
-              title: { chunker: chunkText },
-              content: { chunker: chunkRichText },
+        knowledgePools: {
+          default: {
+            collections: {
+              posts: {
+                fields: {
+                  title: { chunker: chunkText },
+                  content: { chunker: chunkRichText },
+                },
+              },
             },
+            embedDocs,
+            embedQuery,
+            embeddingVersion: testEmbeddingVersion,
           },
         },
-        embedDocs,
-        embedQuery,
-        embeddingVersion: testEmbeddingVersion,
       }),
     ],
     secret: process.env.PAYLOAD_SECRET || 'test-secret_key',

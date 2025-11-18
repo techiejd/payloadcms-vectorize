@@ -1,4 +1,4 @@
-import type { CollectionSlug, Payload, Config } from 'payload'
+import type { CollectionSlug, Payload } from 'payload'
 import type { SerializedEditorState } from '@payloadcms/richtext-lexical/lexical'
 
 export type EmbedDocsFn = (texts: string[]) => Promise<number[][] | Float32Array[]>
@@ -20,17 +20,21 @@ export type CollectionVectorizeOption = {
   fields: Record<string, FieldVectorizeOption>
 }
 
+/** Knowledge pool name identifier */
+export type KnowledgePoolName = string
+
+/** Static configuration for a knowledge pool */
 /** Note current limitation: needs a migration in order to change after initial creation */
-export type StaticIntegrationConfig = {
-  /** Name of the embeddings collection created by the plugin */
-  embeddingsSlugOverride?: string
+export type KnowledgePoolStaticConfig = {
   /** Vector dimensions for pgvector column */
   dims: number
   /** IVFFLAT lists parameter used when creating the index */
   ivfflatLists: number
 }
 
-export type PayloadcmsVectorizeConfig = {
+/** Dynamic configuration for a knowledge pool */
+/** Does not need a migration in order to change after initial creation */
+export type KnowledgePoolDynamicConfig = {
   /** Collections and fields to vectorize */
   collections: Partial<Record<CollectionSlug, CollectionVectorizeOption>>
   /** Embedding function for document provided by the user */
@@ -39,6 +43,11 @@ export type PayloadcmsVectorizeConfig = {
   embedQuery: EmbedQueryFn
   /** Version string to track embedding model/version - stored in each embedding document */
   embeddingVersion: string
+}
+
+export type PayloadcmsVectorizeConfig = {
+  /** Knowledge pools and their dynamic configurations */
+  knowledgePools: Record<KnowledgePoolName, KnowledgePoolDynamicConfig>
   /** Task queue name.
    * Default is payloadcms default queue (undefined)
    * You must setup the job in your payload config
@@ -82,6 +91,7 @@ export type VectorizeTaskArgs = {
   pluginOptions: PayloadcmsVectorizeConfig & { embeddingsCollectionSlug?: string }
   doc: Record<string, any>
   collection: string
+  knowledgePool: KnowledgePoolName
   fieldsConfig: Record<string, FieldVectorizeOption>
 }
 
@@ -101,9 +111,12 @@ export interface VectorSearchResponse {
 }
 
 export interface VectorSearchQuery {
+  /** The knowledge pool to search in */
+  knowledgePool: KnowledgePoolName
+  /** The search query string */
+  query: string
   // TODO(techiejd): Expand on query API
   // add support for particular collections, fields, etc.
-  query: string
 }
 
 export type JobContext = {
@@ -112,5 +125,3 @@ export type JobContext = {
   req: any
   tasks: any
 }
-
-export const DEFAULT_EMBEDDINGS_COLLECTION = 'embeddings'

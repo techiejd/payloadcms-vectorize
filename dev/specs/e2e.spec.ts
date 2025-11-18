@@ -22,6 +22,7 @@ test('querying the endpoint should return the title when queried', async ({ requ
   const response = await request.post('/api/vector-search', {
     data: {
       query: title,
+      knowledgePool: 'default',
     },
   })
   expect(response.ok()).toBe(true)

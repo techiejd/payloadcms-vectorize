@@ -11,6 +11,7 @@ A Payload CMS plugin that adds vector search capabilities to your collections us
 - 🎯 **Flexible Chunking**: You provide the custom chunkers for different field types (text, rich text, etc.)
 - 🔧 **Configurable**: Choose which collections and fields to vectorize
 - 🌐 **REST API**: Built-in vector-search endpoint for querying vectorized content
+- 🏊 **Multiple Knowledge Pools**: Separate knowledge pools with independent configurations (dims, ivfflatLists, embedding functions)
 
 ## Prerequisites
 
@@ -65,12 +66,19 @@ const chunkRichText = async (richText: SerializedEditorState,
   return /* string array */
 }
 
-// Create the integration
+// Create the integration with static configs (dims, ivfflatLists)
 const { afterSchemaInitHook, payloadcmsVectorize } = createVectorizeIntegration({
   // Note limitation: Changing these values is currently not supported.
   // Migration is necessary.
-  dims: 1536, // Vector dimensions
-  ivfflatLists: 100, // IVFFLAT index parameter
+  main: {
+    dims: 1536, // Vector dimensions
+    ivfflatLists: 100, // IVFFLAT index parameter
+  },
+  // You can add more knowledge pools with different static configs
+  // products: {
+  //   dims: 384,
+  //   ivfflatLists: 50,
+  // },
 })
 
 export default buildConfig({
@@ -83,18 +91,37 @@ export default buildConfig({
   }),
   plugins: [
     payloadcmsVectorize({
-      // The collection-fields you want vectorized
-      collections: {
-        posts: {
-          fields: {
-            title: { chunker: chunkText },
-            content: { chunker: chunkRichText },
+      // Knowledge pools - dynamic configs (collections, embedding functions)
+      knowledgePools: {
+        main: {
+          // The collection-fields you want vectorized in this pool
+          collections: {
+            posts: {
+              fields: {
+                title: { chunker: chunkText },
+                content: { chunker: chunkRichText },
+              },
+            },
           },
+          embedDocs,
+          embedQuery,
+          embeddingVersion: 'v1.0.0',
         },
+        // You can add more knowledge pools with different dynamic configs
+        // products: {
+        //   collections: { ... },
+        //   embedDocs: differentEmbedDocs,
+        //   embedQuery: differentEmbedQuery,
+        //   embeddingVersion: 'v2.0.0',
+        // },
       },
-      embedDocs,
-      embedQuery,
-      embeddingVersion: 'v1.0.0',
+      // Optional plugin options:
+      // queueName: 'custom-queue',
+      // endpointOverrides: {
+      //   path: '/custom-vector-search',
+      //   enabled: true,
+      // },
+      // disabled: false,
     }),
   ],
 })
@@ -108,7 +135,10 @@ The plugin automatically creates a `/api/vector-search` endpoint:
 const response = await fetch('/api/vector-search', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ query: 'What is machine learning?' }),
+  body: JSON.stringify({
+    query: 'What is machine learning?', // Required: query
+    knowledgePool: 'main', // Required: specify which knowledge pool to search
+  }),
 })
 
 const results = await response.json()
@@ -119,15 +149,30 @@ const results = await response.json()
 
 ### Plugin Options
 
-| Option              | Type                                        | Required | Description                               |
-| ------------------- | ------------------------------------------- | -------- | ----------------------------------------- |
-| `collections`       | `Record<string, CollectionVectorizeOption>` | ✅       | Collections and fields to vectorize       |
-| `embedDocs`         | `EmbedDocsFn`                               | ✅       | Function to embed multiple documents      |
-| `embedQuery`        | `EmbedQueryFn`                              | ✅       | Function to embed search queries          |
-| `embeddingVersion`  | `string`                                    | ✅       | Version string for tracking model changes |
-| `queueName`         | `string`                                    | ❌       | Custom queue name for background jobs     |
-| `endpointOverrides` | `object`                                    | ❌       | Customize the search endpoint             |
-| `disabled`          | `boolean`                                   | ❌       | Disable plugin while keeping schema       |
+| Option              | Type                                         | Required | Description                              |
+| ------------------- | -------------------------------------------- | -------- | ---------------------------------------- |
+| `knowledgePools`    | `Record<KnowledgePool, KnowledgePoolConfig>` | ✅       | Knowledge pools and their configurations |
+| `queueName`         | `string`                                     | ❌       | Custom queue name for background jobs    |
+| `endpointOverrides` | `object`                                     | ❌       | Customize the search endpoint            |
+| `disabled`          | `boolean`                                    | ❌       | Disable plugin while keeping schema      |
+
+### Knowledge Pool Config
+
+Knowledge pools are configured in two steps. The static configs define the database schema (migration required), while dynamic configs define runtime behavior (no migration required).
+
+**1. Static Config** (passed to `createVectorizeIntegration`):
+
+- `dims`: `number` - Vector dimensions for pgvector column
+- `ivfflatLists`: `number` - IVFFLAT index parameter
+
+The embeddings collection name will be the same as the knowledge pool name.
+
+**2. Dynamic Config** (passed to `payloadcmsVectorize`):
+
+- `collections`: `Record<string, CollectionVectorizeOption>` - Collections and fields to vectorize
+- `embedDocs`: `EmbedDocsFn` - Function to embed multiple documents
+- `embedQuery`: `EmbedQueryFn` - Function to embed search queries
+- `embeddingVersion`: `string` - Version string for tracking model changes
 
 ## Chunkers
 
@@ -187,9 +232,15 @@ Search for similar content using vector similarity.
 
 ```json
 {
-  "query": "Your search query"
+  "query": "Your search query",
+  "knowledgePool": "main"
 }
 ```
+
+**Parameters:**
+
+- `query` (required): The search query string
+- `knowledgePool` (required): The knowledge pool identifier to search in
 
 **Response:**
 
@@ -209,6 +260,73 @@ Search for similar content using vector similarity.
   ]
 }
 ```
+
+## Migration from v0.1.0 to v0.2.0
+
+Version 0.2.0 introduces support for multiple knowledge pools. This is a **breaking change** that requires updating your configuration.
+
+### Before (v0.1.0):
+
+```typescript
+const { afterSchemaInitHook, payloadcmsVectorize } = createVectorizeIntegration({
+  dims: 1536,
+  ivfflatLists: 100,
+})
+
+payloadcmsVectorize({
+  collections: {
+    posts: { fields: { ... } },
+  },
+  embedDocs,
+  embedQuery,
+  embeddingVersion: 'v1.0.0',
+})
+```
+
+### After (v0.2.0):
+
+```typescript
+// Static configs (schema-related) passed to createVectorizeIntegration
+const { afterSchemaInitHook, payloadcmsVectorize } = createVectorizeIntegration({
+  main: {
+    dims: 1536,
+    ivfflatLists: 100,
+  },
+})
+
+// Dynamic configs (runtime behavior) passed to payloadcmsVectorize
+payloadcmsVectorize({
+  knowledgePools: {
+    main: {
+      collections: {
+        posts: { fields: { ... } },
+      },
+      embedDocs,
+      embedQuery,
+      embeddingVersion: 'v1.0.0',
+    },
+  },
+})
+```
+
+### API Changes
+
+The vector search endpoint now requires a `knowledgePool` parameter:
+
+```typescript
+// Before
+{ query: 'search term' }
+
+// After
+{ query: 'search term', knowledgePool: 'main' }
+```
+
+### Benefits of Multiple Knowledge Pools
+
+- **Separate knowledge domains**: Keep different types of content in separate pools
+- **Different technical requirements**: Each pool can have different `dims`, `ivfflatLists`, and embedding functions
+- **Flexible organization**: Collections can appear in multiple pools if needed
+- **Independent versioning**: Each pool can track its own embedding model version
 
 ## Requirements
 

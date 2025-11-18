@@ -35,17 +35,21 @@ describe('Queue tests', () => {
       plugins: [
         plugin({
           queueName: expectedQueueName,
-          collections: {
-            posts: {
-              fields: {
-                title: { chunker: chunkText },
-                content: { chunker: chunkRichText },
+          knowledgePools: {
+            default: {
+              collections: {
+                posts: {
+                  fields: {
+                    title: { chunker: chunkText },
+                    content: { chunker: chunkRichText },
+                  },
+                },
               },
+              embedDocs: async () => [[0, 0, 0, 0, 0, 0, 0, 0]],
+              embedQuery: async () => [0, 0, 0, 0, 0, 0, 0, 0],
+              embeddingVersion: 'test',
             },
           },
-          embedDocs: async () => [[0, 0, 0, 0, 0, 0, 0, 0]],
-          embedQuery: async () => [0, 0, 0, 0, 0, 0, 0, 0],
-          embeddingVersion: 'test',
         }),
       ],
     })

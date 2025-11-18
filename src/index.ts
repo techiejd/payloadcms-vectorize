@@ -5,7 +5,9 @@ import { createEmbeddingsCollection } from './collections/embeddings.js'
 import type {
   PayloadcmsVectorizeConfig,
   PostgresPayload,
-  StaticIntegrationConfig,
+  KnowledgePoolName,
+  KnowledgePoolStaticConfig,
+  KnowledgePoolDynamicConfig,
 } from './types.js'
 import { isPostgresPayload } from './types.js'
 import type { PostgresAdapterArgs } from '@payloadcms/db-postgres'
@@ -13,8 +15,6 @@ import { createVectorizeTask } from './tasks/vectorize.js'
 import { vectorSearch } from './endpoints/vectorSearch.js'
 
 export type * from './types.js'
-
-const DEFAULT_EMBEDDINGS_COLLECTION = 'embeddings'
 
 async function ensurePgvectorArtifacts(args: {
   payload: Payload
@@ -64,33 +64,37 @@ async function ensurePgvectorArtifacts(args: {
 // ==================
 
 export const createVectorizeIntegration = (
-  integrationConfig: StaticIntegrationConfig,
+  staticConfigs: Record<KnowledgePoolName, KnowledgePoolStaticConfig>,
 ): {
   afterSchemaInitHook: Required<PostgresAdapterArgs>['afterSchemaInit'][number]
   payloadcmsVectorize: (pluginOptions: PayloadcmsVectorizeConfig) => (config: Config) => Config
 } => {
-  const embeddingsSlug = integrationConfig.embeddingsSlugOverride || DEFAULT_EMBEDDINGS_COLLECTION
-
   // Augment the generated schema so push/migrations are aware of our custom columns
   const afterSchemaInitHook: Required<PostgresAdapterArgs>['afterSchemaInit'][number] = async ({
     schema,
     extendTable,
   }) => {
-    const vectorType = customType({
-      dataType() {
-        return `vector(${integrationConfig.dims})`
-      },
-    })
+    // Extend schema for each knowledge pool
+    for (const [poolName, staticConfig] of Object.entries(staticConfigs)) {
+      const dims = staticConfig.dims
 
-    const table = schema?.tables?.[embeddingsSlug]
-    if (table && typeof extendTable === 'function') {
-      extendTable({
-        table,
-        columns: {
-          embedding: vectorType('embedding'),
+      const vectorType = customType({
+        dataType() {
+          return `vector(${dims})`
         },
       })
+
+      const table = schema?.tables?.[poolName]
+      if (table && typeof extendTable === 'function') {
+        extendTable({
+          table,
+          columns: {
+            embedding: vectorType('embedding'),
+          },
+        })
+      }
     }
+
     return schema
   }
   const payloadcmsVectorize =
@@ -99,37 +103,71 @@ export const createVectorizeIntegration = (
       // Ensure collections array exists
       config.collections = [...(config.collections || [])]
 
-      // Add the embeddings collection (backed by pgvector column added on init)
-      const embeddingsCollection = createEmbeddingsCollection(embeddingsSlug)
-
-      // Only add once
-      if (!config.collections.find((c) => c.slug === embeddingsSlug)) {
-        config.collections.push(embeddingsCollection)
+      // Validate static/dynamic configs share the same pool names
+      for (const poolName of Object.keys(pluginOptions.knowledgePools)) {
+        if (!staticConfigs[poolName]) {
+          throw new Error(
+            `[payloadcms-vectorize] Knowledge pool "${poolName}" not found in static configs`,
+          )
+        }
       }
 
-      // Exit early if disabled, but keep embeddings collection present for migrations
+      const unusedStaticPools = Object.keys(staticConfigs).filter(
+        (poolName) => !pluginOptions.knowledgePools[poolName],
+      )
+      if (unusedStaticPools.length > 0) {
+        throw new Error(
+          `[payloadcms-vectorize] Static knowledge pool(s) ${unusedStaticPools.join(', ')} lack dynamic configuration`,
+        )
+      }
+
+      // Build reverse mapping: collectionSlug -> KnowledgePoolName[]
+      const collectionToPools = new Map<
+        string,
+        Array<{
+          pool: KnowledgePoolName
+          dynamic: KnowledgePoolDynamicConfig
+        }>
+      >()
+
+      // Process each knowledge pool
+      for (const [poolName, dynamicConfig] of Object.entries(pluginOptions.knowledgePools)) {
+        // Add the embeddings collection for this knowledge pool
+        const embeddingsCollection = createEmbeddingsCollection(poolName)
+        if (!config.collections.find((c) => c.slug === poolName)) {
+          config.collections.push(embeddingsCollection)
+        }
+
+        // Build reverse mapping for hooks
+        for (const collectionSlug of Object.keys(dynamicConfig.collections)) {
+          if (!collectionToPools.has(collectionSlug)) {
+            collectionToPools.set(collectionSlug, [])
+          }
+          collectionToPools.get(collectionSlug)!.push({ pool: poolName, dynamic: dynamicConfig })
+        }
+      }
+
+      // Exit early if disabled, but keep embeddings collections present for migrations
       if (pluginOptions.disabled) return config
 
-      // Register tasks using Payload Jobs
+      // Register a single task using Payload Jobs that can handle any knowledge pool
       const incomingJobs = config.jobs || { tasks: [] }
+      const tasks = [...incomingJobs.tasks]
 
       const vectorizeTask = createVectorizeTask({
-        integrationConfig,
-        opts: pluginOptions,
-        collections: pluginOptions.collections,
+        knowledgePools: pluginOptions.knowledgePools,
       })
+      tasks.push(vectorizeTask)
+
       config.jobs = {
         ...incomingJobs,
-        tasks: [...incomingJobs.tasks, vectorizeTask],
+        tasks,
       }
 
       // Extend configured collections with hooks
-      for (const [collectionSlug, cv] of Object.entries(pluginOptions.collections)) {
+      for (const [collectionSlug, pools] of collectionToPools.entries()) {
         const collection = config.collections.find((c) => c.slug === collectionSlug)
         if (!collection) {
-          throw new Error(`[payloadcms-vectorize] Collection ${collectionSlug} not found`)
-        }
-        if (!cv) {
           throw new Error(`[payloadcms-vectorize] Collection ${collectionSlug} not found`)
         }
 
@@ -140,18 +178,24 @@ export const createVectorizeIntegration = (
             async (args) => {
               const { doc, req } = args
               const payload = req.payload
-              const fieldsConfig = cv.fields
 
-              await payload.jobs.queue<'payloadcms-vectorize:vectorize'>({
-                task: 'payloadcms-vectorize:vectorize',
-                input: {
-                  doc,
-                  collection: collectionSlug,
-                  fieldsConfig,
-                },
-                req: req,
-                ...(pluginOptions.queueName ? { queue: pluginOptions.queueName } : {}),
-              })
+              // Queue vectorization jobs for ALL knowledge pools containing this collection
+              for (const { pool, dynamic } of pools) {
+                const collectionConfig = dynamic.collections[collectionSlug]
+                if (!collectionConfig) continue
+
+                await payload.jobs.queue<'payloadcms-vectorize:vectorize'>({
+                  task: 'payloadcms-vectorize:vectorize',
+                  input: {
+                    doc,
+                    collection: collectionSlug,
+                    knowledgePool: pool,
+                    fieldsConfig: collectionConfig.fields,
+                  },
+                  req: req,
+                  ...(pluginOptions.queueName ? { queue: pluginOptions.queueName } : {}),
+                })
+              }
               return
             },
           ],
@@ -159,31 +203,26 @@ export const createVectorizeIntegration = (
             ...((collection.hooks?.afterDelete as any[]) || []),
             async ({ id, payload: pld, req }: any) => {
               const payload = (pld as any) || (req as any)?.payload
-              try {
-                await payload.delete({
-                  collection: embeddingsSlug,
-                  where: {
-                    and: [
-                      { sourceCollection: { equals: collectionSlug } },
-                      { docId: { equals: String(id) } },
-                    ],
-                  },
-                })
-              } catch (e) {
-                payload?.logger?.warn?.(
-                  '[payloadcms-vectorize] Jobs enqueue failed (delete), running inline',
-                  e as Error,
-                )
+
+              // Delete from ALL knowledge pools containing this collection
+              for (const { pool } of pools) {
+                try {
+                  await payload.delete({
+                    collection: pool,
+                    where: {
+                      and: [
+                        { sourceCollection: { equals: collectionSlug } },
+                        { docId: { equals: String(id) } },
+                      ],
+                    },
+                  })
+                } catch (e) {
+                  payload?.logger?.warn?.(
+                    `[payloadcms-vectorize] Failed to delete from knowledge pool ${pool}`,
+                    e as Error,
+                  )
+                }
               }
-              await payload.delete({
-                collection: embeddingsSlug,
-                where: {
-                  and: [
-                    { sourceCollection: { equals: collectionSlug } },
-                    { docId: { equals: String(id) } },
-                  ],
-                },
-              })
             },
           ],
         }
@@ -192,12 +231,16 @@ export const createVectorizeIntegration = (
       const incomingOnInit = config.onInit
       config.onInit = async (payload) => {
         if (incomingOnInit) await incomingOnInit(payload)
-        await ensurePgvectorArtifacts({
-          payload,
-          tableName: embeddingsSlug,
-          dims: integrationConfig.dims,
-          ivfflatLists: integrationConfig.ivfflatLists,
-        })
+
+        // Ensure pgvector artifacts for each knowledge pool
+        for (const [poolName, staticConfig] of Object.entries(staticConfigs)) {
+          await ensurePgvectorArtifacts({
+            payload,
+            tableName: poolName,
+            dims: staticConfig.dims,
+            ivfflatLists: staticConfig.ivfflatLists,
+          })
+        }
       }
 
       if (pluginOptions.endpointOverrides?.enabled !== false) {
@@ -208,7 +251,7 @@ export const createVectorizeIntegration = (
           {
             path,
             method: 'post',
-            handler: vectorSearch(pluginOptions.embedQuery),
+            handler: vectorSearch(pluginOptions.knowledgePools),
           },
         ]
       }
