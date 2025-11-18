@@ -34,7 +34,6 @@ test('querying the endpoint should return the title when queried', async ({ requ
       expect.objectContaining({
         sourceCollection: 'posts',
         docId: String(post.id),
-        fieldPath: 'title',
         chunkIndex: 0,
         chunkText: title,
         embeddingVersion: testEmbeddingVersion,

@@ -102,7 +102,6 @@ describe('Plugin integration tests', () => {
     const expectedTitleDoc = {
       sourceCollection: 'posts',
       docId: String(post.id),
-      fieldPath: 'title',
       chunkIndex: 0,
       chunkText: title,
       embeddingVersion: testEmbeddingVersion,
@@ -112,8 +111,7 @@ describe('Plugin integration tests', () => {
     const expectedContentDocs = contentChunks.map((chunkText, index) => ({
       sourceCollection: 'posts',
       docId: String(post.id),
-      fieldPath: 'content',
-      chunkIndex: index,
+      chunkIndex: index + 1, // +1 because title chunk is at index 0
       chunkText,
       embeddingVersion: testEmbeddingVersion,
     }))

@@ -4,6 +4,7 @@ import {
   PostgresPayload,
   KnowledgePoolName,
   KnowledgePoolDynamicConfig,
+  ToKnowledgePoolFn,
 } from '../types.js'
 
 type VectorizeTaskInput = {
@@ -80,7 +81,7 @@ async function runVectorizeTask(args: {
       `[payloadcms-vectorize] collection "${collection}" not configured in knowledge pool "${poolName}"`,
     )
   }
-  const fieldsConfig = collectionConfig.fields
+  const toKnowledgePoolFn: ToKnowledgePoolFn = collectionConfig.toKnowledgePool
 
   const isPostgres = isPostgresPayload(payload)
   if (!isPostgres) {
@@ -93,41 +94,39 @@ async function runVectorizeTask(args: {
     throw new Error('[payloadcms-vectorize] Failed to persist vector column')
   }
 
-  const inputs: { chunkText: string; fieldPath: string; chunkIndex: number }[] = []
-  for (const [fieldPath, fieldCfg] of Object.entries(fieldsConfig)) {
-    // Delete existing embeddings for this doc/field combination to keep one set per doc/field
-    // The embeddingVersion is stored in each document and can be updated by re-vectorizing
-    await payload.delete({
-      collection: poolName,
-      where: {
-        and: [
-          { sourceCollection: { equals: collection } },
-          { docId: { equals: String(sourceDoc.id) } },
-          { fieldPath: { equals: fieldPath } },
-        ],
-      },
-    })
-    const value = getByPath(sourceDoc, fieldPath)
-    const chunker = fieldCfg.chunker
-    const chunks = await chunker(value, payload)
-    inputs.push(
-      ...chunks.map((chunk, index) => ({ chunkText: chunk, fieldPath, chunkIndex: index })),
-    )
-  }
-  const chunkTexts = inputs.map((input) => input.chunkText)
+  // Delete all existing embeddings for this document before creating new ones
+  // This ensures we replace old embeddings (potentially with a different embeddingVersion)
+  // and prevents duplicates when a document is updated
+  await payload.delete({
+    collection: poolName,
+    where: {
+      and: [
+        { sourceCollection: { equals: collection } },
+        { docId: { equals: String(sourceDoc.id) } },
+      ],
+    },
+  })
+
+  // Get chunks from toKnowledgePoolFn
+  const chunkData = await toKnowledgePoolFn(sourceDoc, payload)
+
+  // Extract chunk texts for embedding
+  const chunkTexts = chunkData.map((item) => item.chunk)
   const vectors = await dynamicConfig.embedDocs(chunkTexts)
+
+  // Create embedding documents with extension field values
   await Promise.all(
     vectors.map(async (vector, index) => {
-      const { fieldPath, chunkIndex, chunkText } = inputs[index]
+      const { chunk, ...extensionFields } = chunkData[index]
       const created = await payload.create({
         collection: poolName,
         data: {
           sourceCollection: collection,
           docId: String(sourceDoc.id),
-          fieldPath,
-          chunkIndex,
-          chunkText,
+          chunkIndex: index,
+          chunkText: chunk,
           embeddingVersion,
+          ...extensionFields,
           embedding: Array.isArray(vector) ? vector : Array.from(vector),
         },
       })
@@ -143,9 +142,4 @@ async function runVectorizeTask(args: {
       }
     }),
   )
-}
-
-function getByPath(obj: any, path: string): any {
-  if (!obj) return undefined
-  return path.split('.').reduce((acc, key) => (acc == null ? acc : acc[key]), obj)
 }

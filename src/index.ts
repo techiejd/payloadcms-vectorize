@@ -132,8 +132,16 @@ export const createVectorizeIntegration = (
 
       // Process each knowledge pool
       for (const [poolName, dynamicConfig] of Object.entries(pluginOptions.knowledgePools)) {
-        // Add the embeddings collection for this knowledge pool
-        const embeddingsCollection = createEmbeddingsCollection(poolName)
+        // Collect all extensionFields from all collections in this pool
+        const allExtensionFields: any[] = []
+        for (const collectionConfig of Object.values(dynamicConfig.collections)) {
+          if (collectionConfig?.extensionFields) {
+            allExtensionFields.push(...collectionConfig.extensionFields)
+          }
+        }
+
+        // Add the embeddings collection for this knowledge pool with extensionFields
+        const embeddingsCollection = createEmbeddingsCollection(poolName, allExtensionFields)
         if (!config.collections.find((c) => c.slug === poolName)) {
           config.collections.push(embeddingsCollection)
         }
@@ -190,7 +198,6 @@ export const createVectorizeIntegration = (
                     doc,
                     collection: collectionSlug,
                     knowledgePool: pool,
-                    fieldsConfig: collectionConfig.fields,
                   },
                   req: req,
                   ...(pluginOptions.queueName ? { queue: pluginOptions.queueName } : {}),

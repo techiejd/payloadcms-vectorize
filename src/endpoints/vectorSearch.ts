@@ -1,8 +1,28 @@
-import type { PayloadHandler } from 'payload'
+import type { PayloadHandler, Where } from 'payload'
+import {
+  sql,
+  cosineDistance,
+  inArray,
+  eq,
+  and,
+  or,
+  not,
+  like,
+  gt,
+  gte,
+  lt,
+  lte,
+  ne,
+  isNull,
+  isNotNull,
+} from '@payloadcms/db-postgres/drizzle'
+
+import toSnakeCase from 'to-snake-case'
 import type {
   VectorSearchResult,
   KnowledgePoolName,
   KnowledgePoolDynamicConfig,
+  VectorSearchQuery,
 } from 'payloadcms-vectorize'
 
 export const vectorSearch = (
@@ -13,7 +33,7 @@ export const vectorSearch = (
       return Response.json({ error: 'Request is required' }, { status: 400 })
     }
     try {
-      const { query, knowledgePool } = await req.json()
+      const { query, knowledgePool, where, limit = 10 }: VectorSearchQuery = await req.json()
       if (!query || typeof query !== 'string') {
         return Response.json({ error: 'Query is required and must be a string' }, { status: 400 })
       }
@@ -40,8 +60,14 @@ export const vectorSearch = (
         return Array.isArray(qE) ? qE : Array.from(qE)
       })()
 
-      // Perform cosine similarity search using raw SQL
-      const results = await performCosineSearch(payload, queryEmbedding, knowledgePool, 10)
+      // Perform cosine similarity search using Drizzle
+      const results = await performCosineSearch(
+        payload,
+        queryEmbedding,
+        knowledgePool,
+        limit,
+        where,
+      )
 
       return Response.json({ results })
     } catch (error) {
@@ -56,58 +82,247 @@ async function performCosineSearch(
   queryEmbedding: number[],
   poolName: KnowledgePoolName,
   limit: number = 10,
+  whereClause?: Where,
 ): Promise<Array<VectorSearchResult>> {
-  const isPostgres = payload.db?.pool?.query || payload.db?.drizzle?.execute
+  const isPostgres = payload.db?.pool?.query || payload.db?.drizzle?.execute || payload.db?.adapter
 
   if (!isPostgres) {
     throw new Error('Only works with Postgres')
   }
 
-  const runSQL = async (sql: string, params?: any[]) => {
-    if (payload.db.pool?.query) {
-      return payload.db.pool.query(sql, params)
-    }
-    if (payload.db.drizzle?.execute) {
-      return payload.db.drizzle.execute(sql)
-    }
-    throw new Error('Failed to execute SQL')
+  // Access Drizzle adapter instance
+  const adapter = payload.db?.adapter
+  if (!adapter) {
+    throw new Error('Drizzle adapter not found')
+  }
+  const drizzle = adapter.drizzle
+  if (!drizzle) {
+    throw new Error('Drizzle instance not found in adapter')
   }
 
-  // Convert embedding array to PostgreSQL vector format
-  const vectorString = `[${queryEmbedding.join(',')}]`
-
-  // SQL query for cosine similarity search - use the specified embeddings table
-  const sql = `
-    SELECT 
-      "doc_id",
-      "chunk_text",
-      "field_path",
-      "source_collection",
-      "chunk_index",
-      "embedding_version",
-      1 - (embedding <=> $1::vector) as similarity
-    FROM "${poolName}"
-    ORDER BY embedding <=> $1::vector
-    LIMIT $2
-  `
-
-  try {
-    const result = await runSQL(sql, [vectorString, limit])
-
-    // Handle different result formats from different database adapters
-    const rows = result.rows || result || []
-
-    return rows.map((row: any) => ({
-      id: String(row.doc_id), // Convert to string for consistency
-      docId: row.doc_id,
-      similarity: parseFloat(row.similarity),
-      chunkText: row.chunk_text,
-      fieldPath: row.field_path,
-      sourceCollection: row.source_collection,
-      chunkIndex: parseInt(row.chunk_index, 10), // Convert to number
-      embeddingVersion: row.embedding_version,
-    }))
-  } catch (error) {
-    throw new Error(`Cosine search failed: ${error}`)
+  // Get collection config and table name
+  const collectionConfig = payload.collections[poolName]?.config
+  if (!collectionConfig) {
+    throw new Error(`Collection ${poolName} not found`)
   }
+  const tableName = adapter.tableNameMap?.get(toSnakeCase(collectionConfig.slug))
+  if (!tableName) {
+    throw new Error(
+      `[payloadcms-vectorize] Table name not found in adapter for collection "${poolName}" (slug: "${collectionConfig.slug}"). This typically indicates a configuration issue with the embeddings collection.`,
+    )
+  }
+  const table = adapter.tables[tableName]
+  if (!table) {
+    throw new Error(`Table ${tableName} not found in adapter`)
+  }
+
+  // Use Drizzle's query builder with cosineDistance function
+  // cosineDistance returns distance, so we calculate similarity as 1 - distance
+  const embeddingColumn = table.embedding
+  if (!embeddingColumn) {
+    throw new Error(`Embedding column not found in table ${tableName}`)
+  }
+
+  // Convert WHERE clause to Drizzle conditions
+  let drizzleWhere: any = undefined
+  if (whereClause) {
+    drizzleWhere = convertWhereToDrizzle(whereClause, table, collectionConfig.flattenedFields)
+    if (drizzleWhere === null) {
+      // WHERE clause resulted in an empty condition (e.g., empty 'and' or 'or' array)
+      // This semantically means "match nothing", so return empty results
+      throw new Error(
+        `[payloadcms-vectorize] WHERE clause resulted in no valid conditions. This typically occurs when using empty 'and' or 'or' arrays, or when all field conditions reference non-existent columns.`,
+      )
+    }
+    if (drizzleWhere === undefined) {
+      // WHERE clause could not be converted (invalid structure or unsupported operators)
+      throw new Error(
+        `[payloadcms-vectorize] WHERE clause could not be converted to Drizzle conditions. Please check that all field names exist and operators are supported.`,
+      )
+    }
+  }
+
+  // Build query using Drizzle's query builder
+  let query = drizzle
+    .select({
+      id: table.id,
+      docId: table.docId || (table as any).doc_id,
+      chunkText: table.chunkText || (table as any).chunk_text,
+      sourceCollection: table.sourceCollection || (table as any).source_collection,
+      chunkIndex: table.chunkIndex || (table as any).chunk_index,
+      embeddingVersion: table.embeddingVersion || (table as any).embedding_version,
+      // Calculate similarity: 1 - cosineDistance (distance)
+      similarity: sql<number>`1 - ${cosineDistance(embeddingColumn, queryEmbedding)}`,
+    })
+    .from(table)
+
+  // Add WHERE clause if provided
+  if (drizzleWhere) {
+    query = query.where(drizzleWhere)
+  }
+
+  // Order by cosine distance (ascending = most similar first) and limit
+  query = query.orderBy(cosineDistance(embeddingColumn, queryEmbedding)).limit(limit)
+
+  // Execute the query
+  const result = await query
+
+  return mapRowsToResults(result)
+}
+
+/**
+ * Convert Payload WHERE clause to Drizzle conditions
+ * Simplified version inspired by Payload's buildQuery
+ */
+function convertWhereToDrizzle(where: Where, table: any, fields: any[]): any {
+  if (!where || typeof where !== 'object') {
+    return undefined
+  }
+
+  // Handle 'and' operator
+  if ('and' in where && Array.isArray(where.and)) {
+    const conditions = where.and
+      .map((condition) => convertWhereToDrizzle(condition, table, fields))
+      .filter((c) => c !== undefined && c !== null)
+    if (conditions.length === 0) return null
+    if (conditions.length === 1) return conditions[0]
+    return and(...conditions)
+  }
+
+  // Handle 'or' operator
+  if ('or' in where && Array.isArray(where.or)) {
+    const conditions = where.or
+      .map((condition) => convertWhereToDrizzle(condition, table, fields))
+      .filter((c) => c !== undefined && c !== null)
+    if (conditions.length === 0) return null
+    if (conditions.length === 1) return conditions[0]
+    return or(...conditions)
+  }
+
+  // Handle field conditions - collect all field conditions and combine with AND
+  const fieldConditions: any[] = []
+  for (const [fieldName, condition] of Object.entries(where)) {
+    if (fieldName === 'and' || fieldName === 'or') continue
+
+    // Get the column from the table (handle both camelCase and snake_case)
+    const column = table[fieldName] || table[toSnakeCase(fieldName)]
+    if (!column) {
+      // Field not found, skip (could be a nested field we don't support)
+      continue
+    }
+
+    if (typeof condition !== 'object' || condition === null || Array.isArray(condition)) {
+      continue
+    }
+
+    const cond = condition as Record<string, any>
+
+    // Handle equals
+    if ('equals' in cond) {
+      fieldConditions.push(eq(column, cond.equals))
+      continue
+    }
+
+    // Handle not_equals / notEquals
+    if ('not_equals' in cond || 'notEquals' in cond) {
+      fieldConditions.push(ne(column, cond.not_equals ?? cond.notEquals))
+      continue
+    }
+
+    // Handle in
+    if ('in' in cond && Array.isArray(cond.in)) {
+      fieldConditions.push(inArray(column, cond.in))
+      continue
+    }
+
+    // Handle not_in / notIn
+    if ('not_in' in cond || 'notIn' in cond) {
+      const values = cond.not_in ?? cond.notIn
+      if (Array.isArray(values)) {
+        fieldConditions.push(not(inArray(column, values)))
+      }
+      continue
+    }
+
+    // Handle like
+    if ('like' in cond && typeof cond.like === 'string') {
+      fieldConditions.push(like(column, cond.like))
+      continue
+    }
+
+    // Handle contains
+    if ('contains' in cond && typeof cond.contains === 'string') {
+      fieldConditions.push(like(column, `%${cond.contains}%`))
+      continue
+    }
+
+    // Handle greater_than / greaterThan
+    if ('greater_than' in cond || 'greaterThan' in cond) {
+      fieldConditions.push(gt(column, cond.greater_than ?? cond.greaterThan))
+      continue
+    }
+
+    // Handle greater_than_equal / greaterThanEqual
+    if ('greater_than_equal' in cond || 'greaterThanEqual' in cond) {
+      fieldConditions.push(gte(column, cond.greater_than_equal ?? cond.greaterThanEqual))
+      continue
+    }
+
+    // Handle less_than / lessThan
+    if ('less_than' in cond || 'lessThan' in cond) {
+      fieldConditions.push(lt(column, cond.less_than ?? cond.lessThan))
+      continue
+    }
+
+    // Handle less_than_equal / lessThanEqual
+    if ('less_than_equal' in cond || 'lessThanEqual' in cond) {
+      fieldConditions.push(lte(column, cond.less_than_equal ?? cond.lessThanEqual))
+      continue
+    }
+
+    // Handle exists (null check)
+    if ('exists' in cond && typeof cond.exists === 'boolean') {
+      fieldConditions.push(cond.exists ? isNotNull(column) : isNull(column))
+      continue
+    }
+  }
+
+  // Combine all field conditions with AND
+  if (fieldConditions.length === 0) {
+    return undefined
+  }
+  if (fieldConditions.length === 1) {
+    return fieldConditions[0]
+  }
+  return and(...fieldConditions)
+}
+
+function mapRowsToResults(rows: any[]): Array<VectorSearchResult> {
+  return rows.map((row: any) => ({
+    id: String(row.id),
+    docId: String(row.docId),
+    similarity:
+      typeof row.similarity === 'number' ? row.similarity : parseFloat(String(row.similarity)),
+    chunkText: row.chunkText || '',
+    sourceCollection: row.sourceCollection || '',
+    chunkIndex:
+      typeof row.chunkIndex === 'number' ? row.chunkIndex : parseInt(String(row.chunkIndex), 10),
+    embeddingVersion: row.embeddingVersion || '',
+    // Include any extension fields that might be in the row
+    ...Object.fromEntries(
+      Object.entries(row).filter(
+        ([key]) =>
+          ![
+            'id',
+            'docId',
+            'chunkText',
+            'sourceCollection',
+            'chunkIndex',
+            'embeddingVersion',
+            'similarity',
+            'embedding',
+          ].includes(key),
+      ),
+    ),
+  }))
 }
