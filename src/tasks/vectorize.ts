@@ -1,18 +1,15 @@
-import { CollectionSlug, Payload, TaskConfig, TaskHandlerResult } from 'payload'
+import { Payload, TaskConfig, TaskHandlerResult } from 'payload'
 import {
-  CollectionVectorizeOption,
-  DEFAULT_EMBEDDINGS_COLLECTION,
-  FieldVectorizeOption,
   isPostgresPayload,
-  PayloadcmsVectorizeConfig,
   PostgresPayload,
-  StaticIntegrationConfig,
+  KnowledgePoolName,
+  KnowledgePoolDynamicConfig,
 } from '../types.js'
 
 type VectorizeTaskInput = {
   doc: Record<string, any>
   collection: string
-  collections: Partial<Record<CollectionSlug, CollectionVectorizeOption>>
+  knowledgePool: KnowledgePoolName
 }
 type VectorizeTaskOutput = {
   success: boolean
@@ -23,15 +20,9 @@ type VectorizeTaskInputOutput = {
 }
 
 export const createVectorizeTask = ({
-  integrationConfig,
-  opts,
-  collections,
+  knowledgePools,
 }: {
-  integrationConfig: StaticIntegrationConfig
-  opts: PayloadcmsVectorizeConfig & {
-    embeddingsCollectionSlug?: string
-  }
-  collections: Partial<Record<CollectionSlug, CollectionVectorizeOption>>
+  knowledgePools: Record<KnowledgePoolName, KnowledgePoolDynamicConfig>
 }) => {
   /**
    * Vectorize Task Configuration
@@ -41,17 +32,24 @@ export const createVectorizeTask = ({
   const processVectorizationTask: TaskConfig<VectorizeTaskInputOutput> = {
     slug: 'payloadcms-vectorize:vectorize',
     handler: async ({ input, req }): Promise<TaskHandlerResult<VectorizeTaskInputOutput>> => {
-      if (!input.collection) {
-        throw new Error('[payloadcms-vectorize] collection is required')
+      if (!input.collection) throw new Error('[payloadcms-vectorize] collection is required')
+      if (!input.knowledgePool) throw new Error('[payloadcms-vectorize] knowledgePool is required')
+
+      const dynamicConfig = knowledgePools[input.knowledgePool]
+      if (!dynamicConfig) {
+        throw new Error(
+          `[payloadcms-vectorize] knowledgePool "${input.knowledgePool}" not found in dynamic configs`,
+        )
       }
-      if (!collections[input.collection]) {
-        throw new Error('[payloadcms-vectorize] collection is required')
-      }
-      const fieldsConfig = (collections[input.collection] as CollectionVectorizeOption).fields
+
       await runVectorizeTask({
         payload: req.payload,
-        pluginOptions: { ...opts, ...integrationConfig },
-        job: { doc: input.doc, collection: input.collection, fieldsConfig },
+        poolName: input.knowledgePool,
+        dynamicConfig,
+        job: {
+          doc: input.doc,
+          collection: input.collection,
+        },
       })
       return {
         output: {
@@ -65,19 +63,24 @@ export const createVectorizeTask = ({
 
 async function runVectorizeTask(args: {
   payload: Payload
-  pluginOptions: PayloadcmsVectorizeConfig & StaticIntegrationConfig
+  poolName: KnowledgePoolName
+  dynamicConfig: KnowledgePoolDynamicConfig
   job: {
     doc: Record<string, any>
     collection: string
-    fieldsConfig: Record<string, FieldVectorizeOption>
   }
 }) {
-  const { payload, pluginOptions, job } = args
-  const embeddingsSlug = pluginOptions.embeddingsSlugOverride || DEFAULT_EMBEDDINGS_COLLECTION
-  const embeddingVersion = pluginOptions.embeddingVersion
+  const { payload, poolName, dynamicConfig, job } = args
+  const embeddingVersion = dynamicConfig.embeddingVersion
   const sourceDoc = job.doc
   const collection = job.collection
-  const fieldsConfig = job.fieldsConfig
+  const collectionConfig = dynamicConfig.collections[collection]
+  if (!collectionConfig) {
+    throw new Error(
+      `[payloadcms-vectorize] collection "${collection}" not configured in knowledge pool "${poolName}"`,
+    )
+  }
+  const fieldsConfig = collectionConfig.fields
 
   const isPostgres = isPostgresPayload(payload)
   if (!isPostgres) {
@@ -95,7 +98,7 @@ async function runVectorizeTask(args: {
     // Delete existing embeddings for this doc/field combination to keep one set per doc/field
     // The embeddingVersion is stored in each document and can be updated by re-vectorizing
     await payload.delete({
-      collection: embeddingsSlug,
+      collection: poolName,
       where: {
         and: [
           { sourceCollection: { equals: collection } },
@@ -112,12 +115,12 @@ async function runVectorizeTask(args: {
     )
   }
   const chunkTexts = inputs.map((input) => input.chunkText)
-  const vectors = await pluginOptions.embedDocs(chunkTexts)
+  const vectors = await dynamicConfig.embedDocs(chunkTexts)
   await Promise.all(
     vectors.map(async (vector, index) => {
       const { fieldPath, chunkIndex, chunkText } = inputs[index]
       const created = await payload.create({
-        collection: embeddingsSlug,
+        collection: poolName,
         data: {
           sourceCollection: collection,
           docId: String(sourceDoc.id),
@@ -131,7 +134,7 @@ async function runVectorizeTask(args: {
 
       const id = String(created.id)
       const literal = `[${Array.from(vector).join(',')}]`
-      const sql = `UPDATE "${embeddingsSlug}" SET embedding = $1 WHERE id = $2` as string
+      const sql = `UPDATE "${poolName}" SET embedding = $1 WHERE id = $2` as string
       try {
         await runSQL(sql, [literal, id])
       } catch (e) {

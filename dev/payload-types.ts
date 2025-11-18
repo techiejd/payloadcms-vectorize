@@ -68,8 +68,7 @@ export interface Config {
   blocks: {};
   collections: {
     posts: Post;
-    media: Media;
-    embeddings: Embedding;
+    default: Default;
     users: User;
     'payload-jobs': PayloadJob;
     'payload-locked-documents': PayloadLockedDocument;
@@ -79,8 +78,7 @@ export interface Config {
   collectionsJoins: {};
   collectionsSelect: {
     posts: PostsSelect<false> | PostsSelect<true>;
-    media: MediaSelect<false> | MediaSelect<true>;
-    embeddings: EmbeddingsSelect<false> | EmbeddingsSelect<true>;
+    default: DefaultSelect<false> | DefaultSelect<true>;
     users: UsersSelect<false> | UsersSelect<true>;
     'payload-jobs': PayloadJobsSelect<false> | PayloadJobsSelect<true>;
     'payload-locked-documents': PayloadLockedDocumentsSelect<false> | PayloadLockedDocumentsSelect<true>;
@@ -151,30 +149,12 @@ export interface Post {
   createdAt: string;
 }
 /**
- * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "media".
- */
-export interface Media {
-  id: number;
-  updatedAt: string;
-  createdAt: string;
-  url?: string | null;
-  thumbnailURL?: string | null;
-  filename?: string | null;
-  mimeType?: string | null;
-  filesize?: number | null;
-  width?: number | null;
-  height?: number | null;
-  focalX?: number | null;
-  focalY?: number | null;
-}
-/**
  * Vector embeddings for search and similarity queries. Created by the payloadcms-vectorize plugin. Embeddings cannot be added or modified, only deleted, through the admin panel. No other restrictions enforced.
  *
  * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "embeddings".
+ * via the `definition` "default".
  */
-export interface Embedding {
+export interface Default {
   id: number;
   /**
    * The collection that this embedding belongs to
@@ -324,12 +304,8 @@ export interface PayloadLockedDocument {
         value: number | Post;
       } | null)
     | ({
-        relationTo: 'media';
-        value: number | Media;
-      } | null)
-    | ({
-        relationTo: 'embeddings';
-        value: number | Embedding;
+        relationTo: 'default';
+        value: number | Default;
       } | null)
     | ({
         relationTo: 'users';
@@ -393,26 +369,9 @@ export interface PostsSelect<T extends boolean = true> {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "media_select".
+ * via the `definition` "default_select".
  */
-export interface MediaSelect<T extends boolean = true> {
-  updatedAt?: T;
-  createdAt?: T;
-  url?: T;
-  thumbnailURL?: T;
-  filename?: T;
-  mimeType?: T;
-  filesize?: T;
-  width?: T;
-  height?: T;
-  focalX?: T;
-  focalY?: T;
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "embeddings_select".
- */
-export interface EmbeddingsSelect<T extends boolean = true> {
+export interface DefaultSelect<T extends boolean = true> {
   sourceCollection?: T;
   docId?: T;
   fieldPath?: T;
