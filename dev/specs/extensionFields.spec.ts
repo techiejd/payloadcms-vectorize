@@ -3,7 +3,7 @@ import { getPayload } from 'payload'
 import { beforeAll, describe, expect, test } from 'vitest'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { buildDummyConfig, integration, plugin } from './constants.js'
-import { createTestDb } from './utils.js'
+import { createTestDb, waitForVectorizationJobs } from './utils.js'
 import { PostgresPayload } from '../../src/types.js'
 import { chunkText, chunkRichText } from 'helpers/chunkers.js'
 import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
@@ -16,12 +16,23 @@ describe('Extension fields integration tests', () => {
   beforeAll(async () => {
     await createTestDb({ dbName })
     const config = await buildDummyConfig({
+      jobs: {
+        tasks: [],
+        autoRun: [
+          {
+            cron: '*/5 * * * * *', // Run every 5 seconds
+            limit: 10,
+          },
+        ],
+      },
       collections: [
         {
           slug: 'posts',
           fields: [
             { name: 'title', type: 'text' },
             { name: 'content', type: 'richText' },
+            { name: 'category', type: 'text' },
+            { name: 'priority', type: 'number' },
           ],
         },
       ],
@@ -124,9 +135,9 @@ describe('Extension fields integration tests', () => {
 
     // Check that extension fields exist
     expect(columnsByName.category).toBeDefined()
-    expect(columnsByName.category.data_type).toBe('text')
+    expect(columnsByName.category.data_type).toBe('character varying')
     expect(columnsByName.priority).toBeDefined()
-    expect(columnsByName.priority.data_type).toBe('numeric' || 'integer')
+    expect(['numeric', 'integer']).toContain(columnsByName.priority.data_type)
   })
 
   test('extension field values are stored with embeddings', async () => {
@@ -137,11 +148,11 @@ describe('Extension fields integration tests', () => {
         content: null,
         category: 'tech',
         priority: 5,
-      },
+      } as unknown as any, // any type needed because generated types works off of payload.config.ts, and does not take into account our `buildDummyConfig`.
     })
 
-    // Wait for vectorization to complete
-    await new Promise((resolve) => setTimeout(resolve, 6000))
+    // Wait for vectorization jobs to complete
+    await waitForVectorizationJobs(payload)
 
     const embeddings = await payload.find({
       collection: 'default',

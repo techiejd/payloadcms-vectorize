@@ -24,6 +24,7 @@ import type {
   KnowledgePoolDynamicConfig,
   VectorSearchQuery,
 } from 'payloadcms-vectorize'
+import { getEmbeddingsTable } from '../drizzle/tables.js'
 
 export const vectorSearch = (
   knowledgePools: Record<KnowledgePoolName, KnowledgePoolDynamicConfig>,
@@ -84,17 +85,19 @@ async function performCosineSearch(
   limit: number = 10,
   whereClause?: Where,
 ): Promise<Array<VectorSearchResult>> {
-  const isPostgres = payload.db?.pool?.query || payload.db?.drizzle?.execute || payload.db?.adapter
+  const isPostgres = payload.db?.pool?.query || payload.db?.drizzle
 
   if (!isPostgres) {
     throw new Error('Only works with Postgres')
   }
 
-  // Access Drizzle adapter instance
-  const adapter = payload.db?.adapter
+  // In PayloadCMS, payload.db IS the adapter, and drizzle is at payload.db.drizzle
+  const adapter = payload.db
   if (!adapter) {
     throw new Error('Drizzle adapter not found')
   }
+
+  // Get drizzle instance
   const drizzle = adapter.drizzle
   if (!drizzle) {
     throw new Error('Drizzle instance not found in adapter')
@@ -105,22 +108,22 @@ async function performCosineSearch(
   if (!collectionConfig) {
     throw new Error(`Collection ${poolName} not found`)
   }
-  const tableName = adapter.tableNameMap?.get(toSnakeCase(collectionConfig.slug))
-  if (!tableName) {
-    throw new Error(
-      `[payloadcms-vectorize] Table name not found in adapter for collection "${poolName}" (slug: "${collectionConfig.slug}"). This typically indicates a configuration issue with the embeddings collection.`,
-    )
-  }
-  const table = adapter.tables[tableName]
+
+  const table = getEmbeddingsTable(poolName)
   if (!table) {
-    throw new Error(`Table ${tableName} not found in adapter`)
+    throw new Error(
+      `[payloadcms-vectorize] Embeddings table for knowledge pool "${poolName}" not registered. Ensure the plugin's afterSchemaInit hook ran and the pool exists.`,
+    )
   }
 
   // Use Drizzle's query builder with cosineDistance function
   // cosineDistance returns distance, so we calculate similarity as 1 - distance
+  // The table from fullSchema should have columns as direct properties
   const embeddingColumn = table.embedding
   if (!embeddingColumn) {
-    throw new Error(`Embedding column not found in table ${tableName}`)
+    throw new Error(
+      `Embedding column not found in table for pool "${poolName}". Available properties: ${Object.keys(table).join(', ')}`,
+    )
   }
 
   // Convert WHERE clause to Drizzle conditions
@@ -143,16 +146,21 @@ async function performCosineSearch(
   }
 
   // Build query using Drizzle's query builder
+  // Column names in the table are camelCase (docId, chunkText, etc.)
+  // but their database names are snake_case (doc_id, chunk_text, etc.)
+  // The table from fullSchema should have columns as direct properties
+  // Calculate similarity: 1 - cosineDistance (distance)
+  // Need to cast 1 to numeric to avoid "integer - vector" error
+  const distanceExpr = cosineDistance(embeddingColumn, queryEmbedding)
   let query = drizzle
     .select({
       id: table.id,
-      docId: table.docId || (table as any).doc_id,
-      chunkText: table.chunkText || (table as any).chunk_text,
-      sourceCollection: table.sourceCollection || (table as any).source_collection,
-      chunkIndex: table.chunkIndex || (table as any).chunk_index,
-      embeddingVersion: table.embeddingVersion || (table as any).embedding_version,
-      // Calculate similarity: 1 - cosineDistance (distance)
-      similarity: sql<number>`1 - ${cosineDistance(embeddingColumn, queryEmbedding)}`,
+      docId: table.docId,
+      chunkText: table.chunkText,
+      sourceCollection: table.sourceCollection,
+      chunkIndex: table.chunkIndex,
+      embeddingVersion: table.embeddingVersion,
+      similarity: sql<number>`1 - (${distanceExpr})`,
     })
     .from(table)
 
@@ -162,7 +170,8 @@ async function performCosineSearch(
   }
 
   // Order by cosine distance (ascending = most similar first) and limit
-  query = query.orderBy(cosineDistance(embeddingColumn, queryEmbedding)).limit(limit)
+  // Reuse the same distance expression for ordering
+  query = query.orderBy(distanceExpr).limit(limit)
 
   // Execute the query
   const result = await query
@@ -204,8 +213,24 @@ function convertWhereToDrizzle(where: Where, table: any, fields: any[]): any {
   for (const [fieldName, condition] of Object.entries(where)) {
     if (fieldName === 'and' || fieldName === 'or') continue
 
-    // Get the column from the table (handle both camelCase and snake_case)
-    const column = table[fieldName] || table[toSnakeCase(fieldName)]
+    // Get the column from the table
+    // Drizzle tables have columns as direct properties
+    // Try camelCase first, then snake_case as fallback
+    // Use 'in' operator to check existence, then access the property
+    let column: any = undefined
+    if (fieldName in table) {
+      column = table[fieldName]
+    } else if (toSnakeCase(fieldName) in table) {
+      column = table[toSnakeCase(fieldName)]
+    } else if (table.columns) {
+      // Fallback to table.columns if it exists
+      if (fieldName in table.columns) {
+        column = table.columns[fieldName]
+      } else if (toSnakeCase(fieldName) in table.columns) {
+        column = table.columns[toSnakeCase(fieldName)]
+      }
+    }
+
     if (!column) {
       // Field not found, skip (could be a nested field we don't support)
       continue
@@ -298,31 +323,45 @@ function convertWhereToDrizzle(where: Where, table: any, fields: any[]): any {
 }
 
 function mapRowsToResults(rows: any[]): Array<VectorSearchResult> {
-  return rows.map((row: any) => ({
-    id: String(row.id),
-    docId: String(row.docId),
-    similarity:
-      typeof row.similarity === 'number' ? row.similarity : parseFloat(String(row.similarity)),
-    chunkText: row.chunkText || '',
-    sourceCollection: row.sourceCollection || '',
-    chunkIndex:
-      typeof row.chunkIndex === 'number' ? row.chunkIndex : parseInt(String(row.chunkIndex), 10),
-    embeddingVersion: row.embeddingVersion || '',
-    // Include any extension fields that might be in the row
-    ...Object.fromEntries(
-      Object.entries(row).filter(
-        ([key]) =>
-          ![
-            'id',
-            'docId',
-            'chunkText',
-            'sourceCollection',
-            'chunkIndex',
-            'embeddingVersion',
-            'similarity',
-            'embedding',
-          ].includes(key),
+  return rows.map((row: any) => {
+    // Drizzle returns columns with the names we selected (camelCase)
+    // Handle both camelCase and snake_case for robustness
+    const docId = row.docId ?? row.doc_id
+    const chunkText = row.chunkText ?? row.chunk_text ?? ''
+    const sourceCollection = row.sourceCollection ?? row.source_collection ?? ''
+    const chunkIndex = row.chunkIndex ?? row.chunk_index
+    const embeddingVersion = row.embeddingVersion ?? row.embedding_version ?? ''
+
+    return {
+      id: String(row.id),
+      docId: String(docId),
+      similarity:
+        typeof row.similarity === 'number' ? row.similarity : parseFloat(String(row.similarity)),
+      chunkText,
+      sourceCollection,
+      chunkIndex: typeof chunkIndex === 'number' ? chunkIndex : parseInt(String(chunkIndex), 10),
+      embeddingVersion,
+      // Include any extension fields that might be in the row
+      ...Object.fromEntries(
+        Object.entries(row).filter(
+          ([key]) =>
+            ![
+              'id',
+              'docId',
+              'doc_id',
+              'chunkText',
+              'chunk_text',
+              'sourceCollection',
+              'source_collection',
+              'chunkIndex',
+              'chunk_index',
+              'embeddingVersion',
+              'embedding_version',
+              'similarity',
+              'embedding',
+            ].includes(key),
+        ),
       ),
-    ),
-  }))
+    }
+  })
 }

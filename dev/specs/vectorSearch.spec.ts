@@ -216,13 +216,12 @@ describe('Search endpoint integration tests', () => {
       // Search without WHERE - should return both
       const responseAll = await performVectorSearch(payload, sharedText)
       const jsonAll = await responseAll.json()
+
       expect(jsonAll.results.length).toBeGreaterThanOrEqual(2)
 
       // Search with WHERE clause filtering by docId - should return only one
       const responseFiltered = await performVectorSearch(payload, sharedText, 'default', {
-        where: {
-          docId: { equals: String(post1.id) },
-        },
+        docId: { equals: String(post1.id) },
       })
       const jsonFiltered = await responseFiltered.json()
       expect(jsonFiltered.results.length).toBeGreaterThan(0)

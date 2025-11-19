@@ -13,6 +13,7 @@ import { isPostgresPayload } from './types.js'
 import type { PostgresAdapterArgs } from '@payloadcms/db-postgres'
 import { createVectorizeTask } from './tasks/vectorize.js'
 import { vectorSearch } from './endpoints/vectorSearch.js'
+import { clearEmbeddingsTables, registerEmbeddingsTable } from './drizzle/tables.js'
 
 export type * from './types.js'
 
@@ -74,6 +75,9 @@ export const createVectorizeIntegration = (
     schema,
     extendTable,
   }) => {
+    // Ensure registry reflects the latest schema
+    clearEmbeddingsTables()
+
     // Extend schema for each knowledge pool
     for (const [poolName, staticConfig] of Object.entries(staticConfigs)) {
       const dims = staticConfig.dims
@@ -85,7 +89,13 @@ export const createVectorizeIntegration = (
       })
 
       const table = schema?.tables?.[poolName]
-      if (table && typeof extendTable === 'function') {
+      if (!table) {
+        throw new Error(
+          `[payloadcms-vectorize] Embeddings table "${poolName}" not found during schema initialization. Ensure the collection has been registered.`,
+        )
+      }
+
+      if (typeof extendTable === 'function') {
         extendTable({
           table,
           columns: {
@@ -93,6 +103,8 @@ export const createVectorizeIntegration = (
           },
         })
       }
+
+      registerEmbeddingsTable(poolName as KnowledgePoolName, table)
     }
 
     return schema
