@@ -1,0 +1,82 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+## 0.3.0 - 2025-11-19
+
+### Added
+
+- `extensionFields` option that lets each collection extend the embeddings table schema with arbitrary Payload fields (while protecting reserved column names).
+- `toKnowledgePool` functions replace field-based chunking and provide full control over how documents are chunked—including the ability to attach extension-field values per chunk.
+- Vector search endpoint now accepts optional `where` clauses (Payload syntax) and `limit`, enabling filtered queries against both default embedding columns and extension fields.
+- Expanded `vectorSearch` coverage for filtering, using `where` clause now possible.
+
+### Changed
+
+- Embedding deletion now occurs per document/collection pair (no `fieldPath` column).
+- Search results omit `fieldPath` and include any extension-field values that were stored with the embedding chunk.
+- Documentation updated to describe `toKnowledgePool`, extension fields, and the enhanced search API.
+
+## 0.2.0
+
+### Breaking
+
+- Introduced knowledge pools with separate static (schema) and dynamic (runtime) configurations.
+- The vector search endpoint requires a `knowledgePool` parameter to disambiguate results across pools.
+
+### Migration Notes
+
+**Before (≤0.1.x)**
+
+```ts
+const { afterSchemaInitHook, payloadcmsVectorize } = createVectorizeIntegration({
+  dims: 1536,
+  ivfflatLists: 100,
+})
+
+payloadcmsVectorize({
+  collections: {
+    posts: {
+      fields: {
+        /* ... */
+      },
+    },
+  },
+  embedDocs,
+  embedQuery,
+  embeddingVersion: 'v1.0.0',
+})
+```
+
+**After (0.2.0+)**
+
+```ts
+const { afterSchemaInitHook, payloadcmsVectorize } = createVectorizeIntegration({
+  main: {
+    dims: 1536,
+    ivfflatLists: 100,
+  },
+})
+
+payloadcmsVectorize({
+  knowledgePools: {
+    main: {
+      collections: {
+        posts: {
+          fields: {
+            /* ... */
+          },
+        },
+      },
+      embedDocs,
+      embedQuery,
+      embeddingVersion: 'v1.0.0',
+    },
+  },
+})
+```
+
+### Benefits Introduced
+
+- Multiple knowledge pools allow separate domains, embedding settings, and versioning per pool.
+- Collections can participate in multiple pools, enabling more flexible organization of embeddings.
