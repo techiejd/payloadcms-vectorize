@@ -40,9 +40,9 @@ export type KnowledgePoolDynamicConfig = {
   embeddingVersion: string
 }
 
-export type PayloadcmsVectorizeConfig = {
+export type PayloadcmsVectorizeConfig<TPoolNames extends KnowledgePoolName = KnowledgePoolName> = {
   /** Knowledge pools and their dynamic configurations */
-  knowledgePools: Record<KnowledgePoolName, KnowledgePoolDynamicConfig>
+  knowledgePools: Record<TPoolNames, KnowledgePoolDynamicConfig>
   /** Task queue name.
    * Default is payloadcms default queue (undefined)
    * You must setup the job in your payload config
@@ -105,9 +105,9 @@ export interface VectorSearchResponse {
   results: VectorSearchResult[]
 }
 
-export interface VectorSearchQuery {
+export interface VectorSearchQuery<TPoolNames extends KnowledgePoolName = KnowledgePoolName> {
   /** The knowledge pool to search in */
-  knowledgePool: KnowledgePoolName
+  knowledgePool: TPoolNames
   /** The search query string */
   query: string
   /** Optional Payload where clause to filter results. Can rely on embeddings collection fields or extension fields. */

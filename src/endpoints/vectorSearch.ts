@@ -26,15 +26,20 @@ import type {
 } from 'payloadcms-vectorize'
 import { getEmbeddingsTable } from '../drizzle/tables.js'
 
-export const vectorSearch = (
-  knowledgePools: Record<KnowledgePoolName, KnowledgePoolDynamicConfig>,
+export const createVectorSearchHandler = <TPoolNames extends KnowledgePoolName>(
+  knowledgePools: Record<TPoolNames, KnowledgePoolDynamicConfig>,
 ) => {
   const _vectorSearch: PayloadHandler = async (req) => {
     if (!req || !req.json) {
       return Response.json({ error: 'Request is required' }, { status: 400 })
     }
     try {
-      const { query, knowledgePool, where, limit = 10 }: VectorSearchQuery = await req.json()
+      const {
+        query,
+        knowledgePool,
+        where,
+        limit = 10,
+      }: VectorSearchQuery<TPoolNames> = await req.json()
       if (!query || typeof query !== 'string') {
         return Response.json({ error: 'Query is required and must be a string' }, { status: 400 })
       }
