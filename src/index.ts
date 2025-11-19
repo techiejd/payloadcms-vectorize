@@ -12,7 +12,7 @@ import type {
 import { isPostgresPayload } from './types.js'
 import type { PostgresAdapterArgs } from '@payloadcms/db-postgres'
 import { createVectorizeTask } from './tasks/vectorize.js'
-import { vectorSearch } from './endpoints/vectorSearch.js'
+import { createVectorSearchHandler } from './endpoints/vectorSearch.js'
 import { clearEmbeddingsTables, registerEmbeddingsTable } from './drizzle/tables.js'
 
 export type * from './types.js'
@@ -64,11 +64,13 @@ async function ensurePgvectorArtifacts(args: {
 // Plugin entry point
 // ==================
 
-export const createVectorizeIntegration = (
-  staticConfigs: Record<KnowledgePoolName, KnowledgePoolStaticConfig>,
+export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>(
+  staticConfigs: Record<TPoolNames, KnowledgePoolStaticConfig>,
 ): {
   afterSchemaInitHook: Required<PostgresAdapterArgs>['afterSchemaInit'][number]
-  payloadcmsVectorize: (pluginOptions: PayloadcmsVectorizeConfig) => (config: Config) => Config
+  payloadcmsVectorize: (
+    pluginOptions: PayloadcmsVectorizeConfig<TPoolNames>,
+  ) => (config: Config) => Config
 } => {
   // Augment the generated schema so push/migrations are aware of our custom columns
   const afterSchemaInitHook: Required<PostgresAdapterArgs>['afterSchemaInit'][number] = async ({
@@ -79,7 +81,8 @@ export const createVectorizeIntegration = (
     clearEmbeddingsTables()
 
     // Extend schema for each knowledge pool
-    for (const [poolName, staticConfig] of Object.entries(staticConfigs)) {
+    for (const poolName in staticConfigs) {
+      const staticConfig = staticConfigs[poolName]
       const dims = staticConfig.dims
 
       const vectorType = customType({
@@ -110,13 +113,13 @@ export const createVectorizeIntegration = (
     return schema
   }
   const payloadcmsVectorize =
-    (pluginOptions: PayloadcmsVectorizeConfig) =>
+    (pluginOptions: PayloadcmsVectorizeConfig<TPoolNames>) =>
     (config: Config): Config => {
       // Ensure collections array exists
       config.collections = [...(config.collections || [])]
 
       // Validate static/dynamic configs share the same pool names
-      for (const poolName of Object.keys(pluginOptions.knowledgePools)) {
+      for (const poolName in pluginOptions.knowledgePools) {
         if (!staticConfigs[poolName]) {
           throw new Error(
             `[payloadcms-vectorize] Knowledge pool "${poolName}" not found in static configs`,
@@ -124,9 +127,12 @@ export const createVectorizeIntegration = (
         }
       }
 
-      const unusedStaticPools = Object.keys(staticConfigs).filter(
-        (poolName) => !pluginOptions.knowledgePools[poolName],
-      )
+      const unusedStaticPools: TPoolNames[] = []
+      for (const poolName in staticConfigs) {
+        if (!pluginOptions.knowledgePools[poolName]) {
+          unusedStaticPools.push(poolName)
+        }
+      }
       if (unusedStaticPools.length > 0) {
         throw new Error(
           `[payloadcms-vectorize] Static knowledge pool(s) ${unusedStaticPools.join(', ')} lack dynamic configuration`,
@@ -143,7 +149,8 @@ export const createVectorizeIntegration = (
       >()
 
       // Process each knowledge pool
-      for (const [poolName, dynamicConfig] of Object.entries(pluginOptions.knowledgePools)) {
+      for (const poolName in pluginOptions.knowledgePools) {
+        const dynamicConfig = pluginOptions.knowledgePools[poolName]
         // Collect all extensionFields from all collections in this pool
         const allExtensionFields: any[] = []
         for (const collectionConfig of Object.values(dynamicConfig.collections)) {
@@ -252,7 +259,8 @@ export const createVectorizeIntegration = (
         if (incomingOnInit) await incomingOnInit(payload)
 
         // Ensure pgvector artifacts for each knowledge pool
-        for (const [poolName, staticConfig] of Object.entries(staticConfigs)) {
+        for (const poolName in staticConfigs) {
+          const staticConfig = staticConfigs[poolName]
           await ensurePgvectorArtifacts({
             payload,
             tableName: poolName,
@@ -270,7 +278,7 @@ export const createVectorizeIntegration = (
           {
             path,
             method: 'post',
-            handler: vectorSearch(pluginOptions.knowledgePools),
+            handler: createVectorSearchHandler(pluginOptions.knowledgePools),
           },
         ]
       }

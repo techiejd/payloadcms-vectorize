@@ -14,7 +14,7 @@ import {
 import { createTestDb, waitForVectorizationJobs } from './utils.js'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { chunkRichText, chunkText } from 'helpers/chunkers.js'
-import { vectorSearch } from '../../src/endpoints/vectorSearch.js'
+import { createVectorSearchHandler } from '../../src/endpoints/vectorSearch.js'
 import type { KnowledgePoolDynamicConfig } from 'payloadcms-vectorize'
 
 const embedFn = makeDummyEmbedQuery(DIMS)
@@ -35,7 +35,7 @@ async function performVectorSearch(
       embeddingVersion: testEmbeddingVersion,
     },
   }
-  const searchHandler = vectorSearch(knowledgePools)
+  const searchHandler = createVectorSearchHandler(knowledgePools)
 
   // Create a mock request object
   const mockRequest = {

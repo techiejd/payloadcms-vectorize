@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.3.1 - 2025-01-XX
+
+### Changed
+
+- Improved type safety: `PayloadcmsVectorizeConfig` is now generic and enforces that `knowledgePools` keys match `staticConfigs` keys exactly.
+
 ## 0.3.0 - 2025-11-19
 
 ### Added
