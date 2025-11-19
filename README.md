@@ -4,14 +4,14 @@ A Payload CMS plugin that adds vector search capabilities to your collections us
 
 ## Features
 
-- 🔍 **Semantic Search**: Vectorize any collection field for intelligent content discovery
-- 🚀 **Automatic Vectorization**: Documents are automatically vectorized when created or updated
+- 🔍 **Semantic Search**: Vectorize any collection for intelligent content discovery
+- 🚀 **Automatic**: Documents are automatically vectorized when created or updated, and vectors are deleted as soon as the document is deleted.
 - 📊 **PostgreSQL Integration**: Built on pgvector for high-performance vector operations
 - ⚡ **Background Processing**: Uses Payload's job system for non-blocking vectorization
-- 🎯 **Flexible Chunking**: You provide the custom chunkers for different field types (text, rich text, etc.)
-- 🔧 **Configurable**: Choose which collections and fields to vectorize
-- 🌐 **REST API**: Built-in vector-search endpoint for querying vectorized content
-- 🏊 **Multiple Knowledge Pools**: Separate knowledge pools with independent configurations (dims, ivfflatLists, embedding functions)
+- 🎯 **Flexible Chunking**: Drive chunk creation yourself with `toKnowledgePool` functions so you can combine any fields or content types
+- 🧩 **Extensible Schema**: Attach custom `extensionFields` to the embeddings collection and persist values per chunk and use for querying.
+- 🌐 **REST API**: Built-in vector-search endpoint with Payload-style `where` filtering and configurable limits
+- 🏊 **Multiple Knowledge Pools**: Separate knowledge pools with independent configurations (dims, ivfflatLists, embedding functions) and needs.
 
 ## Prerequisites
 
@@ -27,58 +27,77 @@ pnpm add payloadcms-vectorize
 
 ## Quick Start
 
-### 1. Install pgvector
+### 0. Install pgvector
 
-Make sure your PostgreSQL database has the pgvector extension:
+The plugin automatically creates the `vector` extension when Payload initializes. However, your PostgreSQL database user must have permission to create extensions. If your user doesn't have these permissions, you may need to manually create the extension once:
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;
 ```
 
-### 2. Configure the Plugin
+**Note:** Most managed PostgreSQL services (like AWS RDS, Supabase, etc.) require superuser privileges or specific extension permissions. If you encounter permission errors, contact your database administrator or check your service's documentation.
+
+### 1. Configure the Plugin
 
 ```typescript
 import { buildConfig } from 'payload'
+import type { Payload } from 'payload'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { createVectorizeIntegration } from 'payloadcms-vectorize'
+import type { ToKnowledgePoolFn } from 'payloadcms-vectorize'
 
 // Configure your embedding functions
 const embedDocs = async (texts: string[]) => {
   // Your embedding logic here
-  return texts.map(text => /* vector array */)
+  return texts.map((text) => /* vector array */)
 }
 
-const embedQuery = async (text: string,
-  payload: Payload,) => {
+const embedQuery = async (text: string) => {
   // Your query embedding logic here
   return /* vector array */
 }
 
-// Configure your chunking functions
-const chunkText = async (text: string,
-  payload: Payload) => {
+// Optional chunker helpers (see dev/helpers/chunkers.ts for ideas)
+const chunkText = async (text: string, payload: Payload) => {
   return /* string array */
 }
 
-// See examples under chunkers.ts
-const chunkRichText = async (richText: SerializedEditorState,
-  payload: Payload) => {
+const chunkRichText = async (richText: any, payload: Payload) => {
   return /* string array */
+}
+
+// Convert a document into chunks + extension-field values
+const postsToKnowledgePool: ToKnowledgePoolFn = async (doc, payload) => {
+  const entries: Array<{ chunk: string; category?: string; priority?: number }> = []
+
+  const titleChunks = await chunkText(doc.title ?? '', payload)
+  titleChunks.forEach((chunk) =>
+    entries.push({
+      chunk,
+      category: doc.category ?? 'general',
+      priority: Number(doc.priority ?? 0),
+    }),
+  )
+
+  const contentChunks = await chunkRichText(doc.content, payload)
+  contentChunks.forEach((chunk) =>
+    entries.push({
+      chunk,
+      category: doc.category ?? 'general',
+      priority: Number(doc.priority ?? 0),
+    }),
+  )
+
+  return entries
 }
 
 // Create the integration with static configs (dims, ivfflatLists)
 const { afterSchemaInitHook, payloadcmsVectorize } = createVectorizeIntegration({
-  // Note limitation: Changing these values is currently not supported.
-  // Migration is necessary.
+  // Note limitation: Changing these values requires a migration.
   main: {
     dims: 1536, // Vector dimensions
     ivfflatLists: 100, // IVFFLAT index parameter
   },
-  // You can add more knowledge pools with different static configs
-  // products: {
-  //   dims: 384,
-  //   ivfflatLists: 50,
-  // },
 })
 
 export default buildConfig({
@@ -91,43 +110,32 @@ export default buildConfig({
   }),
   plugins: [
     payloadcmsVectorize({
-      // Knowledge pools - dynamic configs (collections, embedding functions)
       knowledgePools: {
         main: {
-          // The collection-fields you want vectorized in this pool
           collections: {
             posts: {
-              fields: {
-                title: { chunker: chunkText },
-                content: { chunker: chunkRichText },
-              },
+              toKnowledgePool: postsToKnowledgePool,
+              extensionFields: [
+                { name: 'category', type: 'text' },
+                { name: 'priority', type: 'number' },
+              ],
             },
           },
           embedDocs,
           embedQuery,
           embeddingVersion: 'v1.0.0',
         },
-        // You can add more knowledge pools with different dynamic configs
-        // products: {
-        //   collections: { ... },
-        //   embedDocs: differentEmbedDocs,
-        //   embedQuery: differentEmbedQuery,
-        //   embeddingVersion: 'v2.0.0',
-        // },
       },
       // Optional plugin options:
       // queueName: 'custom-queue',
-      // endpointOverrides: {
-      //   path: '/custom-vector-search',
-      //   enabled: true,
-      // },
+      // endpointOverrides: { path: '/custom-vector-search', enabled: true }, // will be /api/custom-vector-search
       // disabled: false,
     }),
   ],
 })
 ```
 
-### 3. Search Your Content
+### 2. Search Your Content
 
 The plugin automatically creates a `/api/vector-search` endpoint:
 
@@ -136,13 +144,18 @@ const response = await fetch('/api/vector-search', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
-    query: 'What is machine learning?', // Required: query
-    knowledgePool: 'main', // Required: specify which knowledge pool to search
+    query: 'What is machine learning?', // Required
+    knowledgePool: 'main', // Required
+    where: {
+      category: { equals: 'guides' }, // Optional Payload-style filter
+    },
+    limit: 5, // Optional (defaults to 10)
   }),
 })
 
-const results = await response.json()
-// Returns: { results: [{ id, similarity, sourceCollection, docId, fieldPath, chunkText, ... }] }
+const { results } = await response.json()
+// Each result contains: id, similarity, sourceCollection, docId, chunkIndex, chunkText,
+// embeddingVersion, and any extensionFields you attached (e.g., category, priority).
 ```
 
 ## Configuration Options
@@ -169,27 +182,34 @@ The embeddings collection name will be the same as the knowledge pool name.
 
 **2. Dynamic Config** (passed to `payloadcmsVectorize`):
 
-- `collections`: `Record<string, CollectionVectorizeOption>` - Collections and fields to vectorize
+- `collections`: `Record<string, CollectionVectorizeOption>` - Collections and their chunking/extension configs
 - `embedDocs`: `EmbedDocsFn` - Function to embed multiple documents
 - `embedQuery`: `EmbedQueryFn` - Function to embed search queries
 - `embeddingVersion`: `string` - Version string for tracking model changes
 
+#### CollectionVectorizeOption
+
+- `toKnowledgePool (doc, payload)` – return an array of `{ chunk, ...extensionFieldValues }`. Each object becomes one embedding row and the index in the array determines `chunkIndex`.
+- `extensionFields?` – standard Payload `Field[]` merged onto the embeddings collection. These values can be written from `toKnowledgePool` output and queried later (including via the `where` parameter).
+
+Reserved column names: `sourceCollection`, `docId`, `chunkIndex`, `chunkText`, `embeddingVersion`. Avoid reusing them in `extensionFields`.
+
 ## Chunkers
 
-The plugin includes examples chunkers for common field types:
-// Not yet provided publicly because maintenance is not guaranteed
-
-- `chunkText`: For plain text fields
-- `chunkRichText`: For Lexical rich text fields
-
-You must create (or copy) custom chunkers:
+Use chunker helpers (see `dev/helpers/chunkers.ts`) to keep `toKnowledgePool` implementations focused on orchestration. A `toKnowledgePool` can combine multiple chunkers, enrich each chunk with metadata, and return everything the embeddings collection needs.
 
 ```typescript
-const customChunker = async (value: any, payload: Payload) => {
-  // Your custom chunking logic
-  return ['chunk1', 'chunk2', 'chunk3']
+const postsToKnowledgePool: ToKnowledgePoolFn = async (doc, payload) => {
+  const chunks = await chunkText(doc.title ?? '', payload)
+
+  return chunks.map((chunk) => ({
+    chunk,
+    category: doc.category ?? 'general',
+  }))
 }
 ```
+
+Because you control the output, you can mix different field types, discard empty values, or inject any metadata that aligns with your `extensionFields`.
 
 ## Example
 
@@ -230,21 +250,28 @@ Search for similar content using vector similarity.
 
 **Request Body:**
 
-```json
+```jsonc
 {
   "query": "Your search query",
-  "knowledgePool": "main"
+  "knowledgePool": "main",
+  "where": {
+    "category": { "equals": "guides" },
+    "priority": { "gte": 3 },
+  },
+  "limit": 5,
 }
 ```
 
-**Parameters:**
+**Parameters**
 
-- `query` (required): The search query string
-- `knowledgePool` (required): The knowledge pool identifier to search in
+- `query` (required): Search query string
+- `knowledgePool` (required): Knowledge pool identifier to search in
+- `where` (optional): Payload-style `Where` clause evaluated against the embeddings collection + any `extensionFields`
+- `limit` (optional): Maximum results to return (defaults to `10`)
 
 **Response:**
 
-```json
+```jsonc
 {
   "results": [
     {
@@ -252,81 +279,19 @@ Search for similar content using vector similarity.
       "similarity": 0.85,
       "sourceCollection": "posts",
       "docId": "post_id",
-      "fieldPath": "content",
       "chunkIndex": 0,
       "chunkText": "Relevant text chunk",
-      "embeddingVersion": "v1.0.0"
-    }
-  ]
+      "embeddingVersion": "v1.0.0",
+      "category": "guides", // example extension field
+      "priority": 4, // example extension field
+    },
+  ],
 }
 ```
 
-## Migration from v0.1.0 to v0.2.0
+## Changelog
 
-Version 0.2.0 introduces support for multiple knowledge pools. This is a **breaking change** that requires updating your configuration.
-
-### Before (v0.1.0):
-
-```typescript
-const { afterSchemaInitHook, payloadcmsVectorize } = createVectorizeIntegration({
-  dims: 1536,
-  ivfflatLists: 100,
-})
-
-payloadcmsVectorize({
-  collections: {
-    posts: { fields: { ... } },
-  },
-  embedDocs,
-  embedQuery,
-  embeddingVersion: 'v1.0.0',
-})
-```
-
-### After (v0.2.0):
-
-```typescript
-// Static configs (schema-related) passed to createVectorizeIntegration
-const { afterSchemaInitHook, payloadcmsVectorize } = createVectorizeIntegration({
-  main: {
-    dims: 1536,
-    ivfflatLists: 100,
-  },
-})
-
-// Dynamic configs (runtime behavior) passed to payloadcmsVectorize
-payloadcmsVectorize({
-  knowledgePools: {
-    main: {
-      collections: {
-        posts: { fields: { ... } },
-      },
-      embedDocs,
-      embedQuery,
-      embeddingVersion: 'v1.0.0',
-    },
-  },
-})
-```
-
-### API Changes
-
-The vector search endpoint now requires a `knowledgePool` parameter:
-
-```typescript
-// Before
-{ query: 'search term' }
-
-// After
-{ query: 'search term', knowledgePool: 'main' }
-```
-
-### Benefits of Multiple Knowledge Pools
-
-- **Separate knowledge domains**: Keep different types of content in separate pools
-- **Different technical requirements**: Each pool can have different `dims`, `ivfflatLists`, and embedding functions
-- **Flexible organization**: Collections can appear in multiple pools if needed
-- **Independent versioning**: Each pool can track its own embedding model version
+See [CHANGELOG.md](./CHANGELOG.md) for release history, migration notes, and upgrade guides.
 
 ## Requirements
 
@@ -360,6 +325,11 @@ The more detailed your issue, the better I can understand and address your needs
 
 ## 🗺️ Roadmap
 
+Thank you for the stars! The following updates have been completed:
+
+- **Multiple Knowledge Pools**: You can create separate knowledge pools with independent configurations (dims, ivfflatLists, embedding functions) and needs. Each pool operates independently, allowing you to organize your vectorized content by domain, use case, or any other criteria that makes sense for your application.
+- **More expressive queries**: Added ability to change query limit, search on certain collections or certain fields
+
 The following features are planned for future releases based on community interest and stars:
 
 - **Migrations for vector dimensions**: Easy migration tools for changing vector dimensions and/or ivfflatLists after initial setup
@@ -367,6 +337,5 @@ The following features are planned for future releases based on community intere
 - **Vercel support**: Optimized deployment and configuration for Vercel hosting
 - **Batch embedding**: More efficient bulk embedding operations for large datasets
 - **'Embed all' button**: Admin UI button to re-embed all content after embeddingVersion changes
-- **More expressive queries**: Add ability to change query limit, search on certain collections or certain fields.
 
 **Want to see these features sooner?** Star this repository and open issues for the features you need most!

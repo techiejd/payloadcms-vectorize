@@ -165,11 +165,7 @@ export interface Default {
    */
   docId: string;
   /**
-   * The field path that was vectorized (e.g., "title", "content")
-   */
-  fieldPath: string;
-  /**
-   * The index of this chunk within the field
+   * The index of this chunk
    */
   chunkIndex: number;
   /**
@@ -374,7 +370,6 @@ export interface PostsSelect<T extends boolean = true> {
 export interface DefaultSelect<T extends boolean = true> {
   sourceCollection?: T;
   docId?: T;
-  fieldPath?: T;
   chunkIndex?: T;
   chunkText?: T;
   embeddingVersion?: T;

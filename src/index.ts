@@ -13,6 +13,7 @@ import { isPostgresPayload } from './types.js'
 import type { PostgresAdapterArgs } from '@payloadcms/db-postgres'
 import { createVectorizeTask } from './tasks/vectorize.js'
 import { vectorSearch } from './endpoints/vectorSearch.js'
+import { clearEmbeddingsTables, registerEmbeddingsTable } from './drizzle/tables.js'
 
 export type * from './types.js'
 
@@ -74,6 +75,9 @@ export const createVectorizeIntegration = (
     schema,
     extendTable,
   }) => {
+    // Ensure registry reflects the latest schema
+    clearEmbeddingsTables()
+
     // Extend schema for each knowledge pool
     for (const [poolName, staticConfig] of Object.entries(staticConfigs)) {
       const dims = staticConfig.dims
@@ -85,7 +89,13 @@ export const createVectorizeIntegration = (
       })
 
       const table = schema?.tables?.[poolName]
-      if (table && typeof extendTable === 'function') {
+      if (!table) {
+        throw new Error(
+          `[payloadcms-vectorize] Embeddings table "${poolName}" not found during schema initialization. Ensure the collection has been registered.`,
+        )
+      }
+
+      if (typeof extendTable === 'function') {
         extendTable({
           table,
           columns: {
@@ -93,6 +103,8 @@ export const createVectorizeIntegration = (
           },
         })
       }
+
+      registerEmbeddingsTable(poolName as KnowledgePoolName, table)
     }
 
     return schema
@@ -132,8 +144,16 @@ export const createVectorizeIntegration = (
 
       // Process each knowledge pool
       for (const [poolName, dynamicConfig] of Object.entries(pluginOptions.knowledgePools)) {
-        // Add the embeddings collection for this knowledge pool
-        const embeddingsCollection = createEmbeddingsCollection(poolName)
+        // Collect all extensionFields from all collections in this pool
+        const allExtensionFields: any[] = []
+        for (const collectionConfig of Object.values(dynamicConfig.collections)) {
+          if (collectionConfig?.extensionFields) {
+            allExtensionFields.push(...collectionConfig.extensionFields)
+          }
+        }
+
+        // Add the embeddings collection for this knowledge pool with extensionFields
+        const embeddingsCollection = createEmbeddingsCollection(poolName, allExtensionFields)
         if (!config.collections.find((c) => c.slug === poolName)) {
           config.collections.push(embeddingsCollection)
         }
@@ -190,7 +210,6 @@ export const createVectorizeIntegration = (
                     doc,
                     collection: collectionSlug,
                     knowledgePool: pool,
-                    fieldsConfig: collectionConfig.fields,
                   },
                   req: req,
                   ...(pluginOptions.queueName ? { queue: pluginOptions.queueName } : {}),

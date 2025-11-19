@@ -1,23 +1,18 @@
-import type { CollectionSlug, Payload } from 'payload'
-import type { SerializedEditorState } from '@payloadcms/richtext-lexical/lexical'
+import type { CollectionSlug, Payload, Field, Where } from 'payload'
 
 export type EmbedDocsFn = (texts: string[]) => Promise<number[][] | Float32Array[]>
 export type EmbedQueryFn = (text: string) => Promise<number[] | Float32Array>
 
-export type ChunkerFn =
-  | ((text: string, payload: Payload) => string[])
-  | ((text: string, payload: Payload) => Promise<string[]>)
-  | ((richText: SerializedEditorState, payload: Payload) => string[])
-  | ((richText: SerializedEditorState, payload: Payload) => Promise<string[]>)
-
-export type FieldVectorizeOption = {
-  /** Required per-field chunker override */
-  chunker: ChunkerFn
-}
+export type ToKnowledgePoolFn = (
+  doc: Record<string, any>,
+  payload: Payload,
+) => Promise<Array<{ chunk: string; [key: string]: any }>>
 
 export type CollectionVectorizeOption = {
-  /** Map of field paths to enable vectorization */
-  fields: Record<string, FieldVectorizeOption>
+  /** Function that converts a document to an array of chunks with optional extension field values */
+  toKnowledgePool: ToKnowledgePoolFn
+  /** Optional fields to extend the embeddings collection schema */
+  extensionFields?: Field[]
 }
 
 /** Knowledge pool name identifier */
@@ -92,7 +87,7 @@ export type VectorizeTaskArgs = {
   doc: Record<string, any>
   collection: string
   knowledgePool: KnowledgePoolName
-  fieldsConfig: Record<string, FieldVectorizeOption>
+  toKnowledgePoolFn: ToKnowledgePoolFn
 }
 
 export interface VectorSearchResult {
@@ -100,10 +95,10 @@ export interface VectorSearchResult {
   similarity: number
   sourceCollection: string // The collection that this embedding belongs to
   docId: string // The ID of the source document
-  fieldPath: string // The field path that was vectorized (e.g., "title", "content")
-  chunkIndex: number // The index of this chunk within the field
+  chunkIndex: number // The index of this chunk
   chunkText: string // The original text that was vectorized
   embeddingVersion: string // The version of the embedding model used
+  [key: string]: any // Extension fields and other dynamic fields
 }
 
 export interface VectorSearchResponse {
@@ -115,8 +110,10 @@ export interface VectorSearchQuery {
   knowledgePool: KnowledgePoolName
   /** The search query string */
   query: string
-  // TODO(techiejd): Expand on query API
-  // add support for particular collections, fields, etc.
+  /** Optional Payload where clause to filter results. Can rely on embeddings collection fields or extension fields. */
+  where?: Where
+  /** Optional limit for number of results (default: 10) */
+  limit?: number
 }
 
 export type JobContext = {

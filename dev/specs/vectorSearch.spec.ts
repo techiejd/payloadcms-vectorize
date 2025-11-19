@@ -24,6 +24,8 @@ async function performVectorSearch(
   payload: Payload,
   query: any,
   knowledgePool: string = 'default',
+  where?: any,
+  limit?: number,
 ): Promise<Response> {
   const knowledgePools: Record<string, KnowledgePoolDynamicConfig> = {
     default: {
@@ -37,7 +39,12 @@ async function performVectorSearch(
 
   // Create a mock request object
   const mockRequest = {
-    json: async () => ({ query, knowledgePool }),
+    json: async () => ({
+      query,
+      knowledgePool,
+      ...(where ? { where } : {}),
+      ...(limit ? { limit } : {}),
+    }),
     payload,
   } as any
 
@@ -83,9 +90,19 @@ describe('Search endpoint integration tests', () => {
             default: {
               collections: {
                 posts: {
-                  fields: {
-                    title: { chunker: chunkText },
-                    content: { chunker: chunkRichText },
+                  toKnowledgePool: async (doc, payload) => {
+                    const chunks: Array<{ chunk: string }> = []
+                    // Process title
+                    if (doc.title) {
+                      const titleChunks = chunkText(doc.title)
+                      chunks.push(...titleChunks.map((chunk) => ({ chunk })))
+                    }
+                    // Process content
+                    if (doc.content) {
+                      const contentChunks = await chunkRichText(doc.content, payload)
+                      chunks.push(...contentChunks.map((chunk) => ({ chunk })))
+                    }
+                    return chunks
                   },
                 },
               },
@@ -125,7 +142,6 @@ describe('Search endpoint integration tests', () => {
         expect.objectContaining({
           sourceCollection: 'posts',
           docId: String(post.id),
-          fieldPath: 'title',
           chunkIndex: 0,
           chunkText: titleAndQuery,
           embeddingVersion: testEmbeddingVersion,
@@ -171,5 +187,45 @@ describe('Search endpoint integration tests', () => {
     const error = await response.json()
     expect(error).toHaveProperty('error')
     expect(error.error).toContain('Query is required and must be a string')
+  })
+
+  describe('where', () => {
+    test('filters results by extensionFields using WHERE clause', async () => {
+      const sharedText = 'Shared searchable content'
+
+      // Create two posts with same text but different categories
+      const post1 = await payload.create({
+        collection: 'posts',
+        data: {
+          title: sharedText,
+          content: null,
+        },
+      })
+
+      const post2 = await payload.create({
+        collection: 'posts',
+        data: {
+          title: sharedText,
+          content: null,
+        },
+      })
+
+      // Wait for vectorization jobs to complete
+      await waitForVectorizationJobs(payload)
+
+      // Search without WHERE - should return both
+      const responseAll = await performVectorSearch(payload, sharedText)
+      const jsonAll = await responseAll.json()
+
+      expect(jsonAll.results.length).toBeGreaterThanOrEqual(2)
+
+      // Search with WHERE clause filtering by docId - should return only one
+      const responseFiltered = await performVectorSearch(payload, sharedText, 'default', {
+        docId: { equals: String(post1.id) },
+      })
+      const jsonFiltered = await responseFiltered.json()
+      expect(jsonFiltered.results.length).toBeGreaterThan(0)
+      expect(jsonFiltered.results.every((r: any) => r.docId === String(post1.id))).toBe(true)
+    })
   })
 })

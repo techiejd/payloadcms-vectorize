@@ -7,6 +7,10 @@ settings:
 importers:
 
   .:
+    dependencies:
+      to-snake-case:
+        specifier: 1.0.0
+        version: 1.0.0
     devDependencies:
       '@eslint/eslintrc':
         specifier: ^3.2.0
@@ -56,6 +60,9 @@ importers:
       '@types/react-dom':
         specifier: 19.1.6
         version: 19.1.6(@types/react@19.1.8)
+      '@types/to-snake-case':
+        specifier: ^1.0.2
+        version: 1.0.2
       ai:
         specifier: ^5.0.72
         version: 5.0.72(zod@4.1.12)
@@ -2456,6 +2463,9 @@ packages:
 
   '@types/stack-utils@2.0.3':
     resolution: {integrity: sha512-9aEbYZ3TbYMznPdcdr3SmIrLXwC/AKZXQeCf9Pgao5CKb8CyHuEX5jzWPTkvregvhRJHcpRO6BFoGW9ycaOkYw==}
+
+  '@types/to-snake-case@1.0.2':
+    resolution: {integrity: sha512-uWcU4i5CsTPECCaqPSzmgdAa2wDFjmHw96RAy6kImMp9hmpn/XLocxNEO2PWoUFNbkV/QwKukfDwVN7bcHXNPg==}
 
   '@types/trusted-types@1.0.6':
     resolution: {integrity: sha512-230RC8sFeHoT6sSUlRO6a8cAnclO06eeiq1QDfiv2FGCLWFvvERWgwIQD4FWqD9A69BN7Lzee4OXwoMVnnsWDw==}
@@ -9045,6 +9055,8 @@ snapshots:
       '@types/node': 18.19.127
 
   '@types/stack-utils@2.0.3': {}
+
+  '@types/to-snake-case@1.0.2': {}
 
   '@types/trusted-types@1.0.6': {}
 
