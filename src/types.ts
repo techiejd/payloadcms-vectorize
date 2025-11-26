@@ -11,8 +11,6 @@ export type ToKnowledgePoolFn = (
 export type CollectionVectorizeOption = {
   /** Function that converts a document to an array of chunks with optional extension field values */
   toKnowledgePool: ToKnowledgePoolFn
-  /** Optional fields to extend the embeddings collection schema */
-  extensionFields?: Field[]
 }
 
 /** Knowledge pool name identifier */
@@ -38,6 +36,8 @@ export type KnowledgePoolDynamicConfig = {
   embedQuery: EmbedQueryFn
   /** Version string to track embedding model/version - stored in each embedding document */
   embeddingVersion: string
+  /** Optional fields to extend the knowledge pool collection schema */
+  extensionFields?: Field[]
 }
 
 export type PayloadcmsVectorizeConfig<TPoolNames extends KnowledgePoolName = KnowledgePoolName> = {

@@ -151,16 +151,12 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
       // Process each knowledge pool
       for (const poolName in pluginOptions.knowledgePools) {
         const dynamicConfig = pluginOptions.knowledgePools[poolName]
-        // Collect all extensionFields from all collections in this pool
-        const allExtensionFields: any[] = []
-        for (const collectionConfig of Object.values(dynamicConfig.collections)) {
-          if (collectionConfig?.extensionFields) {
-            allExtensionFields.push(...collectionConfig.extensionFields)
-          }
-        }
 
         // Add the embeddings collection for this knowledge pool with extensionFields
-        const embeddingsCollection = createEmbeddingsCollection(poolName, allExtensionFields)
+        const embeddingsCollection = createEmbeddingsCollection(
+          poolName,
+          dynamicConfig.extensionFields,
+        )
         if (!config.collections.find((c) => c.slug === poolName)) {
           config.collections.push(embeddingsCollection)
         }
