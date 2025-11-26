@@ -1,4 +1,4 @@
-import type { PayloadHandler, Where } from 'payload'
+import type { BasePayload, PayloadHandler, Where } from 'payload'
 import {
   sql,
   cosineDistance,
@@ -84,7 +84,7 @@ export const createVectorSearchHandler = <TPoolNames extends KnowledgePoolName>(
 }
 
 async function performCosineSearch(
-  payload: any,
+  payload: BasePayload,
   queryEmbedding: number[],
   poolName: KnowledgePoolName,
   limit: number = 10,
@@ -157,17 +157,33 @@ async function performCosineSearch(
   // Calculate similarity: 1 - cosineDistance (distance)
   // Need to cast 1 to numeric to avoid "integer - vector" error
   const distanceExpr = cosineDistance(embeddingColumn, queryEmbedding)
-  let query = drizzle
-    .select({
-      id: table.id,
-      docId: table.docId,
-      chunkText: table.chunkText,
-      sourceCollection: table.sourceCollection,
-      chunkIndex: table.chunkIndex,
-      embeddingVersion: table.embeddingVersion,
-      similarity: sql<number>`1 - (${distanceExpr})`,
-    })
-    .from(table)
+
+  // Build select object with similarity
+  const selectObj: Record<string, any> = {
+    id: table.id, // ensure we select id explicitly
+    similarity: sql<number>`1 - (${distanceExpr})`,
+  }
+
+  console.log({
+    collectionConfigFields: collectionConfig.fields,
+    collectionConfigFlattenedFields: collectionConfig.flattenedFields,
+  })
+
+  // Add reserved + extension fields from collection config
+  for (const field of collectionConfig.fields ?? []) {
+    if (typeof field === 'object' && 'name' in field) {
+      const name = field.name as string
+      if (name in table) {
+        selectObj[name] = table[name]
+      } else if (toSnakeCase(name) in table) {
+        selectObj[name] = table[toSnakeCase(name)]
+      }
+    }
+  }
+
+  // console.log({ selectObj })
+
+  let query: any = drizzle.select(selectObj).from(table)
 
   // Add WHERE clause if provided
   if (drizzleWhere) {
@@ -181,7 +197,7 @@ async function performCosineSearch(
   // Execute the query
   const result = await query
 
-  return mapRowsToResults(result)
+  return mapRowsToResults(result, collectionConfig)
 }
 
 /**
@@ -327,46 +343,45 @@ function convertWhereToDrizzle(where: Where, table: any, fields: any[]): any {
   return and(...fieldConditions)
 }
 
-function mapRowsToResults(rows: any[]): Array<VectorSearchResult> {
+function mapRowsToResults(rows: any[], collectionConfig: any): Array<VectorSearchResult> {
+  // Collect names of fields that are typed as number on the collection
+  const numberFields = new Set<string>()
+  if (collectionConfig?.fields) {
+    for (const field of collectionConfig.fields) {
+      if (typeof field === 'object' && 'name' in field && field.type === 'number') {
+        numberFields.add(field.name as string)
+      }
+    }
+  }
+
   return rows.map((row: any) => {
     // Drizzle returns columns with the names we selected (camelCase)
     // Handle both camelCase and snake_case for robustness
-    const docId = row.docId ?? row.doc_id
-    const chunkText = row.chunkText ?? row.chunk_text ?? ''
-    const sourceCollection = row.sourceCollection ?? row.source_collection ?? ''
-    const chunkIndex = row.chunkIndex ?? row.chunk_index
-    const embeddingVersion = row.embeddingVersion ?? row.embedding_version ?? ''
+    const rawDocId = row.docId ?? row.doc_id
+    const rawChunkIndex = row.chunkIndex ?? row.chunk_index
+    const rawSimilarity = row.similarity
 
-    return {
+    const result: any = {
+      ...row,
       id: String(row.id),
-      docId: String(docId),
+      docId: String(rawDocId),
       similarity:
-        typeof row.similarity === 'number' ? row.similarity : parseFloat(String(row.similarity)),
-      chunkText,
-      sourceCollection,
-      chunkIndex: typeof chunkIndex === 'number' ? chunkIndex : parseInt(String(chunkIndex), 10),
-      embeddingVersion,
-      // Include any extension fields that might be in the row
-      ...Object.fromEntries(
-        Object.entries(row).filter(
-          ([key]) =>
-            ![
-              'id',
-              'docId',
-              'doc_id',
-              'chunkText',
-              'chunk_text',
-              'sourceCollection',
-              'source_collection',
-              'chunkIndex',
-              'chunk_index',
-              'embeddingVersion',
-              'embedding_version',
-              'similarity',
-              'embedding',
-            ].includes(key),
-        ),
-      ),
+        typeof rawSimilarity === 'number' ? rawSimilarity : parseFloat(String(rawSimilarity)),
+      chunkIndex:
+        typeof rawChunkIndex === 'number' ? rawChunkIndex : parseInt(String(rawChunkIndex), 10),
     }
+
+    // Ensure any number fields from the schema are numbers in the result
+    for (const fieldName of numberFields) {
+      const value = result[fieldName]
+      if (value != null && typeof value !== 'number') {
+        const parsed = parseFloat(String(value))
+        if (!Number.isNaN(parsed)) {
+          result[fieldName] = parsed
+        }
+      }
+    }
+
+    return result
   })
 }
