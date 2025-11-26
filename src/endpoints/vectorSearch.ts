@@ -164,11 +164,6 @@ async function performCosineSearch(
     similarity: sql<number>`1 - (${distanceExpr})`,
   }
 
-  console.log({
-    collectionConfigFields: collectionConfig.fields,
-    collectionConfigFlattenedFields: collectionConfig.flattenedFields,
-  })
-
   // Add reserved + extension fields from collection config
   for (const field of collectionConfig.fields ?? []) {
     if (typeof field === 'object' && 'name' in field) {
@@ -180,8 +175,6 @@ async function performCosineSearch(
       }
     }
   }
-
-  // console.log({ selectObj })
 
   let query: any = drizzle.select(selectObj).from(table)
 

@@ -142,8 +142,6 @@ describe('extensionFields', () => {
     )
     expect(matchingResult).toBeDefined()
 
-    console.log(matchingResult)
-
     // Verify extensionFields are present
     expect(matchingResult).toHaveProperty('category')
     expect(matchingResult).toHaveProperty('priorityLevel')
