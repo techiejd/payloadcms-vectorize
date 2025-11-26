@@ -135,6 +135,8 @@ export default buildConfig({
 })
 ```
 
+**Important:** `knowledgePools` must have **different names than your collections**—reusing a collection name for a knowledge pool **will cause schema conflicts**. (In this example, the knowledge pool is named 'main' and a collection named 'main' will be created.)
+
 ### 2. Search Your Content
 
 The plugin automatically creates a `/api/vector-search` endpoint:
