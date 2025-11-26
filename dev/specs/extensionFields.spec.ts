@@ -76,24 +76,24 @@ describe('Extension fields integration tests', () => {
                     }
                     return chunks
                   },
-                  extensionFields: [
-                    {
-                      name: 'category',
-                      type: 'text',
-                      admin: {
-                        description: 'Category for filtering embeddings',
-                      },
-                    },
-                    {
-                      name: 'priority',
-                      type: 'number',
-                      admin: {
-                        description: 'Priority level for the embedding',
-                      },
-                    },
-                  ],
                 },
               },
+              extensionFields: [
+                {
+                  name: 'category',
+                  type: 'text',
+                  admin: {
+                    description: 'Category for filtering embeddings',
+                  },
+                },
+                {
+                  name: 'priority',
+                  type: 'number',
+                  admin: {
+                    description: 'Priority level for the embedding',
+                  },
+                },
+              ],
               embedDocs: makeDummyEmbedDocs(DIMS),
               embedQuery: makeDummyEmbedQuery(DIMS),
               embeddingVersion: testEmbeddingVersion,

@@ -2,6 +2,54 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.4.0 - 2025-11-26
+
+### Breaking
+
+- **`extensionFields` moved from collection-level to knowledge-pool-level.** Previously, `extensionFields` was defined per collection inside `CollectionVectorizeOption`. Now it is defined once per knowledge pool in `KnowledgePoolDynamicConfig`. This eliminates potential field conflicts when multiple collections contribute to the same pool.
+
+### Migration
+
+**Before (≤0.3.x)**
+
+```ts
+payloadcmsVectorize({
+  knowledgePools: {
+    main: {
+      collections: {
+        posts: {
+          toKnowledgePool: postsToKnowledgePool,
+          extensionFields: [{ name: 'category', type: 'text' }],
+        },
+      },
+      embedDocs,
+      embedQuery,
+      embeddingVersion: 'v1.0.0',
+    },
+  },
+})
+```
+
+**After (0.4.0+)**
+
+```ts
+payloadcmsVectorize({
+  knowledgePools: {
+    main: {
+      collections: {
+        posts: {
+          toKnowledgePool: postsToKnowledgePool,
+        },
+      },
+      extensionFields: [{ name: 'category', type: 'text' }],
+      embedDocs,
+      embedQuery,
+      embeddingVersion: 'v1.0.0',
+    },
+  },
+})
+```
+
 ## 0.3.2 - 2025-11-26
 
 ### Fixed

@@ -115,12 +115,12 @@ export default buildConfig({
           collections: {
             posts: {
               toKnowledgePool: postsToKnowledgePool,
-              extensionFields: [
-                { name: 'category', type: 'text' },
-                { name: 'priority', type: 'number' },
-              ],
             },
           },
+          extensionFields: [
+            { name: 'category', type: 'text' },
+            { name: 'priority', type: 'number' },
+          ],
           embedDocs,
           embedQuery,
           embeddingVersion: 'v1.0.0',
@@ -164,12 +164,12 @@ const { results } = await response.json()
 
 ### Plugin Options
 
-| Option              | Type                                         | Required | Description                              |
-| ------------------- | -------------------------------------------- | -------- | ---------------------------------------- |
-| `knowledgePools`    | `Record<KnowledgePool, KnowledgePoolConfig>` | ✅       | Knowledge pools and their configurations |
-| `queueName`         | `string`                                     | ❌       | Custom queue name for background jobs    |
-| `endpointOverrides` | `object`                                     | ❌       | Customize the search endpoint            |
-| `disabled`          | `boolean`                                    | ❌       | Disable plugin while keeping schema      |
+| Option              | Type                                                | Required | Description                              |
+| ------------------- | --------------------------------------------------- | -------- | ---------------------------------------- |
+| `knowledgePools`    | `Record<KnowledgePool, KnowledgePoolDynamicConfig>` | ✅       | Knowledge pools and their configurations |
+| `queueName`         | `string`                                            | ❌       | Custom queue name for background jobs    |
+| `endpointOverrides` | `object`                                            | ❌       | Customize the search endpoint            |
+| `disabled`          | `boolean`                                           | ❌       | Disable plugin while keeping schema      |
 
 ### Knowledge Pool Config
 
@@ -184,15 +184,15 @@ The embeddings collection name will be the same as the knowledge pool name.
 
 **2. Dynamic Config** (passed to `payloadcmsVectorize`):
 
-- `collections`: `Record<string, CollectionVectorizeOption>` - Collections and their chunking/extension configs
+- `collections`: `Record<string, CollectionVectorizeOption>` - Collections and their chunking configs
 - `embedDocs`: `EmbedDocsFn` - Function to embed multiple documents
 - `embedQuery`: `EmbedQueryFn` - Function to embed search queries
 - `embeddingVersion`: `string` - Version string for tracking model changes
+- `extensionFields?`: `Field[]` - Optional fields to extend the embeddings collection schema
 
 #### CollectionVectorizeOption
 
 - `toKnowledgePool (doc, payload)` – return an array of `{ chunk, ...extensionFieldValues }`. Each object becomes one embedding row and the index in the array determines `chunkIndex`.
-- `extensionFields?` – standard Payload `Field[]` merged onto the embeddings collection. These values can be written from `toKnowledgePool` output and queried later (including via the `where` parameter).
 
 Reserved column names: `sourceCollection`, `docId`, `chunkIndex`, `chunkText`, `embeddingVersion`. Avoid reusing them in `extensionFields`.
 
