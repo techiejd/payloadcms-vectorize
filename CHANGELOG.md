@@ -2,7 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
-## 0.3.1 - 2025-01-XX
+## 0.3.2 - 2025-11-26
+
+### Fixed
+
+- Vector search endpoint now returns `extensionFields` in search results with correct types (numbers as numbers, strings as strings, etc.). Previously, extension fields were stored but not included in search results.
+
+## 0.3.1 - 2025-11-19
 
 ### Changed
 

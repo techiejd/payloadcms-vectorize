@@ -1,6 +1,8 @@
 import type { KnowledgePoolName } from '../types.js'
+import type { Table } from '@payloadcms/db-postgres/drizzle'
 
-type DrizzleTable = Record<string, any>
+// Extend Table to allow dynamic column access (for extension fields)
+type DrizzleTable = Table & Record<string, any>
 
 const embeddingsTables = new Map<KnowledgePoolName, DrizzleTable>()
 
