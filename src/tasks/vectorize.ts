@@ -133,7 +133,9 @@ async function runVectorizeTask(args: {
 
       const id = String(created.id)
       const literal = `[${Array.from(vector).join(',')}]`
-      const sql = `UPDATE "${poolName}" SET embedding = $1 WHERE id = $2` as string
+      const postgresPayload = payload as PostgresPayload
+      const schemaName = postgresPayload.db.schemaName || 'public'
+      const sql = `UPDATE "${schemaName}"."${poolName}" SET embedding = $1 WHERE id = $2` as string
       try {
         await runSQL(sql, [literal, id])
       } catch (e) {
