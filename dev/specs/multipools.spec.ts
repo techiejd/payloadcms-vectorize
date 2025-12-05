@@ -70,12 +70,11 @@ describe('Multiple knowledge pools', () => {
     expect(collections).toHaveProperty('pool2')
 
     const db = (payload as PostgresPayload).db
-    const schemaName = db.schemaName || 'public'
     const tablesRes = await db.pool?.query(
       `
         SELECT table_name
         FROM information_schema.tables
-        WHERE table_schema = '${schemaName}'
+        WHERE table_schema = 'public'
           AND table_name IN ('pool1', 'pool2')
       `,
     )
@@ -86,7 +85,7 @@ describe('Multiple knowledge pools', () => {
       `
         SELECT table_name, column_name, udt_name
         FROM information_schema.columns
-        WHERE table_schema = '${schemaName}'
+        WHERE table_schema = 'public'
           AND table_name IN ('pool1', 'pool2')
           AND column_name = 'embedding'
       `,

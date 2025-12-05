@@ -37,11 +37,10 @@ describe('Plugin integration tests', () => {
 
     // Do sql check for vector column
     const db = (payload as PostgresPayload).db
-    const schemaName = db.schemaName || 'public'
     const sql = `
       SELECT column_name, udt_name, data_type
       FROM information_schema.columns
-      WHERE table_schema = '${schemaName}' AND table_name = '${embeddingsCollection}'
+      WHERE table_schema = 'public' AND table_name = '${embeddingsCollection}'
     `
 
     let rows: any[] = []
@@ -64,15 +63,13 @@ describe('Plugin integration tests', () => {
     db: {
       pool?: { query: (sql: string, params?: any[]) => Promise<any> }
       drizzle?: { execute: (sql: string) => Promise<any> }
-      schemaName?: string
     },
     id: string,
   ) => {
-    const schemaName = (db as any).schemaName || 'public'
     if (db?.pool?.query) {
       const sql = `
         SELECT embedding, pg_typeof(embedding) AS t
-        FROM "${schemaName}"."${embeddingsCollection}"
+        FROM "${embeddingsCollection}"
         WHERE id = $1
       `
       const res = await db.pool.query(sql, [id])
@@ -80,7 +77,7 @@ describe('Plugin integration tests', () => {
     } else if (db?.drizzle?.execute) {
       // drizzle.execute may not support params; inline if needed
       const res = await db.drizzle.execute(
-        `SELECT embedding, pg_typeof(embedding) AS t FROM "${schemaName}"."${embeddingsCollection}" WHERE id = '${id}'`,
+        `SELECT embedding, pg_typeof(embedding) AS t FROM "${embeddingsCollection}" WHERE id = '${id}'`,
       )
       return Array.isArray(res) ? res[0] : res.rows?.[0]
     }

@@ -107,11 +107,10 @@ describe('Extension fields integration tests', () => {
 
   test('extension fields are added to the embeddings table schema', async () => {
     const db = (payload as PostgresPayload).db
-    const schemaName = db.schemaName || 'public'
     const sql = `
       SELECT column_name, data_type, udt_name
       FROM information_schema.columns
-      WHERE table_schema = '${schemaName}' AND table_name = 'default'
+      WHERE table_schema = 'public' AND table_name = 'default'
       ORDER BY column_name
     `
 

@@ -213,6 +213,14 @@ const postsToKnowledgePool: ToKnowledgePoolFn = async (doc, payload) => {
 
 Because you control the output, you can mix different field types, discard empty values, or inject any metadata that aligns with your `extensionFields`.
 
+## PostgreSQL Custom Schema Support
+
+The plugin reads the `schemaName` configuration from your Postgres adapter within the Payload config.  
+
+When you configure a custom schema via `postgresAdapter({ schemaName: 'custom' })`, all plugin SQL queries (for vector columns, indexes, and embeddings) are qualified with that schema name. This is useful for multi-tenant setups or when content tables live in a dedicated schema.
+
+Where schemaName is not specified within the postgresAdapter in the Payload config, the plugin falls back to `public` as is default adapter behaviour.
+
 ## Example
 
 ### Using with Voyage AI
