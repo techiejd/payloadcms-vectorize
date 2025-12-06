@@ -33,11 +33,12 @@ async function ensurePgvectorArtifacts(args: {
 
   // Now payload is typed as PostgresPayload
   const postgresPayload = payload as PostgresPayload
+  const schemaName = postgresPayload.db.schemaName || 'public'
 
   const sqls: string[] = [
     `CREATE EXTENSION IF NOT EXISTS vector;`,
-    `ALTER TABLE "${tableName}" ADD COLUMN IF NOT EXISTS embedding vector(${dims});`,
-    `CREATE INDEX IF NOT EXISTS ${tableName}_embedding_ivfflat ON "${tableName}" USING ivfflat (embedding vector_cosine_ops) WITH (lists = ${ivfflatLists});`,
+    `ALTER TABLE "${schemaName}"."${tableName}" ADD COLUMN IF NOT EXISTS embedding vector(${dims});`,
+    `CREATE INDEX IF NOT EXISTS ${tableName}_embedding_ivfflat ON "${schemaName}"."${tableName}" USING ivfflat (embedding vector_cosine_ops) WITH (lists = ${ivfflatLists});`,
   ]
 
   try {

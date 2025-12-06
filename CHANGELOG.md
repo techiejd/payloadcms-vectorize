@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.4.1 - 2025-12-02
+
+### Added
+
+- Support for custom PostgreSQL schema names. The plugin now reads `schemaName` from the Postgres adapter configuration and correctly qualifies all raw SQL queries. Defaults to `public` when not specified.
+
 ## 0.4.0 - 2025-11-26
 
 ### Breaking
