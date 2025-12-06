@@ -150,58 +150,58 @@ describe('Custom schemaName support', () => {
       expect(row.embedding).toBeDefined()
     })
   })
-})
 
-test('vector search queries embeddings from custom schema', async () => {
-  // Create a document that triggers vectorization
-  const post = await payload.create({
-    collection: 'posts',
-    data: {
-      title: 'Test Post Title',
-      content: 'Test post content for vectorization',
-    },
-  })
+  test('vector search queries embeddings from custom schema', async () => {
+    // Create a document that triggers vectorization
+    const post = await payload.create({
+      collection: 'posts',
+      data: {
+        title: 'Test Post Title',
+        content: 'Test post content for vectorization',
+      },
+    })
 
-  // Wait for vectorization jobs to complete
-  await waitForVectorizationJobs(payload)
+    // Wait for vectorization jobs to complete
+    await waitForVectorizationJobs(payload)
 
-  // Perform vector search using the search handler
-  const knowledgePools: Record<string, KnowledgePoolDynamicConfig> = {
-    default: {
-      collections: {},
-      embedDocs: makeDummyEmbedDocs(DIMS),
-      embedQuery: makeDummyEmbedQuery(DIMS),
-      embeddingVersion: testEmbeddingVersion,
-    },
-  }
-  const searchHandler = createVectorSearchHandler(knowledgePools)
-
-  const mockRequest = {
-    json: async () => ({
-      query: 'Test Post Title',
-      knowledgePool: 'default',
-    }),
-    payload,
-  } as any
-
-  const response = await searchHandler(mockRequest)
-  const json = await response.json()
-
-  // Verify search works and returns results from custom schema
-  expect(response.status).toBe(200)
-  expect(json).toHaveProperty('results')
-  expect(Array.isArray(json.results)).toBe(true)
-  expect(json.results.length).toBeGreaterThan(0)
-
-  // Verify the results match what we created
-  expect(json.results).toEqual(
-    expect.arrayContaining([
-      expect.objectContaining({
-        sourceCollection: 'posts',
-        docId: String(post.id),
-        chunkText: 'Test Post Title',
+    // Perform vector search using the search handler
+    const knowledgePools: Record<string, KnowledgePoolDynamicConfig> = {
+      default: {
+        collections: {},
+        embedDocs: makeDummyEmbedDocs(DIMS),
+        embedQuery: makeDummyEmbedQuery(DIMS),
         embeddingVersion: testEmbeddingVersion,
+      },
+    }
+    const searchHandler = createVectorSearchHandler(knowledgePools)
+
+    const mockRequest = {
+      json: async () => ({
+        query: 'Test Post Title',
+        knowledgePool: 'default',
       }),
-    ]),
-  )
+      payload,
+    } as any
+
+    const response = await searchHandler(mockRequest)
+    const json = await response.json()
+
+    // Verify search works and returns results from custom schema
+    expect(response.status).toBe(200)
+    expect(json).toHaveProperty('results')
+    expect(Array.isArray(json.results)).toBe(true)
+    expect(json.results.length).toBeGreaterThan(0)
+
+    // Verify the results match what we created
+    expect(json.results).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourceCollection: 'posts',
+          docId: String(post.id),
+          chunkText: 'Test Post Title',
+          embeddingVersion: testEmbeddingVersion,
+        }),
+      ]),
+    )
+  })
 })
