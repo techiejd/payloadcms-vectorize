@@ -1,5 +1,6 @@
 import { voyage } from 'voyage-ai-provider'
 import { embed, embedMany } from 'ai'
+import type { BulkEmbeddingsCallbacks } from 'payloadcms-vectorize'
 
 export const voyageEmbedDocs = async (texts: string[]): Promise<number[][]> => {
   const embedResult = await embedMany({
@@ -54,3 +55,38 @@ export function makeDummyEmbedDocs(dims: number) {
   }
 }
 export const testEmbeddingVersion = 'test-v1'
+
+export function makeLocalBulkEmbeddingsCallbacks(dims: number): BulkEmbeddingsCallbacks {
+  const pendingInputs = new Map<string, Array<{ id: string; text: string }>>()
+  const embedDocs = makeDummyEmbedDocs(dims)
+  return {
+    prepareBulkEmbeddings: async ({ inputs }) => {
+      const providerBatchId = `local-${dims}-${Date.now()}`
+      pendingInputs.set(providerBatchId, inputs)
+      return {
+        providerBatchId,
+        status: 'queued',
+        counts: { inputs: inputs.length },
+      }
+    },
+    pollBulkEmbeddings: async ({ providerBatchId }) => {
+      if (!pendingInputs.has(providerBatchId)) {
+        return { status: 'failed', error: 'unknown batch' }
+      }
+      return { status: 'succeeded' }
+    },
+    completeBulkEmbeddings: async ({ providerBatchId }) => {
+      const inputs = pendingInputs.get(providerBatchId) || []
+      const embeddings = await embedDocs(inputs.map((i) => i.text))
+      pendingInputs.delete(providerBatchId)
+      return {
+        status: 'succeeded',
+        outputs: embeddings.map((vector, idx) => ({
+          id: inputs[idx]?.id ?? String(idx),
+          embedding: vector,
+        })),
+        counts: { inputs: inputs.length, succeeded: embeddings.length, failed: 0 },
+      }
+    },
+  }
+}

@@ -13,6 +13,8 @@ export type CollectionVectorizeOption = {
   toKnowledgePool: ToKnowledgePoolFn
 }
 
+export type IngestMode = 'realtime' | 'bulk'
+
 /** Knowledge pool name identifier */
 export type KnowledgePoolName = string
 
@@ -38,6 +40,89 @@ export type KnowledgePoolDynamicConfig = {
   embeddingVersion: string
   /** Optional fields to extend the knowledge pool collection schema */
   extensionFields?: Field[]
+  /** Controls whether docs embed immediately or are staged for bulk runs */
+  ingestMode?: IngestMode
+  /** Provider-specific bulk embedding callbacks */
+  bulkEmbeddings?: BulkEmbeddingsCallbacks
+}
+
+export type BulkEmbeddingRunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled'
+
+export type BulkEmbeddingInput = {
+  /** Stable identifier for correlating outputs (should be unique per chunk) */
+  id: string
+  /** Raw text to embed */
+  text: string
+  metadata: {
+    sourceCollection: string
+    docId: string
+    chunkIndex: number
+    embeddingVersion: string
+    [key: string]: any
+  }
+}
+
+export type BulkEmbeddingOutput = {
+  id: string
+  embedding?: number[] | Float32Array
+  error?: string | null
+}
+
+export type BulkEmbeddingCounts = {
+  inputs?: number
+  succeeded?: number
+  failed?: number
+}
+
+export type PrepareBulkEmbeddingsArgs = {
+  payload: Payload
+  knowledgePool: KnowledgePoolName
+  embeddingVersion: string
+  inputs: BulkEmbeddingInput[]
+}
+
+export type PrepareBulkEmbeddingsResult = {
+  providerBatchId: string
+  inputFileRef?: string
+  status?: BulkEmbeddingRunStatus
+  counts?: BulkEmbeddingCounts
+}
+
+export type PollBulkEmbeddingsArgs = {
+  payload: Payload
+  knowledgePool: KnowledgePoolName
+  providerBatchId: string
+}
+
+export type PollBulkEmbeddingsResult = {
+  status: BulkEmbeddingRunStatus
+  counts?: BulkEmbeddingCounts
+  error?: string
+  /** Optional delay hint in ms before the next poll */
+  nextPollMs?: number
+}
+
+export type CompleteBulkEmbeddingsArgs = {
+  payload: Payload
+  knowledgePool: KnowledgePoolName
+  providerBatchId: string
+}
+
+export type CompleteBulkEmbeddingsResult = {
+  status: BulkEmbeddingRunStatus
+  outputs: BulkEmbeddingOutput[]
+  counts?: BulkEmbeddingCounts
+  error?: string
+}
+
+export type BulkEmbeddingsCallbacks = {
+  prepareBulkEmbeddings: (
+    args: PrepareBulkEmbeddingsArgs,
+  ) => Promise<PrepareBulkEmbeddingsResult | void>
+  pollBulkEmbeddings: (args: PollBulkEmbeddingsArgs) => Promise<PollBulkEmbeddingsResult>
+  completeBulkEmbeddings: (
+    args: CompleteBulkEmbeddingsArgs,
+  ) => Promise<CompleteBulkEmbeddingsResult | void>
 }
 
 export type PayloadcmsVectorizeConfig<TPoolNames extends KnowledgePoolName = KnowledgePoolName> = {

@@ -14,6 +14,9 @@ import type { PostgresAdapterArgs } from '@payloadcms/db-postgres'
 import { createVectorizeTask } from './tasks/vectorize.js'
 import { createVectorSearchHandler } from './endpoints/vectorSearch.js'
 import { clearEmbeddingsTables, registerEmbeddingsTable } from './drizzle/tables.js'
+import { createBulkEmbeddingsRunsCollection, BULK_EMBEDDINGS_RUNS_SLUG } from './collections/bulkEmbeddingsRuns.js'
+import { createBulkEmbedAllTask } from './tasks/bulkEmbedAll.js'
+import { createBulkEmbedHandler } from './endpoints/bulkEmbed.js'
 
 export type * from './types.js'
 
@@ -119,6 +122,12 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
       // Ensure collections array exists
       config.collections = [...(config.collections || [])]
 
+      // Ensure bulk runs collection exists once
+      const bulkRunsCollection = createBulkEmbeddingsRunsCollection()
+      if (!config.collections.find((c) => c.slug === BULK_EMBEDDINGS_RUNS_SLUG)) {
+        config.collections.push(bulkRunsCollection)
+      }
+
       // Validate static/dynamic configs share the same pool names
       for (const poolName in pluginOptions.knowledgePools) {
         if (!staticConfigs[poolName]) {
@@ -182,6 +191,10 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
         knowledgePools: pluginOptions.knowledgePools,
       })
       tasks.push(vectorizeTask)
+      const bulkEmbedTask = createBulkEmbedAllTask({
+        knowledgePools: pluginOptions.knowledgePools,
+      })
+      tasks.push(bulkEmbedTask)
 
       config.jobs = {
         ...incomingJobs,
@@ -207,6 +220,20 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
               for (const { pool, dynamic } of pools) {
                 const collectionConfig = dynamic.collections[collectionSlug]
                 if (!collectionConfig) continue
+
+                if ((dynamic.ingestMode || 'realtime') === 'bulk') {
+                  // In bulk mode, clear stale embeddings and let the bulk job recreate them
+                  await payload.delete({
+                    collection: pool,
+                    where: {
+                      and: [
+                        { sourceCollection: { equals: collectionSlug } },
+                        { docId: { equals: String(doc.id) } },
+                      ],
+                    },
+                  })
+                  continue
+                }
 
                 await payload.jobs.queue<'payloadcms-vectorize:vectorize'>({
                   task: 'payloadcms-vectorize:vectorize',
@@ -270,14 +297,20 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
       if (pluginOptions.endpointOverrides?.enabled !== false) {
         const path = pluginOptions.endpointOverrides?.path || '/vector-search'
         const inputEndpoints = config.endpoints || []
-        config.endpoints = [
+        const endpoints = [
           ...inputEndpoints,
           {
             path,
             method: 'post',
             handler: createVectorSearchHandler(pluginOptions.knowledgePools),
           },
+          {
+            path: '/vector-bulk-embed',
+            method: 'post',
+            handler: createBulkEmbedHandler(pluginOptions.knowledgePools, pluginOptions.queueName),
+          },
         ]
+        config.endpoints = endpoints
       }
 
       return config

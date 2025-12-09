@@ -6,6 +6,7 @@ A Payload CMS plugin that adds vector search capabilities to your collections us
 
 - 🔍 **Semantic Search**: Vectorize any collection for intelligent content discovery
 - 🚀 **Automatic**: Documents are automatically vectorized when created or updated, and vectors are deleted as soon as the document is deleted.
+- 🧵 **Bulk embedding**: Run “Embed all” batches that backfill only documents missing the current `embeddingVersion`.
 - 📊 **PostgreSQL Integration**: Built on pgvector for high-performance vector operations
 - ⚡ **Background Processing**: Uses Payload's job system for non-blocking vectorization
 - 🎯 **Flexible Chunking**: Drive chunk creation yourself with `toKnowledgePool` functions so you can combine any fields or content types
@@ -189,6 +190,8 @@ The embeddings collection name will be the same as the knowledge pool name.
 - `embedQuery`: `EmbedQueryFn` - Function to embed search queries
 - `embeddingVersion`: `string` - Version string for tracking model changes
 - `extensionFields?`: `Field[]` - Optional fields to extend the embeddings collection schema
+- `ingestMode?`: `'realtime' | 'bulk'` - Default `realtime` queues embeddings immediately. `bulk` skips realtime embedding, deletes stale vectors on updates, and relies on the bulk job to backfill.
+- `bulkEmbeddings?`: Provider-specific callbacks for batch embedding (`prepareBulkEmbeddings`, `pollBulkEmbeddings`, `completeBulkEmbeddings`). If omitted, the plugin falls back to using `embedDocs` in-process.
 
 #### CollectionVectorizeOption
 
@@ -299,6 +302,27 @@ Search for similar content using vector similarity.
 }
 ```
 
+### Bulk embedding (Embed all)
+
+- Each knowledge pool’s embeddings list shows an **Embed all** admin button that queues a `payloadcms-vectorize:bulk-embed-all` job.
+- Bulk runs only include documents that are missing embeddings for the pool’s current `embeddingVersion`.
+- Progress is recorded in the `vector-bulk-embeddings-runs` collection (fields: `pool`, `embeddingVersion`, `providerBatchId`, `status`, counts, timestamps, `error`).
+- Endpoint: **POST** `/api/vector-bulk-embed`
+
+```jsonc
+{
+  "knowledgePool": "main"
+}
+```
+
+Bulk callbacks are provider-agnostic:
+
+- `prepareBulkEmbeddings({ payload, knowledgePool, embeddingVersion, inputs })`
+- `pollBulkEmbeddings({ payload, knowledgePool, providerBatchId })`
+- `completeBulkEmbeddings({ payload, knowledgePool, providerBatchId })`
+
+If `bulkEmbeddings` is not provided, the plugin falls back to running `embedDocs` locally.
+
 ## Changelog
 
 See [CHANGELOG.md](./CHANGELOG.md) for release history, migration notes, and upgrade guides.
@@ -339,13 +363,12 @@ Thank you for the stars! The following updates have been completed:
 
 - **Multiple Knowledge Pools**: You can create separate knowledge pools with independent configurations (dims, ivfflatLists, embedding functions) and needs. Each pool operates independently, allowing you to organize your vectorized content by domain, use case, or any other criteria that makes sense for your application.
 - **More expressive queries**: Added ability to change query limit, search on certain collections or certain fields
+- **Bulk embed all**: Batch backfills with admin button, provider callbacks, and run tracking.
 
 The following features are planned for future releases based on community interest and stars:
 
 - **Migrations for vector dimensions**: Easy migration tools for changing vector dimensions and/or ivfflatLists after initial setup
 - **MongoDB support**: Extend vector search capabilities to MongoDB databases
 - **Vercel support**: Optimized deployment and configuration for Vercel hosting
-- **Batch embedding**: More efficient bulk embedding operations for large datasets
-- **'Embed all' button**: Admin UI button to re-embed all content after embeddingVersion changes
 
 **Want to see these features sooner?** Star this repository and open issues for the features you need most!

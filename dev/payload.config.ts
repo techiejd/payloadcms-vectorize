@@ -9,6 +9,7 @@ import {
   voyageEmbedDocs,
   voyageEmbedQuery,
   makeDummyEmbedQuery,
+  makeLocalBulkEmbeddingsCallbacks,
 } from './helpers/embed.js'
 import sharp from 'sharp'
 import { fileURLToPath } from 'url'
@@ -122,6 +123,8 @@ const buildConfigWithPostgres = async () => {
             embedDocs,
             embedQuery,
             embeddingVersion: testEmbeddingVersion,
+            ingestMode: 'realtime',
+            bulkEmbeddings: makeLocalBulkEmbeddingsCallbacks(dims),
           },
         },
       }),
