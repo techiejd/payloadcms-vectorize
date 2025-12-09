@@ -25,6 +25,14 @@ export const createEmbeddingsCollection = (
     admin: {
       description:
         'Vector embeddings for search and similarity queries. Created by the payloadcms-vectorize plugin. Embeddings cannot be added or modified, only deleted, through the admin panel. No other restrictions enforced.',
+      components: {
+        beforeList: [
+          {
+            path: 'payloadcms-vectorize/client#EmbedAllButton',
+            exportName: 'EmbedAllButton',
+          },
+        ],
+      },
     },
     access: {
       create: () => false, // Cannot add new embeddings through admin panel
