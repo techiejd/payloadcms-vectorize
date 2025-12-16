@@ -1,6 +1,11 @@
 import { voyage } from 'voyage-ai-provider'
 import { embed, embedMany } from 'ai'
-import type { BulkEmbeddingsConfig } from 'payloadcms-vectorize'
+import type {
+  BulkEmbeddingInput,
+  BulkEmbeddingOutput,
+  BulkEmbeddingRunStatus,
+  BulkEmbeddingsConfig,
+} from 'payloadcms-vectorize'
 
 export const voyageEmbedDocs = async (texts: string[]): Promise<number[][]> => {
   const embedResult = await embedMany({
@@ -56,36 +61,226 @@ export function makeDummyEmbedDocs(dims: number) {
 }
 export const testEmbeddingVersion = 'test-v1'
 
-export function makeLocalBulkEmbeddingsCallbacks(dims: number): BulkEmbeddingsConfig {
-  const pendingInputs = new Map<string, Array<{ id: string; text: string }>>()
-  const embedDocs = makeDummyEmbedDocs(dims)
+// Real Voyage Batch API implementation
+export function makeVoyageBulkEmbeddingsConfig(): BulkEmbeddingsConfig {
+  // Store batch state in memory for dev purposes
+  const batchState = new Map<
+    string,
+    {
+      inputs: BulkEmbeddingInput[]
+      batchId: string
+      outputFileId?: string
+    }
+  >()
+
   return {
+    ingestMode: 'bulk',
     prepareBulkEmbeddings: async ({ inputs }) => {
-      const providerBatchId = `local-${dims}-${Date.now()}`
-      pendingInputs.set(providerBatchId, inputs)
-      return {
-        providerBatchId,
-        status: 'queued',
-        counts: { inputs: inputs.length },
+      try {
+        // Create JSONL content for Voyage batch
+        const jsonlLines = inputs.map((input) => {
+          return JSON.stringify({
+            custom_id: input.id,
+            body: {
+              input: [input.text],
+              model: 'voyage-3.5-lite',
+              input_type: 'document',
+            },
+          })
+        })
+        const jsonlContent = jsonlLines.join('\n')
+
+        // Upload file to Voyage Files API using FormData
+        const formData = new FormData()
+        const blob = new Blob([jsonlContent], { type: 'application/jsonl' })
+        formData.append('file', blob, 'batch-input.jsonl')
+        formData.append('purpose', 'batch')
+
+        const uploadResponse = await fetch('https://api.voyageai.com/v1/files', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${process.env.VOYAGE_API_KEY}`,
+          },
+          body: formData,
+        })
+
+        if (!uploadResponse.ok) {
+          const error = await uploadResponse.text()
+          throw new Error(`Voyage file upload failed: ${error}`)
+        }
+
+        const fileData = await uploadResponse.json()
+        const fileId = fileData.id
+
+        // Create batch
+        const batchResponse = await fetch('https://api.voyageai.com/v1/batches', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${process.env.VOYAGE_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            input_file_id: fileId,
+            endpoint: '/v1/embeddings',
+            completion_window: '24h',
+          }),
+        })
+
+        if (!batchResponse.ok) {
+          const error = await batchResponse.text()
+          throw new Error(`Voyage batch creation failed: ${error}`)
+        }
+
+        const batchData = await batchResponse.json()
+        const batchId = batchData.id
+
+        // Store state for later retrieval
+        batchState.set(batchId, {
+          inputs,
+          batchId,
+        })
+
+        return {
+          providerBatchId: batchId,
+          status: batchData.status || 'queued',
+          counts: { inputs: inputs.length },
+        }
+      } catch (error) {
+        console.error('Voyage prepareBulkEmbeddings error:', error)
+        throw error
       }
     },
+
     pollBulkEmbeddings: async ({ providerBatchId }) => {
-      if (!pendingInputs.has(providerBatchId)) {
-        return { status: 'failed', error: 'unknown batch' }
+      try {
+        const response = await fetch(`https://api.voyageai.com/v1/batches/${providerBatchId}`, {
+          headers: {
+            Authorization: `Bearer ${process.env.VOYAGE_API_KEY}`,
+          },
+        })
+
+        if (!response.ok) {
+          const error = await response.text()
+          return { status: 'failed', error: `Voyage API error: ${error}` }
+        }
+
+        const batchData = await response.json()
+
+        // Map Voyage status to our status
+        let status: BulkEmbeddingRunStatus
+        switch (batchData.status) {
+          case 'queued':
+          case 'validating':
+            status = 'queued'
+            break
+          case 'running':
+          case 'finalizing':
+            status = 'running'
+            break
+          case 'completed':
+            status = 'succeeded'
+            break
+          case 'failed':
+          case 'cancelled':
+          case 'expired':
+            status = batchData.status === 'cancelled' ? 'canceled' : 'failed'
+            break
+          default:
+            status = 'running'
+        }
+
+        // Store output file ID if available
+        if (batchData.output_file_id) {
+          const state = batchState.get(providerBatchId)
+          if (state) {
+            state.outputFileId = batchData.output_file_id
+          }
+        }
+
+        return {
+          status,
+          counts: batchData.request_counts
+            ? {
+                inputs: batchData.request_counts.total || 0,
+                succeeded: batchData.request_counts.completed || 0,
+                failed: batchData.request_counts.failed || 0,
+              }
+            : undefined,
+          nextPollMs: status === 'running' || status === 'queued' ? 10000 : undefined, // Poll every 10s if not terminal
+        }
+      } catch (error) {
+        console.error('Voyage pollBulkEmbeddings error:', error)
+        return { status: 'failed', error: 'Failed to poll batch status' }
       }
-      return { status: 'succeeded' }
     },
+
     completeBulkEmbeddings: async ({ providerBatchId }) => {
-      const inputs = pendingInputs.get(providerBatchId) || []
-      const embeddings = await embedDocs(inputs.map((i) => i.text))
-      pendingInputs.delete(providerBatchId)
-      return {
-        status: 'succeeded',
-        outputs: embeddings.map((vector, idx) => ({
-          id: inputs[idx]?.id ?? String(idx),
-          embedding: vector,
-        })),
-        counts: { inputs: inputs.length, succeeded: embeddings.length, failed: 0 },
+      try {
+        const state = batchState.get(providerBatchId)
+        if (!state?.outputFileId) {
+          throw new Error('No output file available for batch')
+        }
+
+        // Download output file
+        const response = await fetch(
+          `https://api.voyageai.com/v1/files/${state.outputFileId}/content`,
+          {
+            headers: {
+              Authorization: `Bearer ${process.env.VOYAGE_API_KEY}`,
+            },
+          },
+        )
+
+        if (!response.ok) {
+          const error = await response.text()
+          throw new Error(`Failed to download output file: ${error}`)
+        }
+
+        const jsonlContent = await response.text()
+        const lines = jsonlContent.trim().split('\n')
+
+        const outputs: BulkEmbeddingOutput[] = []
+        let succeeded = 0
+        let failed = 0
+
+        for (const line of lines) {
+          if (!line.trim()) continue
+          try {
+            const result = JSON.parse(line)
+            if (result.error) {
+              outputs.push({
+                id: result.custom_id,
+                error: result.error.message || 'Unknown error',
+              })
+              failed++
+            } else {
+              outputs.push({
+                id: result.custom_id,
+                embedding: result.response.body.data[0].embedding,
+              })
+              succeeded++
+            }
+          } catch (parseError) {
+            console.error('Failed to parse output line:', line, parseError)
+            failed++
+          }
+        }
+
+        // Clean up state
+        batchState.delete(providerBatchId)
+
+        return {
+          status: 'succeeded',
+          outputs,
+          counts: {
+            inputs: state.inputs.length,
+            succeeded,
+            failed,
+          },
+        }
+      } catch (error) {
+        console.error('Voyage completeBulkEmbeddings error:', error)
+        throw error
       }
     },
   }

@@ -37,8 +37,8 @@ export const createBulkEmbedHandler = (
         },
       })
 
-      await payload.jobs.queue<'payloadcms-vectorize:bulk-embed-all'>({
-        task: 'payloadcms-vectorize:bulk-embed-all',
+      await payload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
+        task: 'payloadcms-vectorize:prepare-bulk-embedding',
         input: {
           runId: String(run.id),
         },

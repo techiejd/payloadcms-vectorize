@@ -8,92 +8,92 @@ import {
 import { BULK_EMBEDDINGS_RUNS_SLUG } from '../collections/bulkEmbeddingsRuns.js'
 import { isPostgresPayload, PostgresPayload } from '../types.js'
 
-type BulkEmbedAllTaskInput = {
+type PrepareBulkEmbeddingTaskInput = {
   runId: string
 }
 
-type BulkEmbedAllTaskOutput = {
+type PrepareBulkEmbeddingTaskOutput = {
   runId: string
   status: string
 }
 
-const TERMINAL_STATUSES = new Set(['succeeded', 'failed', 'canceled'])
-const fallbackInputsCache = new Map<string, BulkEmbeddingInput[]>()
-
-export function createFallbackBulkCallbacks(
-  dynamicConfig: KnowledgePoolDynamicConfig,
-): BulkEmbeddingsConfig {
-  return {
-    prepareBulkEmbeddings: async ({ inputs }) => {
-      const providerBatchId = `local-${Date.now()}-${Math.random().toString(16).slice(2)}`
-      fallbackInputsCache.set(providerBatchId, inputs)
-      return {
-        providerBatchId,
-        status: 'queued',
-        counts: { inputs: inputs.length },
-      }
-    },
-    pollBulkEmbeddings: async ({ providerBatchId }) => {
-      if (!fallbackInputsCache.has(providerBatchId)) {
-        return { status: 'failed', error: 'Unknown local batch' }
-      }
-      return {
-        status: 'succeeded',
-        counts: { inputs: fallbackInputsCache.get(providerBatchId)?.length },
-      }
-    },
-    completeBulkEmbeddings: async ({ providerBatchId }) => {
-      const inputs = fallbackInputsCache.get(providerBatchId) || []
-      const embeddings = await dynamicConfig.embedDocs(inputs.map((i) => i.text))
-      const outputs = embeddings.map((vector, idx) => {
-        const input = inputs[idx]
-        return {
-          id: input?.id ?? String(idx),
-          embedding: Array.isArray(vector) ? vector : Array.from(vector),
-        }
-      })
-      fallbackInputsCache.delete(providerBatchId)
-      return {
-        status: 'succeeded',
-        outputs,
-        counts: {
-          inputs: inputs.length,
-          succeeded: outputs.length,
-          failed: inputs.length - outputs.length,
-        },
-      }
-    },
-  }
+type PrepareBulkEmbeddingTaskInputOutput = {
+  input: PrepareBulkEmbeddingTaskInput
+  output: PrepareBulkEmbeddingTaskOutput
 }
 
-export const createBulkEmbedAllTask = ({
+type PollOrCompleteBulkEmbeddingTaskInput = {
+  runId: string
+}
+
+type PollOrCompleteBulkEmbeddingTaskOutput = {
+  runId: string
+  status: string
+}
+
+type PollOrCompleteBulkEmbeddingTaskInputOutput = {
+  input: PollOrCompleteBulkEmbeddingTaskInput
+  output: PollOrCompleteBulkEmbeddingTaskOutput
+}
+
+const TERMINAL_STATUSES = new Set(['succeeded', 'failed', 'canceled'])
+
+// Helper to load and validate run + config
+async function loadRunAndConfig({
+  payload,
+  runId,
   knowledgePools,
 }: {
+  payload: Payload
+  runId: string
   knowledgePools: Record<KnowledgePoolName, KnowledgePoolDynamicConfig>
-}): TaskConfig<BulkEmbedAllTaskInput> => {
-  const task: TaskConfig<BulkEmbedAllTaskInput> = {
-    slug: 'payloadcms-vectorize:bulk-embed-all',
-    handler: async ({ input, req }): Promise<TaskHandlerResult<BulkEmbedAllTaskOutput>> => {
+}) {
+  const run = await payload.findByID({
+    collection: BULK_EMBEDDINGS_RUNS_SLUG,
+    id: runId,
+  })
+  const poolName = (run as any)?.pool as KnowledgePoolName
+  if (!poolName) {
+    throw new Error(`[payloadcms-vectorize] bulk embed run ${runId} missing pool`)
+  }
+  const dynamicConfig = knowledgePools[poolName]
+  if (!dynamicConfig) {
+    throw new Error(
+      `[payloadcms-vectorize] knowledgePool "${poolName}" not found for bulk embed run ${runId}`,
+    )
+  }
+  if (!dynamicConfig.bulkEmbeddings) {
+    throw new Error(
+      `[payloadcms-vectorize] knowledgePool "${poolName}" does not have bulkEmbeddings configured`,
+    )
+  }
+  return { run, poolName, dynamicConfig }
+}
+
+export const createPrepareBulkEmbeddingTask = ({
+  knowledgePools,
+  bulkQueueName,
+}: {
+  knowledgePools: Record<KnowledgePoolName, KnowledgePoolDynamicConfig>
+  bulkQueueName?: string
+}): TaskConfig<PrepareBulkEmbeddingTaskInputOutput> => {
+  const task: TaskConfig<PrepareBulkEmbeddingTaskInputOutput> = {
+    slug: 'payloadcms-vectorize:prepare-bulk-embedding',
+    handler: async ({
+      input,
+      req,
+    }): Promise<TaskHandlerResult<PrepareBulkEmbeddingTaskInputOutput>> => {
       if (!input?.runId) {
         throw new Error('[payloadcms-vectorize] bulk embed runId is required')
       }
       const payload = req.payload
-      const run = await payload.findByID({
-        collection: BULK_EMBEDDINGS_RUNS_SLUG,
-        id: input.runId,
+      const { run, poolName, dynamicConfig } = await loadRunAndConfig({
+        payload,
+        runId: input.runId,
+        knowledgePools,
       })
-      const poolName = (run as any)?.pool as KnowledgePoolName
-      if (!poolName) {
-        throw new Error(`[payloadcms-vectorize] bulk embed run ${input.runId} missing pool`)
-      }
-      const dynamicConfig = knowledgePools[poolName]
-      if (!dynamicConfig) {
-        throw new Error(
-          `[payloadcms-vectorize] knowledgePool "${poolName}" not found for bulk embed run ${input.runId}`,
-        )
-      }
 
-      const callbacks = dynamicConfig.bulkEmbeddings || createFallbackBulkCallbacks(dynamicConfig)
+      const callbacks = dynamicConfig.bulkEmbeddings!
       const embeddingVersion = dynamicConfig.embeddingVersion
 
       const inputs = await collectMissingEmbeddings({
@@ -140,57 +140,116 @@ export const createBulkEmbedAllTask = ({
         },
       })
 
-      // Poll until terminal
-      let pollResult: any = null
-      const maxPolls = 10
-      let polls = 0
-      while (!TERMINAL_STATUSES.has(status) && polls < maxPolls) {
-        pollResult = await callbacks.pollBulkEmbeddings({
-          payload,
-          knowledgePool: poolName,
-          providerBatchId,
-        })
-        status = pollResult.status
-        await payload.update({
-          id: input.runId,
-          collection: BULK_EMBEDDINGS_RUNS_SLUG,
-          data: {
-            status,
-            inputs: pollResult.counts?.inputs ?? inputsCount,
-            succeeded: pollResult.counts?.succeeded,
-            failed: pollResult.counts?.failed,
-            error: pollResult.error,
-          },
-        })
-        if (TERMINAL_STATUSES.has(status)) break
-        polls += 1
-        const delay = pollResult.nextPollMs ?? 1000
-        await new Promise((resolve) => setTimeout(resolve, delay))
+      // Queue the poll task
+      await payload.jobs.queue<'payloadcms-vectorize:poll-or-complete-bulk-embedding'>({
+        task: 'payloadcms-vectorize:poll-or-complete-bulk-embedding',
+        input: { runId: input.runId },
+        req,
+        ...(bulkQueueName ? { queue: bulkQueueName } : {}),
+      })
+
+      return { output: { runId: input.runId, status: 'prepared' } }
+    },
+  }
+
+  return task
+}
+
+export const createPollOrCompleteBulkEmbeddingTask = ({
+  knowledgePools,
+  bulkQueueName,
+}: {
+  knowledgePools: Record<KnowledgePoolName, KnowledgePoolDynamicConfig>
+  bulkQueueName?: string
+}): TaskConfig<PollOrCompleteBulkEmbeddingTaskInputOutput> => {
+  const task: TaskConfig<PollOrCompleteBulkEmbeddingTaskInputOutput> = {
+    slug: 'payloadcms-vectorize:poll-or-complete-bulk-embedding',
+    handler: async ({
+      input,
+      req,
+    }): Promise<TaskHandlerResult<PollOrCompleteBulkEmbeddingTaskInputOutput>> => {
+      if (!input?.runId) {
+        throw new Error('[payloadcms-vectorize] bulk embed runId is required')
+      }
+      const payload = req.payload
+      const { run, poolName, dynamicConfig } = await loadRunAndConfig({
+        payload,
+        runId: input.runId,
+        knowledgePools,
+      })
+
+      const callbacks = dynamicConfig.bulkEmbeddings!
+      const providerBatchId = (run as any).providerBatchId
+      const embeddingVersion = dynamicConfig.embeddingVersion
+
+      // Check if already terminal
+      const currentStatus = (run as any).status
+      if (TERMINAL_STATUSES.has(currentStatus)) {
+        return { output: { runId: input.runId, status: currentStatus } }
       }
 
-      if (status !== 'succeeded') {
+      // Poll once
+      const pollResult = await callbacks.pollBulkEmbeddings({
+        payload,
+        knowledgePool: poolName,
+        providerBatchId,
+      })
+
+      const newStatus = pollResult.status
+      await payload.update({
+        id: input.runId,
+        collection: BULK_EMBEDDINGS_RUNS_SLUG,
+        data: {
+          status: newStatus,
+          inputs: pollResult.counts?.inputs,
+          succeeded: pollResult.counts?.succeeded,
+          failed: pollResult.counts?.failed,
+          error: pollResult.error,
+        },
+      })
+
+      // If still not terminal, requeue this task
+      if (!TERMINAL_STATUSES.has(newStatus)) {
+        await payload.jobs.queue<'payloadcms-vectorize:poll-or-complete-bulk-embedding'>({
+          task: 'payloadcms-vectorize:poll-or-complete-bulk-embedding',
+          input: { runId: input.runId },
+          req,
+          ...(bulkQueueName ? { queue: bulkQueueName } : {}),
+        })
+        return { output: { runId: input.runId, status: 'polling' } }
+      }
+
+      // Terminal - handle success vs failure
+      if (newStatus !== 'succeeded') {
         await payload.update({
           id: input.runId,
           collection: BULK_EMBEDDINGS_RUNS_SLUG,
           data: {
-            status,
-            error: pollResult?.error,
             completedAt: new Date().toISOString(),
           },
         })
-        return { output: { runId: input.runId, status } }
+        return { output: { runId: input.runId, status: newStatus } }
       }
 
+      // Success - complete the embeddings
       const completion = (await callbacks.completeBulkEmbeddings({
         payload,
         knowledgePool: poolName,
         providerBatchId,
-      })) || { status, outputs: [] }
+      })) || { status: newStatus, outputs: [] }
 
       const outputs = completion.outputs || []
+
+      // Re-collect inputs to match outputs (in case they changed during polling)
+      const inputs = await collectMissingEmbeddings({
+        payload,
+        poolName,
+        dynamicConfig,
+        embeddingVersion,
+      })
       const inputsById = new Map(inputs.map((input) => [input.id, input]))
       const successfulOutputs = outputs.filter((o) => !o.error && o.embedding)
-      const failedCount = completion.counts?.failed ?? inputsCount - successfulOutputs.length
+      const failedCount = completion.counts?.failed ?? outputs.length - successfulOutputs.length
 
       // Remove existing embeddings for successful doc ids before writing new vectors
       const docKeys = new Set<string>()
@@ -254,7 +313,7 @@ export const createBulkEmbedAllTask = ({
         collection: BULK_EMBEDDINGS_RUNS_SLUG,
         data: {
           status: completion.status ?? 'succeeded',
-          inputs: completion.counts?.inputs ?? inputsCount,
+          inputs: completion.counts?.inputs ?? outputs.length,
           succeeded: completion.counts?.succeeded ?? successfulOutputs.length,
           failed: failedCount,
           error: completion.error,

@@ -128,11 +128,12 @@ export type BulkEmbeddingsConfig = {
 export type PayloadcmsVectorizeConfig<TPoolNames extends KnowledgePoolName = KnowledgePoolName> = {
   /** Knowledge pools and their dynamic configurations */
   knowledgePools: Record<TPoolNames, KnowledgePoolDynamicConfig>
-  /** Task queue name.
-   * Default is payloadcms default queue (undefined)
-   * You must setup the job in your payload config
-   * (with either an undefined or defined queue name). */
-  queueName?: string
+  /** Queue name for realtime vectorization jobs.
+   * Default is Payload's default queue (undefined). */
+  realtimeQueueName?: string
+  /** Queue name for bulk embedding jobs.
+   * Required at runtime if any knowledge pool uses any bulk ingestion (`bulkEmbeddings !== undefined`). */
+  bulkQueueName?: string
   /** Endpoint overrides for searching vectorized content */
   endpointOverrides?: {
     // Default is '/vector-search' (which gets turned into '/api/vector-search')

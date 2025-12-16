@@ -9,7 +9,7 @@ import {
   voyageEmbedDocs,
   voyageEmbedQuery,
   makeDummyEmbedQuery,
-  makeLocalBulkEmbeddingsCallbacks,
+  makeVoyageBulkEmbeddingsConfig,
 } from './helpers/embed.js'
 import sharp from 'sharp'
 import { fileURLToPath } from 'url'
@@ -79,11 +79,21 @@ const buildConfigWithPostgres = async () => {
     email: testEmailAdapter,
     jobs: {
       tasks: [],
+      queues: {
+        'vectorize-bulk': {
+          concurrency: 2,
+        },
+      },
       autoRun: [
         {
           cron: '*/5 * * * * *', // Run every 5 seconds in development
           limit: 10,
           queue: 'default',
+        },
+        {
+          cron: '*/10 * * * * *', // Run every 10 seconds for bulk jobs
+          limit: 5,
+          queue: 'vectorize-bulk',
         },
       ],
       jobsCollectionOverrides: ({ defaultJobsCollection }) => {
@@ -123,12 +133,11 @@ const buildConfigWithPostgres = async () => {
             embedDocs,
             embedQuery,
             embeddingVersion: testEmbeddingVersion,
-            bulkEmbeddings: {
-              ...makeLocalBulkEmbeddingsCallbacks(dims),
-              ingestMode: 'realtime',
-            },
+            bulkEmbeddings: makeVoyageBulkEmbeddingsConfig(),
           },
         },
+        realtimeQueueName: 'vectorize-realtime',
+        bulkQueueName: 'vectorize-bulk',
       }),
     ],
     secret: process.env.PAYLOAD_SECRET || 'test-secret_key',

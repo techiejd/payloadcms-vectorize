@@ -18,7 +18,10 @@ import {
   createBulkEmbeddingsRunsCollection,
   BULK_EMBEDDINGS_RUNS_SLUG,
 } from './collections/bulkEmbeddingsRuns.js'
-import { createBulkEmbedAllTask } from './tasks/bulkEmbedAll.js'
+import {
+  createPrepareBulkEmbeddingTask,
+  createPollOrCompleteBulkEmbeddingTask,
+} from './tasks/bulkEmbedAll.js'
 import { createBulkEmbedHandler } from './endpoints/bulkEmbed.js'
 
 export type * from './types.js'
@@ -183,6 +186,21 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
         }
       }
 
+      // Validate bulk queue requirements
+      let bulkIngestEnabled = false
+      for (const poolName in pluginOptions.knowledgePools) {
+        const dynamicConfig = pluginOptions.knowledgePools[poolName]
+        if ((dynamicConfig.bulkEmbeddings?.ingestMode || 'realtime') === 'bulk') {
+          bulkIngestEnabled = true
+          break
+        }
+      }
+      if (bulkIngestEnabled && !pluginOptions.bulkQueueName) {
+        throw new Error(
+          '[payloadcms-vectorize] bulkQueueName is required when any knowledge pool uses bulk ingest mode (bulkEmbeddings.ingestMode === \"bulk\").',
+        )
+      }
+
       // Exit early if disabled, but keep embeddings collections present for migrations
       if (pluginOptions.disabled) return config
 
@@ -194,10 +212,16 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
         knowledgePools: pluginOptions.knowledgePools,
       })
       tasks.push(vectorizeTask)
-      const bulkEmbedTask = createBulkEmbedAllTask({
+      const prepareBulkEmbedTask = createPrepareBulkEmbeddingTask({
         knowledgePools: pluginOptions.knowledgePools,
+        bulkQueueName: pluginOptions.bulkQueueName,
       })
-      tasks.push(bulkEmbedTask)
+      tasks.push(prepareBulkEmbedTask)
+      const pollOrCompleteBulkEmbedTask = createPollOrCompleteBulkEmbeddingTask({
+        knowledgePools: pluginOptions.knowledgePools,
+        bulkQueueName: pluginOptions.bulkQueueName,
+      })
+      tasks.push(pollOrCompleteBulkEmbedTask)
 
       config.jobs = {
         ...incomingJobs,
@@ -246,7 +270,9 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
                     knowledgePool: pool,
                   },
                   req: req,
-                  ...(pluginOptions.queueName ? { queue: pluginOptions.queueName } : {}),
+                  ...(pluginOptions.realtimeQueueName
+                    ? { queue: pluginOptions.realtimeQueueName }
+                    : {}),
                 })
               }
               return
@@ -304,13 +330,16 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
           ...inputEndpoints,
           {
             path,
-            method: 'post',
+            method: 'post' as const,
             handler: createVectorSearchHandler(pluginOptions.knowledgePools),
           },
           {
             path: '/vector-bulk-embed',
-            method: 'post',
-            handler: createBulkEmbedHandler(pluginOptions.knowledgePools, pluginOptions.queueName),
+            method: 'post' as const,
+            handler: createBulkEmbedHandler(
+              pluginOptions.knowledgePools,
+              pluginOptions.bulkQueueName,
+            ),
           },
         ]
         config.endpoints = endpoints

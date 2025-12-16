@@ -2,13 +2,22 @@
 
 import React, { useState } from 'react'
 
-type EmbedAllButtonProps = {
+type EmbedAllButtonServerProps = {
+  hasBulkEmbeddings: boolean
+}
+
+type EmbedAllButtonClientProps = {
   collectionSlug: string
   hasCreatePermission?: boolean
   newDocumentURL?: string
 }
 
-export const EmbedAllButton: React.FC<EmbedAllButtonProps> = ({ collectionSlug }) => {
+type EmbedAllButtonProps = EmbedAllButtonServerProps & EmbedAllButtonClientProps
+
+export const EmbedAllButton: React.FC<EmbedAllButtonProps> = ({
+  collectionSlug,
+  hasBulkEmbeddings,
+}) => {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
 
@@ -34,6 +43,22 @@ export const EmbedAllButton: React.FC<EmbedAllButtonProps> = ({ collectionSlug }
     } finally {
       setIsSubmitting(false)
     }
+  }
+
+  if (!hasBulkEmbeddings) {
+    return (
+      <div style={{ marginBottom: '1rem', display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+        <button
+          type="button"
+          className="btn btn--style-secondary"
+          disabled
+          title="Bulk embedding not implemented for this pool"
+        >
+          Embed all
+        </button>
+        <span style={{ fontSize: '0.9rem', color: '#666' }}>Bulk embedding not configured</span>
+      </div>
+    )
   }
 
   return (

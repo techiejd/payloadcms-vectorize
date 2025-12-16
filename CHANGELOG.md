@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.5.0 - 2025-12-17
+
+### Breaking Changes
+
+- **`queueName` renamed to `realtimeQueueName`**: The plugin option `queueName` has been renamed to `realtimeQueueName` to clarify that it only affects realtime vectorization jobs.
+
+### New Features
+
+- **`bulkQueueName` option**: New plugin option to isolate bulk embedding workloads to a dedicated queue. Required when any knowledge pool uses bulk ingest mode (`bulkEmbeddings.ingestMode === 'bulk'`).
+- **Non-blocking bulk polling**: Bulk jobs now use separate, short-lived tasks that can safely handle long-running providers (hours/days) without blocking worker processes.
+- **Improved admin UX**: The "Embed all" button now:
+  - Disables when bulk embeddings are not configured for a pool
+  - Links to the latest bulk run for easy status tracking
+- **Enhanced bulk provider support**: Added real Voyage AI Batch API integration in dev environment, demonstrating production-ready bulk embedding with file uploads and async polling.
+
+### Tests & Reliability
+
+- Added comprehensive tests for realtime vs bulk ingest behavior
+- Added tests for bulk polling error conditions (`failed`, `canceled` statuses)
+- Added tests for bulk fan-in behavior (multiple documents processed in single run)
+- Improved test coverage for edge cases in bulk embedding workflow
+
 ## 0.4.1 - 2025-12-02
 
 ### Added
