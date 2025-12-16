@@ -1,7 +1,7 @@
 import { Payload, TaskConfig, TaskHandlerResult } from 'payload'
 import {
   BulkEmbeddingInput,
-  BulkEmbeddingsCallbacks,
+  BulkEmbeddingsConfig,
   KnowledgePoolDynamicConfig,
   KnowledgePoolName,
 } from '../types.js'
@@ -22,7 +22,7 @@ const fallbackInputsCache = new Map<string, BulkEmbeddingInput[]>()
 
 export function createFallbackBulkCallbacks(
   dynamicConfig: KnowledgePoolDynamicConfig,
-): BulkEmbeddingsCallbacks {
+): BulkEmbeddingsConfig {
   return {
     prepareBulkEmbeddings: async ({ inputs }) => {
       const providerBatchId = `local-${Date.now()}-${Math.random().toString(16).slice(2)}`
@@ -37,7 +37,10 @@ export function createFallbackBulkCallbacks(
       if (!fallbackInputsCache.has(providerBatchId)) {
         return { status: 'failed', error: 'Unknown local batch' }
       }
-      return { status: 'succeeded', counts: { inputs: fallbackInputsCache.get(providerBatchId)?.length } }
+      return {
+        status: 'succeeded',
+        counts: { inputs: fallbackInputsCache.get(providerBatchId)?.length },
+      }
     },
     completeBulkEmbeddings: async ({ providerBatchId }) => {
       const inputs = fallbackInputsCache.get(providerBatchId) || []
@@ -53,7 +56,11 @@ export function createFallbackBulkCallbacks(
       return {
         status: 'succeeded',
         outputs,
-        counts: { inputs: inputs.length, succeeded: outputs.length, failed: inputs.length - outputs.length },
+        counts: {
+          inputs: inputs.length,
+          succeeded: outputs.length,
+          failed: inputs.length - outputs.length,
+        },
       }
     },
   }
@@ -174,12 +181,11 @@ export const createBulkEmbedAllTask = ({
         return { output: { runId: input.runId, status } }
       }
 
-      const completion =
-        (await callbacks.completeBulkEmbeddings({
-          payload,
-          knowledgePool: poolName,
-          providerBatchId,
-        })) || { status, outputs: [] }
+      const completion = (await callbacks.completeBulkEmbeddings({
+        payload,
+        knowledgePool: poolName,
+        providerBatchId,
+      })) || { status, outputs: [] }
 
       const outputs = completion.outputs || []
       const inputsById = new Map(inputs.map((input) => [input.id, input]))
@@ -214,8 +220,13 @@ export const createBulkEmbedAllTask = ({
           ? output.embedding
           : Array.from(output.embedding)
 
-        const { chunkIndex, sourceCollection, docId, embeddingVersion: version, ...rest } =
-          input.metadata
+        const {
+          chunkIndex,
+          sourceCollection,
+          docId,
+          embeddingVersion: version,
+          ...rest
+        } = input.metadata
         const chunkText = input.text
 
         const created = await payload.create({

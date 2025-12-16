@@ -190,8 +190,12 @@ The embeddings collection name will be the same as the knowledge pool name.
 - `embedQuery`: `EmbedQueryFn` - Function to embed search queries
 - `embeddingVersion`: `string` - Version string for tracking model changes
 - `extensionFields?`: `Field[]` - Optional fields to extend the embeddings collection schema
-- `ingestMode?`: `'realtime' | 'bulk'` - Default `realtime` queues embeddings immediately. `bulk` skips realtime embedding, deletes stale vectors on updates, and relies on the bulk job to backfill.
-- `bulkEmbeddings?`: Provider-specific callbacks for batch embedding (`prepareBulkEmbeddings`, `pollBulkEmbeddings`, `completeBulkEmbeddings`). If omitted, the plugin falls back to using `embedDocs` in-process.
+- `bulkEmbeddings?`: Configuration for bulk embedding operations:
+  - `ingestMode?`: `'realtime' | 'bulk'` - Default `realtime` queues embeddings immediately. `bulk` skips realtime embedding, deletes stale vectors on updates, and relies on the bulk job to backfill.
+  - `prepareBulkEmbeddings`: Callback to prepare a bulk embedding batch
+  - `pollBulkEmbeddings`: Callback to poll the status of a bulk embedding batch
+  - `completeBulkEmbeddings`: Callback to retrieve completed embeddings from a batch
+    If `bulkEmbeddings` is omitted, the plugin falls back to using `embedDocs` in-process.
 
 #### CollectionVectorizeOption
 
@@ -218,7 +222,7 @@ Because you control the output, you can mix different field types, discard empty
 
 ## PostgreSQL Custom Schema Support
 
-The plugin reads the `schemaName` configuration from your Postgres adapter within the Payload config.  
+The plugin reads the `schemaName` configuration from your Postgres adapter within the Payload config.
 
 When you configure a custom schema via `postgresAdapter({ schemaName: 'custom' })`, all plugin SQL queries (for vector columns, indexes, and embeddings) are qualified with that schema name. This is useful for multi-tenant setups or when content tables live in a dedicated schema.
 
@@ -311,7 +315,7 @@ Search for similar content using vector similarity.
 
 ```jsonc
 {
-  "knowledgePool": "main"
+  "knowledgePool": "main",
 }
 ```
 

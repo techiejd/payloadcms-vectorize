@@ -14,7 +14,10 @@ import type { PostgresAdapterArgs } from '@payloadcms/db-postgres'
 import { createVectorizeTask } from './tasks/vectorize.js'
 import { createVectorSearchHandler } from './endpoints/vectorSearch.js'
 import { clearEmbeddingsTables, registerEmbeddingsTable } from './drizzle/tables.js'
-import { createBulkEmbeddingsRunsCollection, BULK_EMBEDDINGS_RUNS_SLUG } from './collections/bulkEmbeddingsRuns.js'
+import {
+  createBulkEmbeddingsRunsCollection,
+  BULK_EMBEDDINGS_RUNS_SLUG,
+} from './collections/bulkEmbeddingsRuns.js'
 import { createBulkEmbedAllTask } from './tasks/bulkEmbedAll.js'
 import { createBulkEmbedHandler } from './endpoints/bulkEmbed.js'
 
@@ -221,7 +224,7 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
                 const collectionConfig = dynamic.collections[collectionSlug]
                 if (!collectionConfig) continue
 
-                if ((dynamic.ingestMode || 'realtime') === 'bulk') {
+                if ((dynamic.bulkEmbeddings?.ingestMode || 'realtime') === 'bulk') {
                   // In bulk mode, clear stale embeddings and let the bulk job recreate them
                   await payload.delete({
                     collection: pool,

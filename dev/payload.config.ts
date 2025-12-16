@@ -123,8 +123,10 @@ const buildConfigWithPostgres = async () => {
             embedDocs,
             embedQuery,
             embeddingVersion: testEmbeddingVersion,
-            ingestMode: 'realtime',
-            bulkEmbeddings: makeLocalBulkEmbeddingsCallbacks(dims),
+            bulkEmbeddings: {
+              ...makeLocalBulkEmbeddingsCallbacks(dims),
+              ingestMode: 'realtime',
+            },
           },
         },
       }),

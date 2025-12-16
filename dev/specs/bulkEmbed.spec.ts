@@ -8,7 +8,12 @@ import { createVectorizeIntegration } from 'payloadcms-vectorize'
 import { BULK_EMBEDDINGS_RUNS_SLUG } from '../../src/collections/bulkEmbeddingsRuns.js'
 import { createBulkEmbedAllTask } from '../../src/tasks/bulkEmbedAll.js'
 import { createTestDb } from './utils.js'
-import { makeDummyEmbedDocs, makeDummyEmbedQuery, makeLocalBulkEmbeddingsCallbacks, testEmbeddingVersion } from 'helpers/embed.js'
+import {
+  makeDummyEmbedDocs,
+  makeDummyEmbedQuery,
+  makeLocalBulkEmbeddingsCallbacks,
+  testEmbeddingVersion,
+} from 'helpers/embed.js'
 
 const DIMS = 8
 
@@ -35,8 +40,10 @@ describe('Bulk embed ingest mode', () => {
         embedDocs: makeDummyEmbedDocs(DIMS),
         embedQuery: makeDummyEmbedQuery(DIMS),
         embeddingVersion: testEmbeddingVersion,
-        ingestMode: 'bulk' as const,
-        bulkEmbeddings: makeLocalBulkEmbeddingsCallbacks(DIMS),
+        bulkEmbeddings: {
+          ...makeLocalBulkEmbeddingsCallbacks(DIMS),
+          ingestMode: 'bulk' as const,
+        },
       },
     },
   }
@@ -75,10 +82,7 @@ describe('Bulk embed ingest mode', () => {
     const initialEmbeds = await payload.find({
       collection: 'default',
       where: {
-        and: [
-          { sourceCollection: { equals: 'posts' } },
-          { docId: { equals: String(post.id) } },
-        ],
+        and: [{ sourceCollection: { equals: 'posts' } }, { docId: { equals: String(post.id) } }],
       },
     })
     expect(initialEmbeds.totalDocs).toBe(0)
@@ -104,10 +108,7 @@ describe('Bulk embed ingest mode', () => {
     const embeds = await payload.find({
       collection: 'default',
       where: {
-        and: [
-          { sourceCollection: { equals: 'posts' } },
-          { docId: { equals: String(post.id) } },
-        ],
+        and: [{ sourceCollection: { equals: 'posts' } }, { docId: { equals: String(post.id) } }],
       },
     })
     expect(embeds.totalDocs).toBeGreaterThan(0)
@@ -154,10 +155,7 @@ describe('Bulk embed ingest mode', () => {
     const afterUpdateEmbeds = await payload.find({
       collection: 'default',
       where: {
-        and: [
-          { sourceCollection: { equals: 'posts' } },
-          { docId: { equals: String(post.id) } },
-        ],
+        and: [{ sourceCollection: { equals: 'posts' } }, { docId: { equals: String(post.id) } }],
       },
     })
     expect(afterUpdateEmbeds.totalDocs).toBe(0)
@@ -179,10 +177,7 @@ describe('Bulk embed ingest mode', () => {
     const embedsAfterRerun = await payload.find({
       collection: 'default',
       where: {
-        and: [
-          { sourceCollection: { equals: 'posts' } },
-          { docId: { equals: String(post.id) } },
-        ],
+        and: [{ sourceCollection: { equals: 'posts' } }, { docId: { equals: String(post.id) } }],
       },
     })
     expect(embedsAfterRerun.totalDocs).toBeGreaterThan(0)

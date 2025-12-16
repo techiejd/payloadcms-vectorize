@@ -1,6 +1,6 @@
 import { voyage } from 'voyage-ai-provider'
 import { embed, embedMany } from 'ai'
-import type { BulkEmbeddingsCallbacks } from 'payloadcms-vectorize'
+import type { BulkEmbeddingsConfig } from 'payloadcms-vectorize'
 
 export const voyageEmbedDocs = async (texts: string[]): Promise<number[][]> => {
   const embedResult = await embedMany({
@@ -56,7 +56,7 @@ export function makeDummyEmbedDocs(dims: number) {
 }
 export const testEmbeddingVersion = 'test-v1'
 
-export function makeLocalBulkEmbeddingsCallbacks(dims: number): BulkEmbeddingsCallbacks {
+export function makeLocalBulkEmbeddingsCallbacks(dims: number): BulkEmbeddingsConfig {
   const pendingInputs = new Map<string, Array<{ id: string; text: string }>>()
   const embedDocs = makeDummyEmbedDocs(dims)
   return {

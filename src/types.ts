@@ -40,10 +40,8 @@ export type KnowledgePoolDynamicConfig = {
   embeddingVersion: string
   /** Optional fields to extend the knowledge pool collection schema */
   extensionFields?: Field[]
-  /** Controls whether docs embed immediately or are staged for bulk runs */
-  ingestMode?: IngestMode
-  /** Provider-specific bulk embedding callbacks */
-  bulkEmbeddings?: BulkEmbeddingsCallbacks
+  /** User provided bulk embedding configuration */
+  bulkEmbeddings?: BulkEmbeddingsConfig
 }
 
 export type BulkEmbeddingRunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled'
@@ -115,7 +113,9 @@ export type CompleteBulkEmbeddingsResult = {
   error?: string
 }
 
-export type BulkEmbeddingsCallbacks = {
+export type BulkEmbeddingsConfig = {
+  /** Controls whether docs embed immediately or are staged for bulk runs */
+  ingestMode?: IngestMode
   prepareBulkEmbeddings: (
     args: PrepareBulkEmbeddingsArgs,
   ) => Promise<PrepareBulkEmbeddingsResult | void>
