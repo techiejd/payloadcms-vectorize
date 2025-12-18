@@ -195,9 +195,9 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
           break
         }
       }
-      if (bulkIngestEnabled && !pluginOptions.bulkQueueName) {
+      if (bulkIngestEnabled && !pluginOptions.bulkQueueNames) {
         throw new Error(
-          '[payloadcms-vectorize] bulkQueueName is required when any knowledge pool uses bulk ingest mode (bulkEmbeddings.ingestMode === \"bulk\").',
+          '[payloadcms-vectorize] bulkQueueNames is required when any knowledge pool uses bulk ingest mode (bulkEmbeddings.ingestMode === \"bulk\").',
         )
       }
 
@@ -214,12 +214,12 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
       tasks.push(vectorizeTask)
       const prepareBulkEmbedTask = createPrepareBulkEmbeddingTask({
         knowledgePools: pluginOptions.knowledgePools,
-        bulkQueueName: pluginOptions.bulkQueueName,
+        pollOrCompleteQueueName: pluginOptions.bulkQueueNames?.pollOrCompleteQueueName,
       })
       tasks.push(prepareBulkEmbedTask)
       const pollOrCompleteBulkEmbedTask = createPollOrCompleteBulkEmbeddingTask({
         knowledgePools: pluginOptions.knowledgePools,
-        bulkQueueName: pluginOptions.bulkQueueName,
+        pollOrCompleteQueueName: pluginOptions.bulkQueueNames?.pollOrCompleteQueueName,
       })
       tasks.push(pollOrCompleteBulkEmbedTask)
 
@@ -249,15 +249,23 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
                 if (!collectionConfig) continue
 
                 if ((dynamic.bulkEmbeddings?.ingestMode || 'realtime') === 'bulk') {
-                  // In bulk mode, clear stale embeddings and let the bulk job recreate them
-                  await payload.delete({
-                    collection: pool,
-                    where: {
-                      and: [
-                        { sourceCollection: { equals: collectionSlug } },
-                        { docId: { equals: String(doc.id) } },
-                      ],
+                  // In bulk mode, queue a bulk run and let poll/completion handle deletes
+                  const run = await payload.create({
+                    collection: BULK_EMBEDDINGS_RUNS_SLUG,
+                    data: {
+                      pool,
+                      embeddingVersion: dynamic.embeddingVersion,
+                      status: 'queued',
                     },
+                  })
+
+                  await payload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
+                    task: 'payloadcms-vectorize:prepare-bulk-embedding',
+                    input: { runId: String(run.id) },
+                    req,
+                    ...(pluginOptions.bulkQueueNames?.prepareBulkEmbedQueueName
+                      ? { queue: pluginOptions.bulkQueueNames.prepareBulkEmbedQueueName }
+                      : {}),
                   })
                   continue
                 }
@@ -338,7 +346,7 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
             method: 'post' as const,
             handler: createBulkEmbedHandler(
               pluginOptions.knowledgePools,
-              pluginOptions.bulkQueueName,
+              pluginOptions.bulkQueueNames?.prepareBulkEmbedQueueName,
             ),
           },
         ]

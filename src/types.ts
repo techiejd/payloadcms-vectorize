@@ -133,7 +133,10 @@ export type PayloadcmsVectorizeConfig<TPoolNames extends KnowledgePoolName = Kno
   realtimeQueueName?: string
   /** Queue name for bulk embedding jobs.
    * Required at runtime if any knowledge pool uses any bulk ingestion (`bulkEmbeddings !== undefined`). */
-  bulkQueueName?: string
+  bulkQueueNames?: {
+    prepareBulkEmbedQueueName: string
+    pollOrCompleteQueueName: string
+  }
   /** Endpoint overrides for searching vectorized content */
   endpointOverrides?: {
     // Default is '/vector-search' (which gets turned into '/api/vector-search')

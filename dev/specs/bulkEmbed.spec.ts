@@ -1,7 +1,8 @@
 import type { Payload, SanitizedConfig } from 'payload'
 
 import { buildConfig, getPayload } from 'payload'
-import { beforeAll, describe, expect, test } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
+import { createVectorizeTask } from '../../src/tasks/vectorize.js'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { lexicalEditor } from '@payloadcms/richtext-lexical'
 import { createVectorizeIntegration } from 'payloadcms-vectorize'
@@ -19,11 +20,13 @@ const DIMS = 8
 // Mock bulk embeddings configs for testing
 function createMockBulkEmbeddings(statusSequence: BulkEmbeddingRunStatus[]): BulkEmbeddingsConfig {
   let callCount = 0
+  let lastInputs: BulkEmbeddingInput[] = []
   const embeddings = makeDummyEmbedDocs(DIMS)
 
   return {
     ingestMode: 'bulk',
     prepareBulkEmbeddings: async ({ inputs }) => {
+      lastInputs = inputs
       return {
         providerBatchId: `mock-${Date.now()}`,
         status: 'queued',
@@ -34,16 +37,25 @@ function createMockBulkEmbeddings(statusSequence: BulkEmbeddingRunStatus[]): Bul
       const status = statusSequence[Math.min(callCount++, statusSequence.length - 1)]
       return {
         status,
-        counts: status === 'succeeded' ? { inputs: 1, succeeded: 1, failed: 0 } : undefined,
+        counts:
+          status === 'succeeded'
+            ? { inputs: lastInputs.length, succeeded: lastInputs.length, failed: 0 }
+            : undefined,
       }
     },
-    completeBulkEmbeddings: async ({ providerBatchId }) => {
-      const inputs = [{ id: 'test-1', text: 'test text', metadata: {} }]
-      const vectors = await embeddings([inputs[0].text])
+    completeBulkEmbeddings: async () => {
+      if (!lastInputs.length) {
+        return { status: 'succeeded', outputs: [], counts: { inputs: 0, succeeded: 0, failed: 0 } }
+      }
+      const vectors = await embeddings(lastInputs.map((i) => i.text))
+      const outputs = lastInputs.map((input, idx) => ({
+        id: input.id,
+        embedding: vectors[idx],
+      }))
       return {
         status: 'succeeded',
-        outputs: [{ id: inputs[0].id, embedding: vectors[0] }],
-        counts: { inputs: 1, succeeded: 1, failed: 0 },
+        outputs,
+        counts: { inputs: outputs.length, succeeded: outputs.length, failed: 0 },
       }
     },
   }
@@ -75,7 +87,10 @@ describe('Bulk embed ingest mode', () => {
         bulkEmbeddings: createMockBulkEmbeddings(['succeeded']),
       },
     },
-    bulkQueueName: 'vectorize-bulk',
+    bulkQueueNames: {
+      prepareBulkEmbedQueueName: 'vectorize-bulk-prepare',
+      pollOrCompleteQueueName: 'vectorize-bulk-poll',
+    },
   }
 
   beforeAll(async () => {
@@ -103,7 +118,22 @@ describe('Bulk embed ingest mode', () => {
     payload = await getPayload({ config })
   })
 
+  beforeEach(async () => {
+    // Clean runs and embeddings between tests to avoid cross-test leakage
+    await payload.delete({
+      collection: BULK_EMBEDDINGS_RUNS_SLUG,
+      where: { id: { exists: true } },
+    })
+    await payload.delete({
+      collection: 'default',
+      where: { id: { exists: true } },
+    })
+    vi.restoreAllMocks()
+  })
+
   test('bulk ingest mode queues no realtime embeddings and bulk job backfills missing docs', async () => {
+    const queueSpy = vi.spyOn(payload.jobs, 'queue')
+
     const post = await payload.create({
       collection: 'posts',
       data: { title: 'Bulk Mode Title' } as any,
@@ -117,29 +147,56 @@ describe('Bulk embed ingest mode', () => {
     })
     expect(initialEmbeds.totalDocs).toBe(0)
 
-    const run = await payload.create({
+    // Bulk mode should queue prepare task automatically
+    expect(queueSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: 'payloadcms-vectorize:prepare-bulk-embedding',
+      }),
+    )
+
+    // Get the latest queued run created by the hook
+    const { docs: latestRuns } = await payload.find({
       collection: BULK_EMBEDDINGS_RUNS_SLUG,
+      where: { pool: { equals: 'default' } },
+      sort: '-createdAt',
+      limit: 1,
+    })
+    const run = latestRuns[0]
+    expect(run).toBeDefined()
+
+    // Seed a stale embedding that should be deleted during poll/complete
+    await payload.create({
+      collection: 'default',
       data: {
-        pool: 'default',
-        embeddingVersion: testEmbeddingVersion,
-        status: 'queued',
+        sourceCollection: 'posts',
+        docId: String(post.id),
+        chunkIndex: 0,
+        chunkText: 'stale chunk',
+        embeddingVersion: 'old-version',
       },
     })
 
     // Run prepare task
     const prepareTask = createPrepareBulkEmbeddingTask({
       knowledgePools: pluginOptions.knowledgePools,
-      bulkQueueName: pluginOptions.bulkQueueName,
+      pollOrCompleteQueueName: pluginOptions.bulkQueueNames?.pollOrCompleteQueueName,
     })
     await prepareTask.handler({
       input: { runId: String(run.id) },
       req: { payload } as any,
     })
 
+    // Prepare should have queued the poll task on the poll queue
+    expect(queueSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: 'payloadcms-vectorize:poll-or-complete-bulk-embedding',
+      }),
+    )
+
     // Run poll/complete task
     const pollTask = createPollOrCompleteBulkEmbeddingTask({
       knowledgePools: pluginOptions.knowledgePools,
-      bulkQueueName: pluginOptions.bulkQueueName,
+      pollOrCompleteQueueName: pluginOptions.bulkQueueNames?.pollOrCompleteQueueName,
     })
     await pollTask.handler({
       input: { runId: String(run.id) },
@@ -152,7 +209,7 @@ describe('Bulk embed ingest mode', () => {
         and: [{ sourceCollection: { equals: 'posts' } }, { docId: { equals: String(post.id) } }],
       },
     })
-    expect(embeds.totalDocs).toBeGreaterThan(0)
+    expect(embeds.totalDocs).toBe(1) // stale embedding should have been deleted and replaced
     expect(embeds.docs[0]?.chunkText).toContain('Bulk Mode Title')
 
     const runDoc = await payload.findByID({
@@ -164,34 +221,37 @@ describe('Bulk embed ingest mode', () => {
   })
 
   test('bulk ingest mode clears stale embeddings on document updates and rerun populates new chunks', async () => {
+    const queueSpy = vi.spyOn(payload.jobs, 'queue')
+
     const post = await payload.create({
       collection: 'posts',
       data: { title: 'Original' } as any,
     })
 
-    // First run to embed
-    const firstRun = await payload.create({
-      collection: BULK_EMBEDDINGS_RUNS_SLUG,
-      data: {
-        pool: 'default',
-        embeddingVersion: testEmbeddingVersion,
-        status: 'queued',
-      },
-    })
+    // First run to embed (auto-queued on create)
+    const firstRun = (
+      await payload.find({
+        collection: BULK_EMBEDDINGS_RUNS_SLUG,
+        where: { pool: { equals: 'default' } },
+        sort: '-createdAt',
+        limit: 1,
+      })
+    ).docs[0]
+    expect(firstRun).toBeDefined()
 
     const prepareTask = createPrepareBulkEmbeddingTask({
       knowledgePools: pluginOptions.knowledgePools,
-      bulkQueueName: pluginOptions.bulkQueueName,
+      pollOrCompleteQueueName: pluginOptions.bulkQueueNames?.pollOrCompleteQueueName,
     })
     const pollTask = createPollOrCompleteBulkEmbeddingTask({
       knowledgePools: pluginOptions.knowledgePools,
-      bulkQueueName: pluginOptions.bulkQueueName,
+      pollOrCompleteQueueName: pluginOptions.bulkQueueNames?.pollOrCompleteQueueName,
     })
 
     await prepareTask.handler({ input: { runId: String(firstRun.id) }, req: { payload } as any })
     await pollTask.handler({ input: { runId: String(firstRun.id) }, req: { payload } as any })
 
-    // Update document - should delete embeddings in bulk mode
+    // Update document - embeddings should remain until poll/completion of the next run
     await payload.update({
       collection: 'posts',
       id: post.id,
@@ -204,17 +264,22 @@ describe('Bulk embed ingest mode', () => {
         and: [{ sourceCollection: { equals: 'posts' } }, { docId: { equals: String(post.id) } }],
       },
     })
-    expect(afterUpdateEmbeds.totalDocs).toBe(0)
+    expect(afterUpdateEmbeds.totalDocs).toBeGreaterThan(0) // no upfront delete; still present until bulk completion
 
-    // Run again to backfill
-    const secondRun = await payload.create({
-      collection: BULK_EMBEDDINGS_RUNS_SLUG,
-      data: {
-        pool: 'default',
-        embeddingVersion: testEmbeddingVersion,
-        status: 'queued',
-      },
-    })
+    // Next run should have been queued by the update hook
+    expect(queueSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ task: 'payloadcms-vectorize:prepare-bulk-embedding' }),
+    )
+    const secondRun = (
+      await payload.find({
+        collection: BULK_EMBEDDINGS_RUNS_SLUG,
+        where: { pool: { equals: 'default' } },
+        sort: '-createdAt',
+        limit: 1,
+      })
+    ).docs[0]
+    expect(secondRun).toBeDefined()
+
     await prepareTask.handler({ input: { runId: String(secondRun.id) }, req: { payload } as any })
     await pollTask.handler({ input: { runId: String(secondRun.id) }, req: { payload } as any })
 
@@ -240,8 +305,25 @@ describe('Bulk embed ingest mode', () => {
           embedDocs: makeDummyEmbedDocs(DIMS),
           embedQuery: makeDummyEmbedQuery(DIMS),
           embeddingVersion: testEmbeddingVersion,
-          // No bulkEmbeddings - should default to realtime
+          bulkEmbeddings: {
+            ingestMode: 'realtime',
+            prepareBulkEmbeddings: async () => ({
+              providerBatchId: 'noop',
+              status: 'succeeded',
+              counts: { inputs: 0, succeeded: 0, failed: 0 },
+            }),
+            pollBulkEmbeddings: async () => ({ status: 'succeeded' }),
+            completeBulkEmbeddings: async () => ({
+              status: 'succeeded',
+              outputs: [],
+              counts: { inputs: 0 },
+            }),
+          },
         },
+      },
+      bulkQueueNames: {
+        prepareBulkEmbedQueueName: 'vectorize-bulk-prepare',
+        pollOrCompleteQueueName: 'vectorize-bulk-poll',
       },
     }
 
@@ -273,7 +355,22 @@ describe('Bulk embed ingest mode', () => {
       data: { title: 'Realtime Test' } as any,
     })
 
-    // Check that embeddings were created immediately
+    // Manually run vectorize task since jobs queue is not processed in tests
+    const vectorizeTask = createVectorizeTask({
+      knowledgePools: realtimePluginOptions.knowledgePools,
+    })
+    await vectorizeTask.handler({
+      input: {
+        doc: post,
+        collection: 'posts',
+        knowledgePool: 'default',
+      } as any,
+      req: { payload: realtimePayload } as any,
+      inlineTask: vi.fn(),
+      tasks: {} as any,
+      job: {} as any,
+    })
+
     const embeds = await realtimePayload.find({
       collection: 'default',
       where: {
@@ -299,7 +396,10 @@ describe('Bulk embed ingest mode', () => {
           bulkEmbeddings: createMockBulkEmbeddings(['failed']),
         },
       },
-      bulkQueueName: 'vectorize-bulk',
+      bulkQueueNames: {
+        prepareBulkEmbedQueueName: 'vectorize-bulk-prepare',
+        pollOrCompleteQueueName: 'vectorize-bulk-poll',
+      },
     }
 
     const failedConfig = await buildConfig({
@@ -340,11 +440,11 @@ describe('Bulk embed ingest mode', () => {
 
     const prepareTask = createPrepareBulkEmbeddingTask({
       knowledgePools: failedBulkOptions.knowledgePools,
-      bulkQueueName: failedBulkOptions.bulkQueueName,
+      pollOrCompleteQueueName: failedBulkOptions.bulkQueueNames?.pollOrCompleteQueueName,
     })
     const pollTask = createPollOrCompleteBulkEmbeddingTask({
       knowledgePools: failedBulkOptions.knowledgePools,
-      bulkQueueName: failedBulkOptions.bulkQueueName,
+      pollOrCompleteQueueName: failedBulkOptions.bulkQueueNames?.pollOrCompleteQueueName,
     })
 
     await prepareTask.handler({
@@ -386,7 +486,10 @@ describe('Bulk embed ingest mode', () => {
           bulkEmbeddings: createMockBulkEmbeddings(['canceled']),
         },
       },
-      bulkQueueName: 'vectorize-bulk',
+      bulkQueueNames: {
+        prepareBulkEmbedQueueName: 'vectorize-bulk-prepare',
+        pollOrCompleteQueueName: 'vectorize-bulk-poll',
+      },
     }
 
     const canceledConfig = await buildConfig({
@@ -422,11 +525,11 @@ describe('Bulk embed ingest mode', () => {
 
     const prepareTask = createPrepareBulkEmbeddingTask({
       knowledgePools: canceledBulkOptions.knowledgePools,
-      bulkQueueName: canceledBulkOptions.bulkQueueName,
+      pollOrCompleteQueueName: canceledBulkOptions.bulkQueueNames?.pollOrCompleteQueueName,
     })
     const pollTask = createPollOrCompleteBulkEmbeddingTask({
       knowledgePools: canceledBulkOptions.knowledgePools,
-      bulkQueueName: canceledBulkOptions.bulkQueueName,
+      pollOrCompleteQueueName: canceledBulkOptions.bulkQueueNames?.pollOrCompleteQueueName,
     })
 
     await prepareTask.handler({
@@ -476,11 +579,11 @@ describe('Bulk embed ingest mode', () => {
     // Run bulk tasks
     const prepareTask = createPrepareBulkEmbeddingTask({
       knowledgePools: pluginOptions.knowledgePools,
-      bulkQueueName: pluginOptions.bulkQueueName,
+      pollOrCompleteQueueName: pluginOptions.bulkQueueNames?.pollOrCompleteQueueName,
     })
     const pollTask = createPollOrCompleteBulkEmbeddingTask({
       knowledgePools: pluginOptions.knowledgePools,
-      bulkQueueName: pluginOptions.bulkQueueName,
+      pollOrCompleteQueueName: pluginOptions.bulkQueueNames?.pollOrCompleteQueueName,
     })
 
     await prepareTask.handler({ input: { runId: String(run.id) }, req: { payload } as any })

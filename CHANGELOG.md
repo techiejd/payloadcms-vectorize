@@ -7,10 +7,11 @@ All notable changes to this project will be documented in this file.
 ### Breaking Changes
 
 - **`queueName` renamed to `realtimeQueueName`**: The plugin option `queueName` has been renamed to `realtimeQueueName` to clarify that it only affects realtime vectorization jobs.
+- **`bulkQueueName` changed to `bulkQueueNames`**: The plugin option `bulkQueueName` has been replaced with `bulkQueueNames` object containing `prepareBulkEmbedQueueName` and `pollOrCompleteQueueName` for separate queue isolation of bulk preparation vs polling workloads.
 
 ### New Features
 
-- **`bulkQueueName` option**: New plugin option to isolate bulk embedding workloads to a dedicated queue. Required when any knowledge pool uses bulk ingest mode (`bulkEmbeddings.ingestMode === 'bulk'`).
+- **`bulkQueueNames` option**: New plugin option to isolate bulk embedding workloads across separate queues for preparation and polling. Required when any knowledge pool uses bulk ingest mode (`bulkEmbeddings.ingestMode === 'bulk'`).
 - **Non-blocking bulk polling**: Bulk jobs now use separate, short-lived tasks that can safely handle long-running providers (hours/days) without blocking worker processes.
 - **Improved admin UX**: The "Embed all" button now:
   - Disables when bulk embeddings are not configured for a pool

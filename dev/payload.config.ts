@@ -79,11 +79,6 @@ const buildConfigWithPostgres = async () => {
     email: testEmailAdapter,
     jobs: {
       tasks: [],
-      queues: {
-        'vectorize-bulk': {
-          concurrency: 2,
-        },
-      },
       autoRun: [
         {
           cron: '*/5 * * * * *', // Run every 5 seconds in development
@@ -136,8 +131,10 @@ const buildConfigWithPostgres = async () => {
             bulkEmbeddings: makeVoyageBulkEmbeddingsConfig(),
           },
         },
-        realtimeQueueName: 'vectorize-realtime',
-        bulkQueueName: 'vectorize-bulk',
+        bulkQueueNames: {
+          prepareBulkEmbedQueueName: 'vectorize-bulk-prepare',
+          pollOrCompleteQueueName: 'vectorize-bulk-poll',
+        },
       }),
     ],
     secret: process.env.PAYLOAD_SECRET || 'test-secret_key',

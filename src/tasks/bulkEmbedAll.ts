@@ -72,10 +72,10 @@ async function loadRunAndConfig({
 
 export const createPrepareBulkEmbeddingTask = ({
   knowledgePools,
-  bulkQueueName,
+  pollOrCompleteQueueName,
 }: {
   knowledgePools: Record<KnowledgePoolName, KnowledgePoolDynamicConfig>
-  bulkQueueName?: string
+  pollOrCompleteQueueName?: string
 }): TaskConfig<PrepareBulkEmbeddingTaskInputOutput> => {
   const task: TaskConfig<PrepareBulkEmbeddingTaskInputOutput> = {
     slug: 'payloadcms-vectorize:prepare-bulk-embedding',
@@ -119,6 +119,26 @@ export const createPrepareBulkEmbeddingTask = ({
         return { output: { runId: input.runId, status: 'succeeded' } }
       }
 
+      // Clear existing embeddings for the docs in this batch before submitting
+      const docKeysToClear = new Set<string>()
+      for (const input of inputs) {
+        const meta = input.metadata
+        if (!meta) continue
+        docKeysToClear.add(`${meta.sourceCollection}:${meta.docId}`)
+      }
+      for (const key of docKeysToClear) {
+        const [sourceCollection, docId] = key.split(':')
+        await payload.delete({
+          collection: poolName,
+          where: {
+            and: [
+              { sourceCollection: { equals: sourceCollection } },
+              { docId: { equals: String(docId) } },
+            ],
+          },
+        })
+      }
+
       const prepare = (await callbacks.prepareBulkEmbeddings({
         payload,
         knowledgePool: poolName,
@@ -145,7 +165,7 @@ export const createPrepareBulkEmbeddingTask = ({
         task: 'payloadcms-vectorize:poll-or-complete-bulk-embedding',
         input: { runId: input.runId },
         req,
-        ...(bulkQueueName ? { queue: bulkQueueName } : {}),
+        ...(pollOrCompleteQueueName ? { queue: pollOrCompleteQueueName } : {}),
       })
 
       return { output: { runId: input.runId, status: 'prepared' } }
@@ -157,10 +177,10 @@ export const createPrepareBulkEmbeddingTask = ({
 
 export const createPollOrCompleteBulkEmbeddingTask = ({
   knowledgePools,
-  bulkQueueName,
+  pollOrCompleteQueueName,
 }: {
   knowledgePools: Record<KnowledgePoolName, KnowledgePoolDynamicConfig>
-  bulkQueueName?: string
+  pollOrCompleteQueueName?: string
 }): TaskConfig<PollOrCompleteBulkEmbeddingTaskInputOutput> => {
   const task: TaskConfig<PollOrCompleteBulkEmbeddingTaskInputOutput> = {
     slug: 'payloadcms-vectorize:poll-or-complete-bulk-embedding',
@@ -214,7 +234,7 @@ export const createPollOrCompleteBulkEmbeddingTask = ({
           task: 'payloadcms-vectorize:poll-or-complete-bulk-embedding',
           input: { runId: input.runId },
           req,
-          ...(bulkQueueName ? { queue: bulkQueueName } : {}),
+          ...(pollOrCompleteQueueName ? { queue: pollOrCompleteQueueName } : {}),
         })
         return { output: { runId: input.runId, status: 'polling' } }
       }
@@ -388,19 +408,6 @@ async function collectMissingEmbeddings(args: {
       const totalPages = (res as any)?.totalPages ?? page
 
       for (const doc of docs) {
-        const existing = await payload.find({
-          collection: poolName,
-          where: {
-            and: [
-              { sourceCollection: { equals: collectionSlug } },
-              { docId: { equals: String(doc.id) } },
-              { embeddingVersion: { equals: embeddingVersion } },
-            ],
-          },
-          limit: 1,
-        })
-        if (existing.totalDocs > 0) continue
-
         const chunkData = await toKnowledgePool(doc, payload)
         chunkData.forEach((chunkEntry, idx) => {
           if (!chunkEntry?.chunk) return

@@ -165,13 +165,13 @@ const { results } = await response.json()
 
 ### Plugin Options
 
-| Option              | Type                                                | Required | Description                                                                |
-| ------------------- | --------------------------------------------------- | -------- | -------------------------------------------------------------------------- |
-| `knowledgePools`    | `Record<KnowledgePool, KnowledgePoolDynamicConfig>` | ✅       | Knowledge pools and their configurations                                   |
-| `realtimeQueueName` | `string`                                            | ❌       | Custom queue name for realtime vectorization jobs                          |
-| `bulkQueueName`     | `string`                                            | ❌       | Queue name for bulk embedding jobs (required if any pool uses bulk ingest) |
-| `endpointOverrides` | `object`                                            | ❌       | Customize the search endpoint                                              |
-| `disabled`          | `boolean`                                           | ❌       | Disable plugin while keeping schema                                        |
+| Option              | Type                                                                   | Required | Description                                                                 |
+| ------------------- | ---------------------------------------------------------------------- | -------- | --------------------------------------------------------------------------- |
+| `knowledgePools`    | `Record<KnowledgePool, KnowledgePoolDynamicConfig>`                    | ✅       | Knowledge pools and their configurations                                    |
+| `realtimeQueueName` | `string`                                                               | ❌       | Custom queue name for realtime vectorization jobs                           |
+| `bulkQueueNames`    | `{prepareBulkEmbedQueueName: string, pollOrCompleteQueueName: string}` | ❌       | Queue names for bulk embedding jobs (required if any pool uses bulk ingest) |
+| `endpointOverrides` | `object`                                                               | ❌       | Customize the search endpoint                                               |
+| `disabled`          | `boolean`                                                              | ❌       | Disable plugin while keeping schema                                         |
 
 ### Knowledge Pool Config
 
@@ -215,16 +215,20 @@ plugins: [
   payloadcmsVectorize({
     knowledgePools: { /* ... */ },
     realtimeQueueName: 'vectorize-realtime', // Separate realtime jobs (Optional)
-    bulkQueueName: 'vectorize-bulk',        // Isolate bulk workloads (Required if any knowledge pool uses bulk ingestion of any kind)
+    bulkQueueNames: {
+      prepareBulkEmbedQueueName: 'vectorize-bulk-prepare', // Daily bulk preparation (Required if any knowledge pool uses bulk ingestion)
+      pollOrCompleteQueueName: 'vectorize-bulk-poll',       // Frequent polling/completion (Required if any knowledge pool uses bulk ingestion)
+    },
   }),
 ]
 
-// Configure Payload queues
 jobs: {
-  queues: {
-    'vectorize-realtime': { concurrency: 5 },
-    'vectorize-bulk': { concurrency: 2 },
-  },
+  // Payload processes jobs via autoRun. Use different schedules for different workloads.
+  autoRun: [
+    { cron: '*/5 * * * * *', limit: 10, queue: 'vectorize-realtime' }, // Optional: Process realtime jobs every 5 seconds
+    { cron: '0 0 * * * *', limit: 1, queue: 'vectorize-bulk-prepare' }, // Required: Run bulk preparation once per hour (or daily)
+    { cron: '*/30 * * * * *', limit: 5, queue: 'vectorize-bulk-poll' }, // Required: Poll bulk status every 30 seconds
+  ],
 }
 ```
 
