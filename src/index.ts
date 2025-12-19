@@ -328,6 +328,40 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
             dims: staticConfig.dims,
             ivfflatLists: staticConfig.ivfflatLists,
           })
+
+          // If bulk ingest is configured for this pool, ensure a baseline run exists and is queued
+          const dynamicConfig = pluginOptions.knowledgePools?.[poolName]
+          if (
+            dynamicConfig?.bulkEmbeddings &&
+            dynamicConfig.bulkEmbeddings.ingestMode !== 'realtime'
+          ) {
+            const existingSucceeded = await payload.find({
+              collection: BULK_EMBEDDINGS_RUNS_SLUG,
+              where: {
+                and: [{ pool: { equals: poolName } }, { status: { equals: 'succeeded' } }],
+              },
+              limit: 1,
+              sort: '-completedAt',
+            })
+            if (!existingSucceeded.totalDocs) {
+              const run = await payload.create({
+                collection: BULK_EMBEDDINGS_RUNS_SLUG,
+                data: {
+                  pool: poolName,
+                  embeddingVersion: dynamicConfig.embeddingVersion,
+                  status: 'queued',
+                },
+              })
+              await payload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
+                task: 'payloadcms-vectorize:prepare-bulk-embedding',
+                input: { runId: String(run.id) },
+                req: { payload } as any,
+                ...(pluginOptions.bulkQueueNames?.prepareBulkEmbedQueueName
+                  ? { queue: pluginOptions.bulkQueueNames.prepareBulkEmbedQueueName }
+                  : {}),
+              })
+            }
+          }
         }
       }
 

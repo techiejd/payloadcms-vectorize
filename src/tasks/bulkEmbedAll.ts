@@ -96,11 +96,34 @@ export const createPrepareBulkEmbeddingTask = ({
       const callbacks = dynamicConfig.bulkEmbeddings!
       const embeddingVersion = dynamicConfig.embeddingVersion
 
+      const latestSucceededRun = await payload.find({
+        collection: BULK_EMBEDDINGS_RUNS_SLUG,
+        where: {
+          and: [
+            { pool: { equals: poolName } },
+            { status: { equals: 'succeeded' } },
+            { completedAt: { exists: true } },
+          ],
+        },
+        limit: 1,
+        sort: '-completedAt',
+      })
+
+      const baselineRun = (latestSucceededRun as any)?.docs?.[0]
+      const baselineVersion: string | undefined = baselineRun?.embeddingVersion
+      const lastBulkCompletedAt: string | undefined = baselineRun?.completedAt
+      const currentEmbeddingVersion = embeddingVersion
+      const versionMismatch =
+        baselineVersion !== undefined && baselineVersion !== currentEmbeddingVersion
+
       const inputs = await collectMissingEmbeddings({
         payload,
         poolName,
         dynamicConfig,
-        embeddingVersion,
+        embeddingVersion: currentEmbeddingVersion,
+        lastBulkCompletedAt,
+        versionMismatch,
+        hasBaseline: Boolean(baselineRun),
       })
 
       const inputsCount = inputs.length
@@ -117,26 +140,6 @@ export const createPrepareBulkEmbeddingTask = ({
           },
         })
         return { output: { runId: input.runId, status: 'succeeded' } }
-      }
-
-      // Clear existing embeddings for the docs in this batch before submitting
-      const docKeysToClear = new Set<string>()
-      for (const input of inputs) {
-        const meta = input.metadata
-        if (!meta) continue
-        docKeysToClear.add(`${meta.sourceCollection}:${meta.docId}`)
-      }
-      for (const key of docKeysToClear) {
-        const [sourceCollection, docId] = key.split(':')
-        await payload.delete({
-          collection: poolName,
-          where: {
-            and: [
-              { sourceCollection: { equals: sourceCollection } },
-              { docId: { equals: String(docId) } },
-            ],
-          },
-        })
       }
 
       const prepare = (await callbacks.prepareBulkEmbeddings({
@@ -266,6 +269,8 @@ export const createPollOrCompleteBulkEmbeddingTask = ({
         poolName,
         dynamicConfig,
         embeddingVersion,
+        versionMismatch: true,
+        hasBaseline: true,
       })
       const inputsById = new Map(inputs.map((input) => [input.id, input]))
       const successfulOutputs = outputs.filter((o) => !o.error && o.embedding)
@@ -385,9 +390,23 @@ async function collectMissingEmbeddings(args: {
   poolName: KnowledgePoolName
   dynamicConfig: KnowledgePoolDynamicConfig
   embeddingVersion: string
+  lastBulkCompletedAt?: string
+  versionMismatch: boolean
+  hasBaseline: boolean
 }): Promise<BulkEmbeddingInput[]> {
-  const { payload, poolName, dynamicConfig, embeddingVersion } = args
+  const {
+    payload,
+    poolName,
+    dynamicConfig,
+    embeddingVersion,
+    lastBulkCompletedAt,
+    versionMismatch,
+    hasBaseline,
+  } = args
   const inputs: BulkEmbeddingInput[] = []
+
+  const includeAll = versionMismatch || !hasBaseline
+  const lastCompletedAtDate = lastBulkCompletedAt ? new Date(lastBulkCompletedAt) : undefined
 
   for (const collectionSlug of Object.keys(dynamicConfig.collections)) {
     const collectionConfig = dynamicConfig.collections[collectionSlug]
@@ -408,6 +427,22 @@ async function collectMissingEmbeddings(args: {
       const totalPages = (res as any)?.totalPages ?? page
 
       for (const doc of docs) {
+        const docUpdatedAt = doc?.updatedAt ? new Date(doc.updatedAt) : undefined
+        let shouldInclude = includeAll
+        if (!shouldInclude) {
+          const updatedAfter =
+            docUpdatedAt && lastCompletedAtDate ? docUpdatedAt > lastCompletedAtDate : false
+          const hasCurrentEmbedding = await docHasEmbeddingVersion({
+            payload,
+            poolName,
+            sourceCollection: collectionSlug,
+            docId: String(doc.id),
+            embeddingVersion,
+          })
+          shouldInclude = updatedAfter || !hasCurrentEmbedding
+        }
+        if (!shouldInclude) continue
+
         const chunkData = await toKnowledgePool(doc, payload)
         chunkData.forEach((chunkEntry, idx) => {
           if (!chunkEntry?.chunk) return
@@ -431,4 +466,26 @@ async function collectMissingEmbeddings(args: {
   }
 
   return inputs
+}
+
+async function docHasEmbeddingVersion(args: {
+  payload: Payload
+  poolName: KnowledgePoolName
+  sourceCollection: string
+  docId: string
+  embeddingVersion: string
+}): Promise<boolean> {
+  const { payload, poolName, sourceCollection, docId, embeddingVersion } = args
+  const existing = await payload.find({
+    collection: poolName,
+    where: {
+      and: [
+        { sourceCollection: { equals: sourceCollection } },
+        { docId: { equals: String(docId) } },
+        { embeddingVersion: { equals: embeddingVersion } },
+      ],
+    },
+    limit: 1,
+  })
+  return (existing as any)?.totalDocs > 0
 }

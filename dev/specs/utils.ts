@@ -14,37 +14,38 @@ export const createTestDb = async ({ dbName }: { dbName: string }) => {
   await client.end()
 }
 
-// Helper function to wait for vectorization jobs to complete
-export async function waitForVectorizationJobs(payload: Payload, maxWaitMs = 10000) {
+async function waitForTasks(
+  payload: Payload,
+  taskSlugs: string[],
+  maxWaitMs = 10000,
+  intervalMs = 250,
+) {
   const startTime = Date.now()
   while (Date.now() - startTime < maxWaitMs) {
-    const jobs = await payload.find({
+    const pending = await payload.find({
       collection: 'payload-jobs',
       where: {
-        and: [
-          { taskSlug: { equals: 'payloadcms-vectorize:vectorize' } },
-          { processing: { equals: true } },
-        ],
+        and: [{ taskSlug: { in: taskSlugs } }, { completedAt: { exists: false } }],
       },
     })
-    if (jobs.totalDocs === 0) {
-      // No running vectorization jobs, check if any are pending
-      const pendingJobs = await payload.find({
-        collection: 'payload-jobs',
-        where: {
-          and: [
-            { taskSlug: { equals: 'payloadcms-vectorize:vectorize' } },
-            { processing: { equals: false } },
-            { completedAt: { equals: null } },
-          ],
-        },
-      })
-      if (pendingJobs.totalDocs === 0) {
-        return // All jobs completed
-      }
-    }
-    await new Promise((resolve) => setTimeout(resolve, 500)) // Check every 500ms
+    if (pending.totalDocs === 0) return
+    await new Promise((resolve) => setTimeout(resolve, intervalMs))
   }
-  // Fallback: wait a bit more if we hit the timeout
-  await new Promise((resolve) => setTimeout(resolve, 2000))
+  // One last grace wait
+  await new Promise((resolve) => setTimeout(resolve, 500))
+}
+
+export async function waitForVectorizationJobs(payload: Payload, maxWaitMs = 10000) {
+  await waitForTasks(payload, ['payloadcms-vectorize:vectorize'], maxWaitMs)
+}
+
+export async function waitForBulkJobs(payload: Payload, maxWaitMs = 10000) {
+  await waitForTasks(
+    payload,
+    [
+      'payloadcms-vectorize:prepare-bulk-embedding',
+      'payloadcms-vectorize:poll-or-complete-bulk-embedding',
+    ],
+    maxWaitMs,
+  )
 }
