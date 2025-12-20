@@ -258,6 +258,11 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
                 if (!collectionConfig) continue
 
                 if ((dynamic.bulkEmbeddings?.ingestMode || 'realtime') === 'bulk') {
+                  console.log(
+                    '[payloadcms-vectorize] afterChange enqueue bulk run',
+                    pool,
+                    dynamic.bulkEmbeddings,
+                  )
                   // In bulk mode, queue a bulk run and let poll/completion handle deletes
                   const run = await payload.create({
                     collection: BULK_EMBEDDINGS_RUNS_SLUG,
@@ -340,10 +345,7 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
 
           // If bulk ingest is configured for this pool, ensure a baseline run exists and is queued
           const dynamicConfig = pluginOptions.knowledgePools?.[poolName]
-          if (
-            dynamicConfig?.bulkEmbeddings &&
-            dynamicConfig.bulkEmbeddings.ingestMode !== 'realtime'
-          ) {
+          if (dynamicConfig?.bulkEmbeddings?.ingestMode === 'bulk') {
             const existingSucceeded = await payload.find({
               collection: BULK_EMBEDDINGS_RUNS_SLUG,
               where: {
@@ -353,6 +355,11 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
               sort: '-completedAt',
             })
             if (!existingSucceeded.totalDocs) {
+              console.log(
+                '[payloadcms-vectorize] queuing baseline bulk run',
+                poolName,
+                dynamicConfig?.bulkEmbeddings,
+              )
               const run = await payload.create({
                 collection: BULK_EMBEDDINGS_RUNS_SLUG,
                 data: {

@@ -28,9 +28,9 @@ pnpm add payloadcms-vectorize
 
 ## Quick Start
 
-### 0. Install pgvector
+### 0. Have pgvector permissions
 
-The plugin automatically creates the `vector` extension when Payload initializes. However, your PostgreSQL database user must have permission to create extensions. If your user doesn't have these permissions, you may need to manually create the extension once:
+The plugin expects `vector` extension to be configured when Payload initializes. Your PostgreSQL database user must have permission to create extensions. If your user doesn't have these permissions, someone with permissions may need to manually create the extension once:
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;
@@ -104,6 +104,7 @@ const { afterSchemaInitHook, payloadcmsVectorize } = createVectorizeIntegration(
 export default buildConfig({
   // ... your existing config
   db: postgresAdapter({
+    // configure the 'vector' extension.
     extensions: ['vector'],
     // afterSchemaInitHook adds 'vector' to your schema
     afterSchemaInit: [afterSchemaInitHook],

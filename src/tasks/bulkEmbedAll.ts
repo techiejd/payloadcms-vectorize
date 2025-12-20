@@ -150,7 +150,7 @@ export const createPrepareBulkEmbeddingTask = ({
           payload.create({
             collection: BULK_EMBEDDINGS_INPUT_METADATA_SLUG,
             data: {
-              run: input.runId,
+              run: (run as any).id,
               inputId: inputWithMeta.id,
               text: inputWithMeta.text,
               sourceCollection: inputWithMeta.metadata.sourceCollection,
@@ -292,7 +292,7 @@ export const createPollOrCompleteBulkEmbeddingTask = ({
       // Load stored metadata for this run
       const metadataById = await loadInputMetadataByRun({
         payload,
-        runId: input.runId,
+        runId: String((run as any).id),
       })
 
       const successfulOutputs = outputs.filter((o) => !o.error && o.embedding)
@@ -351,7 +351,7 @@ export const createPollOrCompleteBulkEmbeddingTask = ({
       // Cleanup stored metadata for this run
       await payload.delete({
         collection: BULK_EMBEDDINGS_INPUT_METADATA_SLUG,
-        where: { run: { equals: input.runId } },
+        where: { run: { equals: (run as any).id } },
       })
 
       await payload.update({
