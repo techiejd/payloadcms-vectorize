@@ -51,14 +51,19 @@ export type BulkEmbeddingInput = {
   id: string
   /** Raw text to embed */
   text: string
-  metadata: {
-    sourceCollection: string
-    docId: string
-    chunkIndex: number
-    embeddingVersion: string
-    [key: string]: any
-  }
 }
+
+/** Internal metadata we persist per input to rebuild embeddings after provider returns outputs */
+export type BulkEmbeddingInputMetadata = {
+  sourceCollection: string
+  docId: string
+  chunkIndex: number
+  embeddingVersion: string
+  /** Arbitrary extension fields returned by toKnowledgePool */
+  extensionFields?: Record<string, any>
+}
+
+export type CollectedEmbeddingInput = BulkEmbeddingInput & { metadata: BulkEmbeddingInputMetadata }
 
 export type BulkEmbeddingOutput = {
   id: string

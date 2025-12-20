@@ -20,10 +20,11 @@ export const createBulkEmbeddingsRunsCollection = (): CollectionConfig => ({
     defaultColumns: ['pool', 'status', 'inputs', 'succeeded', 'failed', 'submittedAt'],
   },
   access: {
+    // Anyone can read; only internal (local API) can mutate.
     read: () => true,
-    create: () => true,
-    update: () => true,
-    delete: () => false,
+    create: ({ req }) => req?.payloadAPI === 'local',
+    update: ({ req }) => req?.payloadAPI === 'local',
+    delete: ({ req }) => req?.payloadAPI === 'local',
   },
   fields: [
     {

@@ -2,10 +2,12 @@ import { Payload, TaskConfig, TaskHandlerResult } from 'payload'
 import {
   BulkEmbeddingInput,
   BulkEmbeddingsConfig,
+  CollectedEmbeddingInput,
   KnowledgePoolDynamicConfig,
   KnowledgePoolName,
 } from '../types.js'
 import { BULK_EMBEDDINGS_RUNS_SLUG } from '../collections/bulkEmbeddingsRuns.js'
+import { BULK_EMBEDDINGS_INPUT_METADATA_SLUG } from '../collections/bulkEmbeddingInputMetadata.js'
 import { isPostgresPayload, PostgresPayload } from '../types.js'
 
 type PrepareBulkEmbeddingTaskInput = {
@@ -116,7 +118,7 @@ export const createPrepareBulkEmbeddingTask = ({
       const versionMismatch =
         baselineVersion !== undefined && baselineVersion !== currentEmbeddingVersion
 
-      const inputs = await collectMissingEmbeddings({
+      const inputsWithMetadata = await collectMissingEmbeddings({
         payload,
         poolName,
         dynamicConfig,
@@ -126,7 +128,7 @@ export const createPrepareBulkEmbeddingTask = ({
         hasBaseline: Boolean(baselineRun),
       })
 
-      const inputsCount = inputs.length
+      const inputsCount = inputsWithMetadata.length
       if (inputsCount === 0) {
         await payload.update({
           id: input.runId,
@@ -142,11 +144,35 @@ export const createPrepareBulkEmbeddingTask = ({
         return { output: { runId: input.runId, status: 'succeeded' } }
       }
 
+      // Persist metadata for this run so we can rebuild embeddings later
+      await Promise.all(
+        inputsWithMetadata.map((inputWithMeta) =>
+          payload.create({
+            collection: BULK_EMBEDDINGS_INPUT_METADATA_SLUG,
+            data: {
+              run: input.runId,
+              inputId: inputWithMeta.id,
+              text: inputWithMeta.text,
+              sourceCollection: inputWithMeta.metadata.sourceCollection,
+              docId: inputWithMeta.metadata.docId,
+              chunkIndex: inputWithMeta.metadata.chunkIndex,
+              embeddingVersion: inputWithMeta.metadata.embeddingVersion,
+              extensionFields: inputWithMeta.metadata.extensionFields,
+            },
+          }),
+        ),
+      )
+
+      const providerInputs: BulkEmbeddingInput[] = inputsWithMetadata.map(({ id, text }) => ({
+        id,
+        text,
+      }))
+
       const prepare = (await callbacks.prepareBulkEmbeddings({
         payload,
         knowledgePool: poolName,
         embeddingVersion,
-        inputs,
+        inputs: providerInputs,
       })) || { providerBatchId: `local-${Date.now()}` }
 
       const providerBatchId = prepare.providerBatchId
@@ -263,25 +289,21 @@ export const createPollOrCompleteBulkEmbeddingTask = ({
 
       const outputs = completion.outputs || []
 
-      // Re-collect inputs to match outputs (in case they changed during polling)
-      const inputs = await collectMissingEmbeddings({
+      // Load stored metadata for this run
+      const metadataById = await loadInputMetadataByRun({
         payload,
-        poolName,
-        dynamicConfig,
-        embeddingVersion,
-        versionMismatch: true,
-        hasBaseline: true,
+        runId: input.runId,
       })
-      const inputsById = new Map(inputs.map((input) => [input.id, input]))
+
       const successfulOutputs = outputs.filter((o) => !o.error && o.embedding)
       const failedCount = completion.counts?.failed ?? outputs.length - successfulOutputs.length
 
       // Remove existing embeddings for successful doc ids before writing new vectors
       const docKeys = new Set<string>()
       for (const output of successfulOutputs) {
-        const inputMeta = inputsById.get(output.id)?.metadata
-        if (!inputMeta) continue
-        docKeys.add(`${inputMeta.sourceCollection}:${inputMeta.docId}`)
+        const meta = metadataById.get(output.id)
+        if (!meta) continue
+        docKeys.add(`${meta.sourceCollection}:${meta.docId}`)
       }
       for (const key of docKeys) {
         const [sourceCollection, docId] = key.split(':')
@@ -297,31 +319,24 @@ export const createPollOrCompleteBulkEmbeddingTask = ({
       }
 
       for (const output of successfulOutputs) {
-        const input = inputsById.get(output.id)
-        if (!input || !output.embedding) continue
+        const meta = metadataById.get(output.id)
+        if (!meta || !output.embedding) continue
 
         const embeddingArray = Array.isArray(output.embedding)
           ? output.embedding
           : Array.from(output.embedding)
 
-        const {
-          chunkIndex,
-          sourceCollection,
-          docId,
-          embeddingVersion: version,
-          ...rest
-        } = input.metadata
-        const chunkText = input.text
+        const chunkText = meta.text
 
         const created = await payload.create({
           collection: poolName,
           data: {
-            sourceCollection,
-            docId: String(docId),
-            chunkIndex,
+            sourceCollection: meta.sourceCollection,
+            docId: String(meta.docId),
+            chunkIndex: meta.chunkIndex,
             chunkText,
-            embeddingVersion: version,
-            ...rest,
+            embeddingVersion: meta.embeddingVersion,
+            ...(meta.extensionFields || {}),
             embedding: embeddingArray,
           } as any,
         })
@@ -332,6 +347,12 @@ export const createPollOrCompleteBulkEmbeddingTask = ({
           id: String((created as any)?.id ?? ''),
         })
       }
+
+      // Cleanup stored metadata for this run
+      await payload.delete({
+        collection: BULK_EMBEDDINGS_INPUT_METADATA_SLUG,
+        where: { run: { equals: input.runId } },
+      })
 
       await payload.update({
         id: input.runId,
@@ -393,7 +414,7 @@ async function collectMissingEmbeddings(args: {
   lastBulkCompletedAt?: string
   versionMismatch: boolean
   hasBaseline: boolean
-}): Promise<BulkEmbeddingInput[]> {
+}): Promise<CollectedEmbeddingInput[]> {
   const {
     payload,
     poolName,
@@ -403,7 +424,7 @@ async function collectMissingEmbeddings(args: {
     versionMismatch,
     hasBaseline,
   } = args
-  const inputs: BulkEmbeddingInput[] = []
+  const inputs: CollectedEmbeddingInput[] = []
 
   const includeAll = versionMismatch || !hasBaseline
   const lastCompletedAtDate = lastBulkCompletedAt ? new Date(lastBulkCompletedAt) : undefined
@@ -455,7 +476,7 @@ async function collectMissingEmbeddings(args: {
               docId: String(doc.id),
               chunkIndex: idx,
               embeddingVersion,
-              ...extensionFields,
+              extensionFields,
             },
           })
         })
@@ -488,4 +509,62 @@ async function docHasEmbeddingVersion(args: {
     limit: 1,
   })
   return (existing as any)?.totalDocs > 0
+}
+
+async function loadInputMetadataByRun(args: { payload: Payload; runId: string }): Promise<
+  Map<
+    string,
+    {
+      text: string
+      sourceCollection: string
+      docId: string
+      chunkIndex: number
+      embeddingVersion: string
+      extensionFields?: Record<string, any>
+    }
+  >
+> {
+  const { payload, runId } = args
+  const map = new Map<
+    string,
+    {
+      text: string
+      sourceCollection: string
+      docId: string
+      chunkIndex: number
+      embeddingVersion: string
+      extensionFields?: Record<string, any>
+    }
+  >()
+
+  let page = 1
+  const limit = 100
+  while (true) {
+    const res = await payload.find({
+      collection: BULK_EMBEDDINGS_INPUT_METADATA_SLUG,
+      page,
+      limit,
+      where: { run: { equals: runId } },
+      sort: 'inputId',
+    })
+    const docs = (res as any)?.docs || []
+    if (!docs.length) break
+
+    for (const doc of docs) {
+      map.set(String(doc.inputId), {
+        text: doc.text,
+        sourceCollection: doc.sourceCollection,
+        docId: String(doc.docId),
+        chunkIndex: doc.chunkIndex,
+        embeddingVersion: doc.embeddingVersion,
+        extensionFields: doc.extensionFields || undefined,
+      })
+    }
+
+    const totalPages = (res as any)?.totalPages ?? page
+    page += 1
+    if (page > totalPages) break
+  }
+
+  return map
 }

@@ -7,6 +7,7 @@ import { postgresAdapter } from '@payloadcms/db-postgres'
 import { lexicalEditor } from '@payloadcms/richtext-lexical'
 import { createVectorizeIntegration } from 'payloadcms-vectorize'
 import { BULK_EMBEDDINGS_RUNS_SLUG } from '../../src/collections/bulkEmbeddingsRuns.js'
+import { BULK_EMBEDDINGS_INPUT_METADATA_SLUG } from '../../src/collections/bulkEmbeddingInputMetadata.js'
 import { createTestDb, waitForBulkJobs } from './utils.js'
 import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
 import type {
@@ -150,6 +151,10 @@ describe('Bulk embed ingest mode with version/time gating', () => {
   const clearAll = async (pl: Payload) => {
     await (pl as any).delete({
       collection: BULK_EMBEDDINGS_RUNS_SLUG,
+      where: { id: { exists: true } },
+    })
+    await (pl as any).delete({
+      collection: BULK_EMBEDDINGS_INPUT_METADATA_SLUG,
       where: { id: { exists: true } },
     })
     await (pl as any).delete({
@@ -512,6 +517,130 @@ describe('Bulk embed ingest mode with version/time gating', () => {
       where: { docId: { equals: String(post.id) } },
     })
     expect(embeds.totalDocs).toBe(0)
+  })
+
+  test('stores metadata records for inputs before provider submit', async () => {
+    await clearAll(payload)
+    const metaPayload = await buildPayload({
+      ...basePluginOptions,
+      knowledgePools: {
+        default: {
+          ...basePluginOptions.knowledgePools.default,
+          extensionFields: [{ name: 'category', type: 'text' }],
+          collections: {
+            posts: {
+              toKnowledgePool: async (doc: any) => [{ chunk: doc.title, category: 'tech' }],
+            },
+          },
+        },
+      },
+    })
+    const createSpy = vi.spyOn(metaPayload, 'create')
+    await metaPayload.create({ collection: 'posts', data: { title: 'Meta' } as any })
+    await waitForBulkJobs(metaPayload)
+    expect(
+      createSpy.mock.calls.some(
+        (call) =>
+          call[0]?.collection === BULK_EMBEDDINGS_INPUT_METADATA_SLUG && call[0]?.data?.inputId,
+      ),
+    ).toBe(true)
+    createSpy.mockRestore()
+  })
+
+  test('extension fields are merged when writing embeddings from metadata table', async () => {
+    await clearAll(payload)
+    const metaPayload = await buildPayload({
+      ...basePluginOptions,
+      knowledgePools: {
+        default: {
+          ...basePluginOptions.knowledgePools.default,
+          extensionFields: [
+            { name: 'category', type: 'text' },
+            { name: 'priority', type: 'number' },
+          ],
+          collections: {
+            posts: {
+              toKnowledgePool: async (doc: any) => [
+                { chunk: doc.title, category: 'tech', priority: 3 },
+              ],
+            },
+          },
+        },
+      },
+    })
+    const post = await metaPayload.create({
+      collection: 'posts',
+      data: { title: 'Ext merge' } as any,
+    })
+    await waitForBulkJobs(metaPayload)
+    const embeds = await metaPayload.find({
+      collection: 'default',
+      where: { docId: { equals: String(post.id) } },
+    })
+    expect(embeds.totalDocs).toBe(1)
+    expect(embeds.docs[0]).toHaveProperty('category', 'tech')
+    expect(embeds.docs[0]).toHaveProperty('priority', 3)
+  })
+
+  test('multiple chunks keep their respective extension fields', async () => {
+    await clearAll(payload)
+    const multiPayload = await buildPayload({
+      ...basePluginOptions,
+      knowledgePools: {
+        default: {
+          ...basePluginOptions.knowledgePools.default,
+          extensionFields: [
+            { name: 'category', type: 'text' },
+            { name: 'priority', type: 'number' },
+          ],
+          collections: {
+            posts: {
+              toKnowledgePool: async () => [
+                { chunk: 'Chunk 1', category: 'a', priority: 1 },
+                { chunk: 'Chunk 2', category: 'b', priority: 2 },
+              ],
+            },
+          },
+        },
+      },
+    })
+    const post = await multiPayload.create({
+      collection: 'posts',
+      data: { title: 'Two' } as any,
+    })
+    await waitForBulkJobs(multiPayload)
+    const embeds = await multiPayload.find({
+      collection: 'default',
+      where: { docId: { equals: String(post.id) } },
+      sort: 'chunkIndex',
+    })
+    expect(embeds.totalDocs).toBe(2)
+    expect(embeds.docs[0]).toMatchObject({ category: 'a', priority: 1, chunkIndex: 0 })
+    expect(embeds.docs[1]).toMatchObject({ category: 'b', priority: 2, chunkIndex: 1 })
+  })
+
+  test('metadata table is cleaned after successful completion', async () => {
+    await clearAll(payload)
+    const cleanPayload = await buildPayload({
+      ...basePluginOptions,
+      knowledgePools: {
+        default: {
+          ...basePluginOptions.knowledgePools.default,
+          collections: {
+            posts: {
+              toKnowledgePool: async (doc: any) => [{ chunk: doc.title }],
+            },
+          },
+        },
+      },
+    })
+    await cleanPayload.create({ collection: 'posts', data: { title: 'Cleanup' } as any })
+    await waitForBulkJobs(cleanPayload)
+    const metadata = await cleanPayload.find({
+      collection: BULK_EMBEDDINGS_INPUT_METADATA_SLUG,
+      where: { run: { exists: true } },
+    })
+    expect(metadata.totalDocs).toBe(0)
   })
 
   test('realtime ingest mode still queues vectorize jobs', async () => {
