@@ -38,7 +38,7 @@ describe('Bulk embed init without bulk', () => {
   // NOTE: skipped because Payload caches the first getPayload() instance per process,
   // so toggling bulk on/off in a single process cannot be simulated reliably.
   // Keep this isolated spec for future process-isolated runs.
-  test.skip('enabling bulk later queues first run automatically', async () => {
+  test('enabling bulk later queues first run automatically', async () => {
     await createTestDb({ dbName })
 
     // Build without bulk (plugin disabled so no hooks/onInit work)
@@ -55,8 +55,8 @@ describe('Bulk embed init without bulk', () => {
     const { payload: noBulkPayload } = await buildPayloadWithIntegration({
       dbName,
       pluginOpts: noBulkOptions,
-      secret: `secret-nobulk-${Date.now()}`,
       dims: DIMS,
+      key: `noBulkPayload-${dbName}-${Date.now()}`,
     })
     await clearAllCollections(noBulkPayload)
     await noBulkPayload.create({ collection: 'posts', data: { title: 'NoBulk' } as any })
@@ -70,8 +70,8 @@ describe('Bulk embed init without bulk', () => {
     const { payload: bulkPayload } = await buildPayloadWithIntegration({
       dbName,
       pluginOpts: basePluginOptions,
-      secret: `secret-bulk-${Date.now()}`,
       dims: DIMS,
+      key: `bulkPayload-${dbName}-${Date.now()}`,
     })
     payload = bulkPayload
     await bulkPayload.create({ collection: 'posts', data: { title: 'WithBulk' } as any })

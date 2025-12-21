@@ -44,12 +44,12 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
-    "@payloadcms/db-postgres": "3.37.0",
-    "@payloadcms/db-sqlite": "3.37.0",
+    "@payloadcms/db-postgres": "3.54.0",
+    "@payloadcms/db-sqlite": "3.54.0",
     "@payloadcms/eslint-config": "3.9.0",
-    "@payloadcms/next": "3.37.0",
-    "@payloadcms/richtext-lexical": "3.37.0",
-    "@payloadcms/ui": "3.37.0",
+    "@payloadcms/next": "3.54.0",
+    "@payloadcms/richtext-lexical": "3.54.0",
+    "@payloadcms/ui": "3.54.0",
     "@playwright/test": "^1.52.0",
     "@swc-node/register": "1.10.9",
     "@swc/cli": "0.6.0",
@@ -71,7 +71,7 @@
     "jest": "^30.2.0",
     "next": "15.4.4",
     "open": "^10.1.0",
-    "payload": "3.37.0",
+    "payload": "3.54.0",
     "pg": "^8.16.3",
     "postcss": "^8.5.6",
     "prettier": "^3.4.2",
@@ -89,7 +89,7 @@
     "voyageai": "^0.0.8"
   },
   "peerDependencies": {
-    "payload": "^3.37.0"
+    "payload": ">=3 <4"
   },
   "engines": {
     "node": "^18.20.2 || >=20.9.0",

@@ -135,6 +135,7 @@ export type BuildPayloadArgs = {
   pluginOpts: any
   secret?: string
   dims?: number
+  key?: string
 }
 
 export async function buildPayloadWithIntegration({
@@ -142,6 +143,7 @@ export async function buildPayloadWithIntegration({
   pluginOpts,
   secret = 'test-secret',
   dims = DEFAULT_DIMS,
+  key,
 }: BuildPayloadArgs): Promise<{ payload: Payload; config: SanitizedConfig }> {
   const integration = createVectorizeIntegration({
     default: {
@@ -184,7 +186,8 @@ export async function buildPayloadWithIntegration({
     },
   })
 
-  const payload = await getPayload({ config })
+  const payloadKey = key ?? `payload-${dbName}-${Date.now()}`
+  const payload = await getPayload({ config, key: payloadKey, cron: true })
   return { payload, config }
 }
 
