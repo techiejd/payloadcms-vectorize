@@ -14,6 +14,19 @@ import type { PostgresAdapterArgs } from '@payloadcms/db-postgres'
 import { createVectorizeTask } from './tasks/vectorize.js'
 import { createVectorSearchHandler } from './endpoints/vectorSearch.js'
 import { clearEmbeddingsTables, registerEmbeddingsTable } from './drizzle/tables.js'
+import {
+  createBulkEmbeddingsRunsCollection,
+  BULK_EMBEDDINGS_RUNS_SLUG,
+} from './collections/bulkEmbeddingsRuns.js'
+import {
+  BULK_EMBEDDINGS_INPUT_METADATA_SLUG,
+  createBulkEmbeddingInputMetadataCollection,
+} from './collections/bulkEmbeddingInputMetadata.js'
+import {
+  createPrepareBulkEmbeddingTask,
+  createPollOrCompleteBulkEmbeddingTask,
+} from './tasks/bulkEmbedAll.js'
+import { createBulkEmbedHandler } from './endpoints/bulkEmbed.js'
 
 export type * from './types.js'
 
@@ -119,6 +132,17 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
       // Ensure collections array exists
       config.collections = [...(config.collections || [])]
 
+      // Ensure bulk runs collection exists once
+      const bulkRunsCollection = createBulkEmbeddingsRunsCollection()
+      if (!config.collections.find((c) => c.slug === BULK_EMBEDDINGS_RUNS_SLUG)) {
+        config.collections.push(bulkRunsCollection)
+      }
+      // Ensure bulk input metadata collection exists once
+      const bulkInputMetadataCollection = createBulkEmbeddingInputMetadataCollection()
+      if (!config.collections.find((c) => c.slug === BULK_EMBEDDINGS_INPUT_METADATA_SLUG)) {
+        config.collections.push(bulkInputMetadataCollection)
+      }
+
       // Validate static/dynamic configs share the same pool names
       for (const poolName in pluginOptions.knowledgePools) {
         if (!staticConfigs[poolName]) {
@@ -171,6 +195,21 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
         }
       }
 
+      // Validate bulk queue requirements
+      let bulkIngestEnabled = false
+      for (const poolName in pluginOptions.knowledgePools) {
+        const dynamicConfig = pluginOptions.knowledgePools[poolName]
+        if ((dynamicConfig.bulkEmbeddings?.ingestMode || 'realtime') === 'bulk') {
+          bulkIngestEnabled = true
+          break
+        }
+      }
+      if (bulkIngestEnabled && !pluginOptions.bulkQueueNames) {
+        throw new Error(
+          '[payloadcms-vectorize] bulkQueueNames is required when any knowledge pool uses bulk ingest mode (bulkEmbeddings.ingestMode === \"bulk\").',
+        )
+      }
+
       // Exit early if disabled, but keep embeddings collections present for migrations
       if (pluginOptions.disabled) return config
 
@@ -182,6 +221,16 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
         knowledgePools: pluginOptions.knowledgePools,
       })
       tasks.push(vectorizeTask)
+      const prepareBulkEmbedTask = createPrepareBulkEmbeddingTask({
+        knowledgePools: pluginOptions.knowledgePools,
+        pollOrCompleteQueueName: pluginOptions.bulkQueueNames?.pollOrCompleteQueueName,
+      })
+      tasks.push(prepareBulkEmbedTask)
+      const pollOrCompleteBulkEmbedTask = createPollOrCompleteBulkEmbeddingTask({
+        knowledgePools: pluginOptions.knowledgePools,
+        pollOrCompleteQueueName: pluginOptions.bulkQueueNames?.pollOrCompleteQueueName,
+      })
+      tasks.push(pollOrCompleteBulkEmbedTask)
 
       config.jobs = {
         ...incomingJobs,
@@ -208,6 +257,33 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
                 const collectionConfig = dynamic.collections[collectionSlug]
                 if (!collectionConfig) continue
 
+                if ((dynamic.bulkEmbeddings?.ingestMode || 'realtime') === 'bulk') {
+                  console.log(
+                    '[payloadcms-vectorize] afterChange enqueue bulk run',
+                    pool,
+                    dynamic.bulkEmbeddings,
+                  )
+                  // In bulk mode, queue a bulk run and let poll/completion handle deletes
+                  const run = await payload.create({
+                    collection: BULK_EMBEDDINGS_RUNS_SLUG,
+                    data: {
+                      pool,
+                      embeddingVersion: dynamic.embeddingVersion,
+                      status: 'queued',
+                    },
+                  })
+
+                  await payload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
+                    task: 'payloadcms-vectorize:prepare-bulk-embedding',
+                    input: { runId: String(run.id) },
+                    req,
+                    ...(pluginOptions.bulkQueueNames?.prepareBulkEmbedQueueName
+                      ? { queue: pluginOptions.bulkQueueNames.prepareBulkEmbedQueueName }
+                      : {}),
+                  })
+                  continue
+                }
+
                 await payload.jobs.queue<'payloadcms-vectorize:vectorize'>({
                   task: 'payloadcms-vectorize:vectorize',
                   input: {
@@ -216,7 +292,9 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
                     knowledgePool: pool,
                   },
                   req: req,
-                  ...(pluginOptions.queueName ? { queue: pluginOptions.queueName } : {}),
+                  ...(pluginOptions.realtimeQueueName
+                    ? { queue: pluginOptions.realtimeQueueName }
+                    : {}),
                 })
               }
               return
@@ -264,20 +342,65 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
             dims: staticConfig.dims,
             ivfflatLists: staticConfig.ivfflatLists,
           })
+
+          // If bulk ingest is configured for this pool, ensure a baseline run exists and is queued
+          const dynamicConfig = pluginOptions.knowledgePools?.[poolName]
+          if (dynamicConfig?.bulkEmbeddings?.ingestMode === 'bulk') {
+            const existingSucceeded = await payload.find({
+              collection: BULK_EMBEDDINGS_RUNS_SLUG,
+              where: {
+                and: [{ pool: { equals: poolName } }, { status: { equals: 'succeeded' } }],
+              },
+              limit: 1,
+              sort: '-completedAt',
+            })
+            if (!existingSucceeded.totalDocs) {
+              console.log(
+                '[payloadcms-vectorize] queuing baseline bulk run',
+                poolName,
+                dynamicConfig?.bulkEmbeddings,
+              )
+              const run = await payload.create({
+                collection: BULK_EMBEDDINGS_RUNS_SLUG,
+                data: {
+                  pool: poolName,
+                  embeddingVersion: dynamicConfig.embeddingVersion,
+                  status: 'queued',
+                },
+              })
+              await payload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
+                task: 'payloadcms-vectorize:prepare-bulk-embedding',
+                input: { runId: String(run.id) },
+                req: { payload } as any,
+                ...(pluginOptions.bulkQueueNames?.prepareBulkEmbedQueueName
+                  ? { queue: pluginOptions.bulkQueueNames.prepareBulkEmbedQueueName }
+                  : {}),
+              })
+            }
+          }
         }
       }
 
       if (pluginOptions.endpointOverrides?.enabled !== false) {
         const path = pluginOptions.endpointOverrides?.path || '/vector-search'
         const inputEndpoints = config.endpoints || []
-        config.endpoints = [
+        const endpoints = [
           ...inputEndpoints,
           {
             path,
-            method: 'post',
+            method: 'post' as const,
             handler: createVectorSearchHandler(pluginOptions.knowledgePools),
           },
+          {
+            path: '/vector-bulk-embed',
+            method: 'post' as const,
+            handler: createBulkEmbedHandler(
+              pluginOptions.knowledgePools,
+              pluginOptions.bulkQueueNames?.prepareBulkEmbedQueueName,
+            ),
+          },
         ]
+        config.endpoints = endpoints
       }
 
       return config

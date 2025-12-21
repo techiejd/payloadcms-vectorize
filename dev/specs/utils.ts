@@ -1,6 +1,18 @@
 // dev/create-alt-db.ts
-import { Payload } from 'payload'
+import type { Payload, SanitizedConfig } from 'payload'
+import { buildConfig, getPayload } from 'payload'
 import { Client } from 'pg'
+import { postgresAdapter } from '@payloadcms/db-postgres'
+import { lexicalEditor } from '@payloadcms/richtext-lexical'
+import { createVectorizeIntegration } from 'payloadcms-vectorize'
+import { BULK_EMBEDDINGS_RUNS_SLUG } from '../../src/collections/bulkEmbeddingsRuns.js'
+import { BULK_EMBEDDINGS_INPUT_METADATA_SLUG } from '../../src/collections/bulkEmbeddingInputMetadata.js'
+import { makeDummyEmbedDocs } from 'helpers/embed.js'
+import type {
+  BulkEmbeddingsConfig,
+  BulkEmbeddingInput,
+  BulkEmbeddingRunStatus,
+} from '../../src/types.js'
 
 export const createTestDb = async ({ dbName }: { dbName: string }) => {
   const adminUri =
@@ -14,37 +26,208 @@ export const createTestDb = async ({ dbName }: { dbName: string }) => {
   await client.end()
 }
 
-// Helper function to wait for vectorization jobs to complete
-export async function waitForVectorizationJobs(payload: Payload, maxWaitMs = 10000) {
+async function waitForTasks(
+  payload: Payload,
+  taskSlugs: string[],
+  maxWaitMs = 10000,
+  intervalMs = 250,
+) {
+  const hasJobsCollection = (payload as any)?.config?.collections?.some(
+    (c: any) => c.slug === 'payload-jobs',
+  )
+  if (!hasJobsCollection) return
+
   const startTime = Date.now()
   while (Date.now() - startTime < maxWaitMs) {
-    const jobs = await payload.find({
+    const pending = await payload.find({
       collection: 'payload-jobs',
       where: {
-        and: [
-          { taskSlug: { equals: 'payloadcms-vectorize:vectorize' } },
-          { processing: { equals: true } },
-        ],
+        and: [{ taskSlug: { in: taskSlugs } }, { completedAt: { exists: false } }],
       },
     })
-    if (jobs.totalDocs === 0) {
-      // No running vectorization jobs, check if any are pending
-      const pendingJobs = await payload.find({
-        collection: 'payload-jobs',
-        where: {
-          and: [
-            { taskSlug: { equals: 'payloadcms-vectorize:vectorize' } },
-            { processing: { equals: false } },
-            { completedAt: { equals: null } },
-          ],
-        },
-      })
-      if (pendingJobs.totalDocs === 0) {
-        return // All jobs completed
-      }
-    }
-    await new Promise((resolve) => setTimeout(resolve, 500)) // Check every 500ms
+    if (pending.totalDocs === 0) return
+    await new Promise((resolve) => setTimeout(resolve, intervalMs))
   }
-  // Fallback: wait a bit more if we hit the timeout
-  await new Promise((resolve) => setTimeout(resolve, 2000))
+  // One last grace wait
+  await new Promise((resolve) => setTimeout(resolve, 500))
+}
+
+export async function waitForVectorizationJobs(payload: Payload, maxWaitMs = 10000) {
+  await waitForTasks(payload, ['payloadcms-vectorize:vectorize'], maxWaitMs)
+}
+
+export async function waitForBulkJobs(payload: Payload, maxWaitMs = 10000) {
+  await waitForTasks(
+    payload,
+    [
+      'payloadcms-vectorize:prepare-bulk-embedding',
+      'payloadcms-vectorize:poll-or-complete-bulk-embedding',
+    ],
+    maxWaitMs,
+  )
+}
+
+export const DEFAULT_DIMS = 8
+export const BULK_QUEUE_NAMES = {
+  prepareBulkEmbedQueueName: 'vectorize-bulk-prepare',
+  pollOrCompleteQueueName: 'vectorize-bulk-poll',
+}
+
+type MockOptions = {
+  statusSequence: BulkEmbeddingRunStatus[]
+  partialFailure?: { failIds: string[] }
+}
+
+export function createMockBulkEmbeddings(
+  options: MockOptions,
+  dims: number = DEFAULT_DIMS,
+): BulkEmbeddingsConfig {
+  const { statusSequence, partialFailure } = options
+  let callCount = 0
+  let lastInputs: BulkEmbeddingInput[] = []
+  const embeddings = makeDummyEmbedDocs(dims)
+
+  return {
+    ingestMode: 'bulk',
+    prepareBulkEmbeddings: async ({ inputs }) => {
+      lastInputs = inputs
+      return {
+        providerBatchId: `mock-${Date.now()}`,
+        status: 'queued',
+        counts: { inputs: inputs.length },
+      }
+    },
+    pollBulkEmbeddings: async () => {
+      const status = statusSequence[Math.min(callCount++, statusSequence.length - 1)]
+      const counts =
+        status === 'succeeded'
+          ? { inputs: lastInputs.length, succeeded: lastInputs.length, failed: 0 }
+          : undefined
+      return {
+        status,
+        counts,
+      }
+    },
+    completeBulkEmbeddings: async () => {
+      if (!lastInputs.length) {
+        return { status: 'succeeded', outputs: [], counts: { inputs: 0, succeeded: 0, failed: 0 } }
+      }
+      const vectors = await embeddings(lastInputs.map((i) => i.text))
+      const outputs = lastInputs.map((input, idx) => {
+        const shouldFail = partialFailure?.failIds?.includes(input.id)
+        return shouldFail
+          ? { id: input.id, error: 'fail' }
+          : { id: input.id, embedding: vectors[idx] }
+      })
+      const succeeded = outputs.filter((o) => (o as any).embedding).length
+      const failed = outputs.length - succeeded
+      return {
+        status: 'succeeded',
+        outputs,
+        counts: { inputs: outputs.length, succeeded, failed },
+      }
+    },
+  }
+}
+
+export type BuildPayloadArgs = {
+  dbName: string
+  pluginOpts: any
+  secret?: string
+  dims?: number
+  key?: string
+}
+
+export async function buildPayloadWithIntegration({
+  dbName,
+  pluginOpts,
+  secret = 'test-secret',
+  dims = DEFAULT_DIMS,
+  key,
+}: BuildPayloadArgs): Promise<{ payload: Payload; config: SanitizedConfig }> {
+  const integration = createVectorizeIntegration({
+    default: {
+      dims,
+      ivfflatLists: 1,
+    },
+  })
+
+  const config = await buildConfig({
+    secret,
+    editor: lexicalEditor(),
+    collections: [
+      {
+        slug: 'posts',
+        fields: [{ name: 'title', type: 'text' }],
+      },
+    ],
+    db: postgresAdapter({
+      extensions: ['vector'],
+      afterSchemaInit: [integration.afterSchemaInitHook],
+      pool: {
+        connectionString: `postgresql://postgres:password@localhost:5433/${dbName}`,
+      },
+    }),
+    plugins: [integration.payloadcmsVectorize(pluginOpts)],
+    jobs: {
+      tasks: [],
+      autoRun: [
+        {
+          cron: '*/2 * * * * *',
+          limit: 10,
+          queue: pluginOpts.bulkQueueNames?.prepareBulkEmbedQueueName,
+        },
+        {
+          cron: '*/2 * * * * *',
+          limit: 10,
+          queue: pluginOpts.bulkQueueNames?.pollOrCompleteQueueName,
+        },
+      ],
+    },
+  })
+
+  const payloadKey = key ?? `payload-${dbName}-${Date.now()}`
+  const payload = await getPayload({ config, key: payloadKey, cron: true })
+  return { payload, config }
+}
+
+export const clearAllCollections = async (pl: Payload) => {
+  const hasCollection = (slug: string) =>
+    !!(pl as any)?.config?.collections?.some((c: any) => c.slug === slug)
+
+  const safeDelete = async (slug: string) => {
+    if (!hasCollection(slug)) return
+    try {
+      await (pl as any).delete({
+        collection: slug,
+        where: { id: { exists: true } },
+      })
+    } catch {
+      // ignore if collection not registered in this payload instance
+    }
+  }
+
+  await safeDelete(BULK_EMBEDDINGS_RUNS_SLUG)
+  await safeDelete(BULK_EMBEDDINGS_INPUT_METADATA_SLUG)
+  await safeDelete('default')
+  await safeDelete('posts')
+  await safeDelete('payload-jobs')
+}
+
+export async function createSucceededBaselineRun(
+  payload: Payload,
+  {
+    version,
+    completedAt = new Date().toISOString(),
+  }: { version?: string; completedAt?: string } = {},
+) {
+  return (payload as any).create({
+    collection: BULK_EMBEDDINGS_RUNS_SLUG,
+    data: {
+      pool: 'default',
+      embeddingVersion: version ?? '',
+      status: 'succeeded',
+      completedAt,
+    },
+  })
 }

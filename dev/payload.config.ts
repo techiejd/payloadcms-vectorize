@@ -9,6 +9,7 @@ import {
   voyageEmbedDocs,
   voyageEmbedQuery,
   makeDummyEmbedQuery,
+  makeVoyageBulkEmbeddingsConfig,
 } from './helpers/embed.js'
 import sharp from 'sharp'
 import { fileURLToPath } from 'url'
@@ -84,6 +85,11 @@ const buildConfigWithPostgres = async () => {
           limit: 10,
           queue: 'default',
         },
+        {
+          cron: '*/10 * * * * *', // Run every 10 seconds for bulk jobs
+          limit: 5,
+          queue: 'vectorize-bulk',
+        },
       ],
       jobsCollectionOverrides: ({ defaultJobsCollection }) => {
         // Make jobs collection visible in admin for debugging
@@ -122,7 +128,12 @@ const buildConfigWithPostgres = async () => {
             embedDocs,
             embedQuery,
             embeddingVersion: testEmbeddingVersion,
+            bulkEmbeddings: makeVoyageBulkEmbeddingsConfig(),
           },
+        },
+        bulkQueueNames: {
+          prepareBulkEmbedQueueName: 'vectorize-bulk-prepare',
+          pollOrCompleteQueueName: 'vectorize-bulk-poll',
         },
       }),
     ],

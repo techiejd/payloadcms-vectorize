@@ -6,6 +6,7 @@ A Payload CMS plugin that adds vector search capabilities to your collections us
 
 - 🔍 **Semantic Search**: Vectorize any collection for intelligent content discovery
 - 🚀 **Automatic**: Documents are automatically vectorized when created or updated, and vectors are deleted as soon as the document is deleted.
+- 🧵 **Bulk embedding**: Run “Embed all” batches that backfill only documents missing the current `embeddingVersion`.
 - 📊 **PostgreSQL Integration**: Built on pgvector for high-performance vector operations
 - ⚡ **Background Processing**: Uses Payload's job system for non-blocking vectorization
 - 🎯 **Flexible Chunking**: Drive chunk creation yourself with `toKnowledgePool` functions so you can combine any fields or content types
@@ -27,9 +28,9 @@ pnpm add payloadcms-vectorize
 
 ## Quick Start
 
-### 0. Install pgvector
+### 0. Have pgvector permissions
 
-The plugin automatically creates the `vector` extension when Payload initializes. However, your PostgreSQL database user must have permission to create extensions. If your user doesn't have these permissions, you may need to manually create the extension once:
+The plugin expects `vector` extension to be configured when Payload initializes. Your PostgreSQL database user must have permission to create extensions. If your user doesn't have these permissions, someone with permissions may need to manually create the extension once:
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;
@@ -103,6 +104,7 @@ const { afterSchemaInitHook, payloadcmsVectorize } = createVectorizeIntegration(
 export default buildConfig({
   // ... your existing config
   db: postgresAdapter({
+    // configure the 'vector' extension.
     extensions: ['vector'],
     // afterSchemaInitHook adds 'vector' to your schema
     afterSchemaInit: [afterSchemaInitHook],
@@ -164,12 +166,13 @@ const { results } = await response.json()
 
 ### Plugin Options
 
-| Option              | Type                                                | Required | Description                              |
-| ------------------- | --------------------------------------------------- | -------- | ---------------------------------------- |
-| `knowledgePools`    | `Record<KnowledgePool, KnowledgePoolDynamicConfig>` | ✅       | Knowledge pools and their configurations |
-| `queueName`         | `string`                                            | ❌       | Custom queue name for background jobs    |
-| `endpointOverrides` | `object`                                            | ❌       | Customize the search endpoint            |
-| `disabled`          | `boolean`                                           | ❌       | Disable plugin while keeping schema      |
+| Option              | Type                                                                   | Required | Description                                                                 |
+| ------------------- | ---------------------------------------------------------------------- | -------- | --------------------------------------------------------------------------- |
+| `knowledgePools`    | `Record<KnowledgePool, KnowledgePoolDynamicConfig>`                    | ✅       | Knowledge pools and their configurations                                    |
+| `realtimeQueueName` | `string`                                                               | ❌       | Custom queue name for realtime vectorization jobs                           |
+| `bulkQueueNames`    | `{prepareBulkEmbedQueueName: string, pollOrCompleteQueueName: string}` | ❌       | Queue names for bulk embedding jobs (required if any pool uses bulk ingest) |
+| `endpointOverrides` | `object`                                                               | ❌       | Customize the search endpoint                                               |
+| `disabled`          | `boolean`                                                              | ❌       | Disable plugin while keeping schema                                         |
 
 ### Knowledge Pool Config
 
@@ -189,6 +192,46 @@ The embeddings collection name will be the same as the knowledge pool name.
 - `embedQuery`: `EmbedQueryFn` - Function to embed search queries
 - `embeddingVersion`: `string` - Version string for tracking model changes
 - `extensionFields?`: `Field[]` - Optional fields to extend the embeddings collection schema
+- `bulkEmbeddings?`: Configuration for bulk embedding operations:
+  - `ingestMode?`: `'realtime' | 'bulk'` - Default `'realtime'` queues embeddings immediately. `'bulk'` skips realtime embedding, deletes stale vectors on updates, and relies on the bulk job to backfill.
+  - `prepareBulkEmbeddings(args)`: Callback to prepare a bulk embedding batch
+  - `pollBulkEmbeddings(args)`: Callback to poll the status of a bulk embedding batch
+  - `completeBulkEmbeddings(args)`: Callback to retrieve completed embeddings from a batch
+    If `bulkEmbeddings` is omitted for a pool, the "Embed all" button is disabled and bulk is not available.
+
+### Bulk Task Model
+
+When bulk ingest mode is enabled, the plugin uses separate Payload jobs for reliability with long-running providers:
+
+- **`prepare-bulk-embedding`**: One-shot task that collects missing embeddings and submits them to the provider. Short-lived.
+- **`poll-or-complete-bulk-embedding`**: Polls the provider status and completes embedding ingestion when ready. Can requeue itself until completion.
+
+### Queue Configuration
+
+For production deployments with bulk embedding:
+
+```typescript
+// Recommended production setup
+plugins: [
+  payloadcmsVectorize({
+    knowledgePools: { /* ... */ },
+    realtimeQueueName: 'vectorize-realtime', // Separate realtime jobs (Optional)
+    bulkQueueNames: {
+      prepareBulkEmbedQueueName: 'vectorize-bulk-prepare', // Daily bulk preparation (Required if any knowledge pool uses bulk ingestion)
+      pollOrCompleteQueueName: 'vectorize-bulk-poll',       // Frequent polling/completion (Required if any knowledge pool uses bulk ingestion)
+    },
+  }),
+]
+
+jobs: {
+  // Payload processes jobs via autoRun. Use different schedules for different workloads.
+  autoRun: [
+    { cron: '*/5 * * * * *', limit: 10, queue: 'vectorize-realtime' }, // Optional: Process realtime jobs every 5 seconds
+    { cron: '0 0 * * * *', limit: 1, queue: 'vectorize-bulk-prepare' }, // Required: Run bulk preparation once per hour (or daily)
+    { cron: '*/30 * * * * *', limit: 5, queue: 'vectorize-bulk-poll' }, // Required: Poll bulk status every 30 seconds
+  ],
+}
+```
 
 #### CollectionVectorizeOption
 
@@ -215,7 +258,7 @@ Because you control the output, you can mix different field types, discard empty
 
 ## PostgreSQL Custom Schema Support
 
-The plugin reads the `schemaName` configuration from your Postgres adapter within the Payload config.  
+The plugin reads the `schemaName` configuration from your Postgres adapter within the Payload config.
 
 When you configure a custom schema via `postgresAdapter({ schemaName: 'custom' })`, all plugin SQL queries (for vector columns, indexes, and embeddings) are qualified with that schema name. This is useful for multi-tenant setups or when content tables live in a dedicated schema.
 
@@ -299,6 +342,27 @@ Search for similar content using vector similarity.
 }
 ```
 
+### Bulk embedding (Embed all)
+
+- Each knowledge pool’s embeddings list shows an **Embed all** admin button that queues a `payloadcms-vectorize:bulk-embed-all` job.
+- Bulk runs only include documents that are missing embeddings for the pool’s current `embeddingVersion`.
+- Progress is recorded in the `vector-bulk-embeddings-runs` collection (fields: `pool`, `embeddingVersion`, `providerBatchId`, `status`, counts, timestamps, `error`).
+- Endpoint: **POST** `/api/vector-bulk-embed`
+
+```jsonc
+{
+  "knowledgePool": "main",
+}
+```
+
+Bulk callbacks are provider-agnostic:
+
+- `prepareBulkEmbeddings({ payload, knowledgePool, embeddingVersion, inputs })`
+- `pollBulkEmbeddings({ payload, knowledgePool, providerBatchId })`
+- `completeBulkEmbeddings({ payload, knowledgePool, providerBatchId })`
+
+If `bulkEmbeddings` is not provided, the plugin falls back to running `embedDocs` locally.
+
 ## Changelog
 
 See [CHANGELOG.md](./CHANGELOG.md) for release history, migration notes, and upgrade guides.
@@ -339,13 +403,12 @@ Thank you for the stars! The following updates have been completed:
 
 - **Multiple Knowledge Pools**: You can create separate knowledge pools with independent configurations (dims, ivfflatLists, embedding functions) and needs. Each pool operates independently, allowing you to organize your vectorized content by domain, use case, or any other criteria that makes sense for your application.
 - **More expressive queries**: Added ability to change query limit, search on certain collections or certain fields
+- **Bulk embed all**: Batch backfills with admin button, provider callbacks, and run tracking.
 
 The following features are planned for future releases based on community interest and stars:
 
 - **Migrations for vector dimensions**: Easy migration tools for changing vector dimensions and/or ivfflatLists after initial setup
 - **MongoDB support**: Extend vector search capabilities to MongoDB databases
 - **Vercel support**: Optimized deployment and configuration for Vercel hosting
-- **Batch embedding**: More efficient bulk embedding operations for large datasets
-- **'Embed all' button**: Admin UI button to re-embed all content after embeddingVersion changes
 
 **Want to see these features sooner?** Star this repository and open issues for the features you need most!
