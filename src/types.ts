@@ -55,10 +55,10 @@ export type BulkEmbeddingInput = {
 
 /** Internal metadata we persist per input to rebuild embeddings after provider returns outputs */
 export type BulkEmbeddingInputMetadata = {
-  sourceCollection: string
-  docId: string
-  chunkIndex: number
-  embeddingVersion: string
+    sourceCollection: string
+    docId: string
+    chunkIndex: number
+    embeddingVersion: string
   /** Arbitrary extension fields returned by toKnowledgePool */
   extensionFields?: Record<string, any>
 }

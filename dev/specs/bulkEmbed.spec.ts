@@ -21,7 +21,8 @@ const DIMS = DEFAULT_DIMS
 describe('Bulk embed ingest mode with version/time gating', () => {
   let payload: Payload
   let config: SanitizedConfig
-  const dbName = 'bulk_embed_test'
+  const dbNameBase = 'bulk_embed_test'
+  let dbName: string
 
   const basePluginOptions = {
     knowledgePools: {
@@ -40,9 +41,7 @@ describe('Bulk embed ingest mode with version/time gating', () => {
     bulkQueueNames: BULK_QUEUE_NAMES,
   }
 
-  beforeAll(async () => {
-    await createTestDb({ dbName })
-  })
+  const makeDbName = () => `${dbNameBase}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
 
   const buildPayload = async (
     pluginOpts = basePluginOptions,
@@ -56,6 +55,7 @@ describe('Bulk embed ingest mode with version/time gating', () => {
       pluginOpts,
       secret,
       dims: DIMS,
+      key: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     })
     payload = built.payload
     config = built.config
@@ -63,6 +63,8 @@ describe('Bulk embed ingest mode with version/time gating', () => {
   }
 
   beforeEach(async () => {
+    dbName = makeDbName()
+    await createTestDb({ dbName })
     await buildPayload()
   })
 
@@ -98,7 +100,7 @@ describe('Bulk embed ingest mode with version/time gating', () => {
     await clearAllCollections(payload)
 
     // Use a fresh database for the toggle scenario to avoid residual runs
-    const tempDbName = `${dbName}_toggle_${Date.now()}`
+    const tempDbName = `${dbNameBase}_toggle_${Date.now()}`
     await createTestDb({ dbName: tempDbName })
 
     // Start without bulkEmbeddings configured
