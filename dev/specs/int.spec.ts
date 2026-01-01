@@ -27,7 +27,7 @@ describe('Plugin integration tests', () => {
   let markdownContent: SerializedEditorState
   beforeAll(async () => {
     const _config = await config
-    payload = await getPayload({ config: _config })
+    payload = await getPayload({ config: _config, cron: true })
     markdownContent = await getInitialMarkdownContent(_config)
   })
   test('adds embeddings collection with vector column', async () => {

@@ -83,7 +83,7 @@ describe('Custom schemaName support', () => {
       ],
     })
 
-    payload = await getPayload({ config })
+    payload = await getPayload({ config, cron: true })
   })
 
   test('embeddings table is created in custom schema', async () => {
