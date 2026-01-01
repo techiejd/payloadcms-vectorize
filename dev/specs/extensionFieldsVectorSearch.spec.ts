@@ -99,7 +99,7 @@ describe('extensionFields', () => {
         }),
       ],
     })
-    const payloadWithExtensions = await getPayload({ config: configWithExtensions })
+    const payloadWithExtensions = await getPayload({ config: configWithExtensions, cron: true })
 
     // Create a post with extension field values
     const testQuery = 'Extension fields test content'

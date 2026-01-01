@@ -139,7 +139,10 @@ async function runVectorizeTask(args: {
       try {
         await runSQL(sql, [literal, id])
       } catch (e) {
-        payload.logger.error('[payloadcms-vectorize] Failed to persist vector column', e as Error)
+        const errorMessage = (e as Error).message || (e as any).toString()
+        payload.logger.error(
+          `[payloadcms-vectorize] Failed to persist vector column: ${errorMessage}`,
+        )
         throw new Error(`[payloadcms-vectorize] Failed to persist vector column: ${e}`)
       }
     }),

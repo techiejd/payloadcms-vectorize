@@ -89,7 +89,7 @@
     "voyageai": "^0.0.8"
   },
   "peerDependencies": {
-    "payload": ">=3 <4"
+    "payload": ">=3.0.0 <4.0.0"
   },
   "engines": {
     "node": "^18.20.2 || >=20.9.0",

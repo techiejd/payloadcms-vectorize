@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## 0.5.0 - 2025-12-17
+## 0.5.0 - 2026-01-01
 
 ### Breaking Changes
 
@@ -24,6 +24,20 @@ All notable changes to this project will be documented in this file.
 - Added tests for bulk polling error conditions (`failed`, `canceled` statuses)
 - Added tests for bulk fan-in behavior (multiple documents processed in single run)
 - Improved test coverage for edge cases in bulk embedding workflow
+
+## 0.4.2 - 2026-01-01
+
+### Changed
+
+- Updated peer dependency requirement to support any Payload 3.x version (`>=3.0.0 <4.0.0`), previously required `^3.37.0`
+- Tested on Payload 3.69.0 (previously tested on 3.37.0)
+
+### Important Note
+
+- **Payload 3.54.0+**: When initializing Payload with `getPayload`, you must include `cron: true` for the job system to run:
+  ```typescript
+  payload = await getPayload({ config, cron: true })
+  ```
 
 ## 0.4.1 - 2025-12-02
 
