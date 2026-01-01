@@ -114,7 +114,7 @@ describe('Search endpoint integration tests', () => {
         }),
       ],
     })
-    payload = await getPayload({ config })
+    payload = await getPayload({ config, cron: true })
     markdownContent = await getInitialMarkdownContent(config)
   })
 

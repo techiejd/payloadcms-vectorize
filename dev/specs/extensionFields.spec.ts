@@ -102,7 +102,7 @@ describe('Extension fields integration tests', () => {
         }),
       ],
     })
-    payload = await getPayload({ config })
+    payload = await getPayload({ config, cron: true })
   })
 
   test('extension fields are added to the embeddings table schema', async () => {
