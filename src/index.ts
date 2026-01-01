@@ -176,7 +176,7 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
 
       // Register a single task using Payload Jobs that can handle any knowledge pool
       const incomingJobs = config.jobs || { tasks: [] }
-      const tasks = [...incomingJobs.tasks]
+      const tasks = [...(config.jobs?.tasks || [])]
 
       const vectorizeTask = createVectorizeTask({
         knowledgePools: pluginOptions.knowledgePools,
