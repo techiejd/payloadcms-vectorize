@@ -15,9 +15,15 @@ A Payload CMS plugin that adds vector search capabilities to your collections us
 
 ## Prerequisites
 
-- Only tested on Payload CMS 3.37.0+
+- Payload CMS 3.x (tested on 3.69.0, previously tested on 3.37.0)
 - PostgreSQL with pgvector extension
 - Node.js 18+
+
+**Note for Payload 3.54.0+:** When initializing Payload with `getPayload`, you must include `cron: true` if you want the cron jobs to run correctly:
+
+```typescript
+payload = await getPayload({ config, cron: true })
+```
 
 ## Installation
 
@@ -305,7 +311,7 @@ See [CHANGELOG.md](./CHANGELOG.md) for release history, migration notes, and upg
 
 ## Requirements
 
-- Payload CMS ^3.37.0
+- Payload CMS >=3.0.0 <4.0.0 (tested on 3.69.0, previously tested on 3.37.0)
 - PostgreSQL with pgvector extension
 - Node.js ^18.20.2
 
