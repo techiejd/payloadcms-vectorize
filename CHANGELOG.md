@@ -2,7 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
-## 0.4.2 - 2025-01-XX
+## 0.4.3 - 2025-01-02
+
+- Added runtime validation for `toKnowledgePool` entries (requires `chunk` string).
+- Documented how to requeue failed jobs by clearing `hasError` and `completedAt`.
+
+## 0.4.2 - 2025-01-01
 
 ### Changed
 
