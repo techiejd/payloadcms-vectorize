@@ -17,7 +17,6 @@ import { PostgresPayload } from '../../src/types.js'
 import { editorConfigFactory, getEnabledNodes } from '@payloadcms/richtext-lexical'
 import { DIMS, embeddingsCollection, getInitialMarkdownContent } from './constants.js'
 import { waitForVectorizationJobs } from './utils.js'
-import { Post } from 'payload-types.js'
 
 const embedFn = makeDummyEmbedDocs(DIMS)
 
