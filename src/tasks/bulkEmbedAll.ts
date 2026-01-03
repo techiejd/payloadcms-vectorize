@@ -1,7 +1,7 @@
 import { Payload, TaskConfig, TaskHandlerResult } from 'payload'
 import {
   BulkEmbeddingInput,
-  BulkEmbeddingsConfig,
+  BulkEmbeddingsFns,
   CollectedEmbeddingInput,
   KnowledgePoolDynamicConfig,
   KnowledgePoolName,
@@ -239,23 +239,23 @@ export const createPollOrCompleteBulkEmbeddingTask = ({
 
       // Poll once
       const pollResult = await callbacks.pollBulkEmbeddings({
-          payload,
-          knowledgePool: poolName,
-          providerBatchId,
-        })
+        payload,
+        knowledgePool: poolName,
+        providerBatchId,
+      })
 
       const newStatus = pollResult.status
-        await payload.update({
-          id: input.runId,
-          collection: BULK_EMBEDDINGS_RUNS_SLUG,
-          data: {
+      await payload.update({
+        id: input.runId,
+        collection: BULK_EMBEDDINGS_RUNS_SLUG,
+        data: {
           status: newStatus,
           inputs: pollResult.counts?.inputs,
-            succeeded: pollResult.counts?.succeeded,
-            failed: pollResult.counts?.failed,
-            error: pollResult.error,
-          },
-        })
+          succeeded: pollResult.counts?.succeeded,
+          failed: pollResult.counts?.failed,
+          error: pollResult.error,
+        },
+      })
 
       // If still not terminal, requeue this task
       if (!TERMINAL_STATUSES.has(newStatus)) {
@@ -282,9 +282,9 @@ export const createPollOrCompleteBulkEmbeddingTask = ({
 
       // Success - complete the embeddings
       const completion = (await callbacks.completeBulkEmbeddings({
-          payload,
-          knowledgePool: poolName,
-          providerBatchId,
+        payload,
+        knowledgePool: poolName,
+        providerBatchId,
       })) || { status: newStatus, outputs: [] }
 
       const outputs = completion.outputs || []

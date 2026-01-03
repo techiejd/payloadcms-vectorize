@@ -14,7 +14,7 @@ import {
   waitForBulkJobs,
 } from './utils.js'
 import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
-import type { BulkEmbeddingsConfig } from '../../src/types.js'
+import type { BulkEmbeddingsFns } from '../../src/types.js'
 
 const DIMS = DEFAULT_DIMS
 

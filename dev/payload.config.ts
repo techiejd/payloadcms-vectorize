@@ -48,6 +48,10 @@ const { afterSchemaInitHook, payloadcmsVectorize } = createVectorizeIntegration(
     dims,
     ivfflatLists, // Rule of thumb: ivfflatLists = sqrt(total_number_of_vectors). Helps with working memory usage.
   },
+  bulkDefault: {
+    dims,
+    ivfflatLists, // Another rule of thumb: ivfflatLists = total_number_of_vectors / 1000. Helps with working memory usage.
+  },
 })
 
 const buildConfigWithPostgres = async () => {
@@ -88,7 +92,12 @@ const buildConfigWithPostgres = async () => {
         {
           cron: '*/10 * * * * *', // Run every 10 seconds for bulk jobs
           limit: 5,
-          queue: 'vectorize-bulk',
+          queue: 'vectorize-bulk-prepare',
+        },
+        {
+          cron: '*/10 * * * * *', // Run every 10 seconds for bulk jobs
+          limit: 5,
+          queue: 'vectorize-bulk-poll',
         },
       ],
       jobsCollectionOverrides: ({ defaultJobsCollection }) => {
@@ -125,10 +134,37 @@ const buildConfigWithPostgres = async () => {
                 },
               },
             },
-            embedDocs,
-            embedQuery,
-            embeddingVersion: testEmbeddingVersion,
-            bulkEmbeddings: makeVoyageBulkEmbeddingsConfig(),
+            embeddingConfig: {
+              version: testEmbeddingVersion,
+              queryFn: embedQuery,
+              realTimeIngestionFn: embedDocs,
+              bulkEmbeddingsFns: makeVoyageBulkEmbeddingsConfig(),
+            },
+          },
+          bulkDefault: {
+            collections: {
+              posts: {
+                toKnowledgePool: async (doc, payload) => {
+                  const chunks: Array<{ chunk: string }> = []
+                  // Process title
+                  if (doc.title) {
+                    const titleChunks = chunkText(doc.title)
+                    chunks.push(...titleChunks.map((chunk) => ({ chunk })))
+                  }
+                  // Process content
+                  if (doc.content) {
+                    const contentChunks = await chunkRichText(doc.content, payload)
+                    chunks.push(...contentChunks.map((chunk) => ({ chunk })))
+                  }
+                  return chunks
+                },
+              },
+            },
+            embeddingConfig: {
+              version: testEmbeddingVersion,
+              queryFn: embedQuery,
+              bulkEmbeddingsFns: makeVoyageBulkEmbeddingsConfig(),
+            },
           },
         },
         bulkQueueNames: {

@@ -9,7 +9,7 @@ import { BULK_EMBEDDINGS_RUNS_SLUG } from '../../src/collections/bulkEmbeddingsR
 import { BULK_EMBEDDINGS_INPUT_METADATA_SLUG } from '../../src/collections/bulkEmbeddingInputMetadata.js'
 import { makeDummyEmbedDocs } from 'helpers/embed.js'
 import type {
-  BulkEmbeddingsConfig,
+  BulkEmbeddingsFns,
   BulkEmbeddingInput,
   BulkEmbeddingRunStatus,
 } from '../../src/types.js'
@@ -81,14 +81,13 @@ type MockOptions = {
 export function createMockBulkEmbeddings(
   options: MockOptions,
   dims: number = DEFAULT_DIMS,
-): BulkEmbeddingsConfig {
+): BulkEmbeddingsFns {
   const { statusSequence, partialFailure } = options
   let callCount = 0
   let lastInputs: BulkEmbeddingInput[] = []
   const embeddings = makeDummyEmbedDocs(dims)
 
   return {
-    ingestMode: 'bulk',
     prepareBulkEmbeddings: async ({ inputs }) => {
       lastInputs = inputs
       return {

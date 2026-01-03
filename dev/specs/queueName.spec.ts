@@ -34,7 +34,7 @@ describe('Queue tests', () => {
       }),
       plugins: [
         plugin({
-          queueName: expectedQueueName,
+          realtimeQueueName: expectedQueueName,
           knowledgePools: {
             default: {
               collections: {
@@ -55,9 +55,11 @@ describe('Queue tests', () => {
                   },
                 },
               },
-              embedDocs: async () => [[0, 0, 0, 0, 0, 0, 0, 0]],
-              embedQuery: async () => [0, 0, 0, 0, 0, 0, 0, 0],
-              embeddingVersion: 'test',
+              embeddingConfig: {
+                version: 'test',
+                queryFn: async () => [0, 0, 0, 0, 0, 0, 0, 0],
+                realTimeIngestionFn: async () => [[0, 0, 0, 0, 0, 0, 0, 0]],
+              },
             },
           },
         }),

@@ -74,9 +74,11 @@ describe('Custom schemaName support', () => {
                   },
                 },
               },
-              embeddingVersion: testEmbeddingVersion,
-              embedDocs: makeDummyEmbedDocs(DIMS),
-              embedQuery: makeDummyEmbedQuery(DIMS),
+              embeddingConfig: {
+                version: testEmbeddingVersion,
+                queryFn: makeDummyEmbedQuery(DIMS),
+                realTimeIngestionFn: makeDummyEmbedDocs(DIMS),
+              },
             },
           },
         }),
@@ -168,9 +170,11 @@ describe('Custom schemaName support', () => {
     const knowledgePools: Record<string, KnowledgePoolDynamicConfig> = {
       default: {
         collections: {},
-        embedDocs: makeDummyEmbedDocs(DIMS),
-        embedQuery: makeDummyEmbedQuery(DIMS),
-        embeddingVersion: testEmbeddingVersion,
+        embeddingConfig: {
+          version: testEmbeddingVersion,
+          queryFn: makeDummyEmbedQuery(DIMS),
+          realTimeIngestionFn: makeDummyEmbedDocs(DIMS),
+        },
       },
     }
     const searchHandler = createVectorSearchHandler(knowledgePools)

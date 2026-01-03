@@ -30,9 +30,11 @@ async function performVectorSearch(
   const knowledgePools: Record<string, KnowledgePoolDynamicConfig> = {
     default: {
       collections: {},
-      embedDocs: makeDummyEmbedDocs(DIMS),
-      embedQuery: embedFn,
-      embeddingVersion: testEmbeddingVersion,
+      embeddingConfig: {
+        version: testEmbeddingVersion,
+        queryFn: makeDummyEmbedQuery(DIMS),
+        realTimeIngestionFn: makeDummyEmbedDocs(DIMS),
+      },
     },
   }
   const searchHandler = createVectorSearchHandler(knowledgePools)
@@ -106,9 +108,11 @@ describe('Search endpoint integration tests', () => {
                   },
                 },
               },
-              embedDocs: makeDummyEmbedDocs(DIMS),
-              embedQuery: makeDummyEmbedQuery(DIMS),
-              embeddingVersion: testEmbeddingVersion,
+              embeddingConfig: {
+                version: testEmbeddingVersion,
+                queryFn: makeDummyEmbedQuery(DIMS),
+                realTimeIngestionFn: makeDummyEmbedDocs(DIMS),
+              },
             },
           },
         }),

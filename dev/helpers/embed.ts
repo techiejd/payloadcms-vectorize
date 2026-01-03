@@ -4,7 +4,7 @@ import type {
   BulkEmbeddingInput,
   BulkEmbeddingOutput,
   BulkEmbeddingRunStatus,
-  BulkEmbeddingsConfig,
+  BulkEmbeddingsFns,
 } from 'payloadcms-vectorize'
 
 export const voyageEmbedDocs = async (texts: string[]): Promise<number[][]> => {
@@ -62,7 +62,7 @@ export function makeDummyEmbedDocs(dims: number) {
 export const testEmbeddingVersion = 'test-v1'
 
 // Real Voyage Batch API implementation
-export function makeVoyageBulkEmbeddingsConfig(): BulkEmbeddingsConfig {
+export function makeVoyageBulkEmbeddingsConfig(): BulkEmbeddingsFns {
   // Store batch state in memory for dev purposes
   const batchState = new Map<
     string,

@@ -32,16 +32,28 @@ export type KnowledgePoolStaticConfig = {
 export type KnowledgePoolDynamicConfig = {
   /** Collections and fields to vectorize */
   collections: Partial<Record<CollectionSlug, CollectionVectorizeOption>>
-  /** Embedding function for document provided by the user */
-  embedDocs: EmbedDocsFn
-  /** Embedding function for query provided by the user */
-  embedQuery: EmbedQueryFn
-  /** Version string to track embedding model/version - stored in each embedding document */
-  embeddingVersion: string
   /** Optional fields to extend the knowledge pool collection schema */
   extensionFields?: Field[]
-  /** User provided bulk embedding configuration */
-  bulkEmbeddings?: BulkEmbeddingsConfig
+  /** Embedding configuration for the knowledge pool */
+  embeddingConfig: EmbeddingConfig
+}
+
+type EmbeddingConfig = {
+  /** Version string to track embedding model/version - stored in each embedding document */
+  version: string
+  /** Embedding function for query provided by the user
+   * TODO(techiejd): Should be optional? Maybe if not provided then we can disable the search endpoint?
+   */
+  queryFn: EmbedQueryFn
+  /** Embedding function for real-time ingestion of documents provided by the user
+   * If not provided, then there is no real-time ingestion of documents provided by the user
+   */
+  realTimeIngestionFn?: EmbedDocsFn
+  /** Bulk embedding configuration provided by the user
+   * If not provided, then there bulk embedding is not available
+   */
+  bulkEmbeddingsFns?: BulkEmbeddingsFns
+  /** If both realTimeIngestionFn and bulkEmbeddingsConfig are not provided, then embedding is essentially disabled */
 }
 
 export type BulkEmbeddingRunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled'
@@ -55,10 +67,10 @@ export type BulkEmbeddingInput = {
 
 /** Internal metadata we persist per input to rebuild embeddings after provider returns outputs */
 export type BulkEmbeddingInputMetadata = {
-    sourceCollection: string
-    docId: string
-    chunkIndex: number
-    embeddingVersion: string
+  sourceCollection: string
+  docId: string
+  chunkIndex: number
+  embeddingVersion: string
   /** Arbitrary extension fields returned by toKnowledgePool */
   extensionFields?: Record<string, any>
 }
@@ -118,9 +130,7 @@ export type CompleteBulkEmbeddingsResult = {
   error?: string
 }
 
-export type BulkEmbeddingsConfig = {
-  /** Controls whether docs embed immediately or are staged for bulk runs */
-  ingestMode?: IngestMode
+export type BulkEmbeddingsFns = {
   prepareBulkEmbeddings: (
     args: PrepareBulkEmbeddingsArgs,
   ) => Promise<PrepareBulkEmbeddingsResult | void>

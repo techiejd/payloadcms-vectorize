@@ -61,9 +61,11 @@ export const dummyPluginOptions = {
   knowledgePools: {
     default: {
       collections: {},
-      embedDocs: async (texts: string[]) => texts.map(() => [0, 0, 0, 0, 0, 0, 0, 0]),
-      embedQuery: async (text: string) => [0, 0, 0, 0, 0, 0, 0, 0],
-      embeddingVersion: 'test',
+      embeddingConfig: {
+        version: 'test',
+        queryFn: async (text: string) => [0, 0, 0, 0, 0, 0, 0, 0],
+        realTimeIngestionFn: async (texts: string[]) => texts.map(() => [0, 0, 0, 0, 0, 0, 0, 0]),
+      },
     },
   },
   queueNameOrCronJob: vectorizeCronJob,
