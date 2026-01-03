@@ -262,6 +262,12 @@ const postsToKnowledgePool: ToKnowledgePoolFn = async (doc, payload) => {
 
 Because you control the output, you can mix different field types, discard empty values, or inject any metadata that aligns with your `extensionFields`.
 
+## Validation & retries
+
+- Each entry returned by `toKnowledgePool` must be an object with a required `chunk` string.
+- If any entry is malformed, the vectorize job fails with `hasError = true` and an error message listing invalid indices.
+- To retry after fixing your `toKnowledgePool` logic, clear `hasError` and `completedAt` (and set `processing` to `false` if needed) on the failed `payload-jobs` row. The queue runner will pick it up on the next interval.
+
 ## PostgreSQL Custom Schema Support
 
 The plugin reads the `schemaName` configuration from your Postgres adapter within the Payload config.

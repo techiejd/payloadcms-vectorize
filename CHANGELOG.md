@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## 0.5.0 - 2026-01-01
+## 0.5.0 - 2026-01-03
 
 ### Breaking Changes
 
@@ -25,7 +25,12 @@ All notable changes to this project will be documented in this file.
 - Added tests for bulk fan-in behavior (multiple documents processed in single run)
 - Improved test coverage for edge cases in bulk embedding workflow
 
-## 0.4.2 - 2026-01-01
+## 0.4.3 - 2025-01-02
+
+- Added runtime validation for `toKnowledgePool` entries (requires `chunk` string).
+- Documented how to requeue failed jobs by clearing `hasError` and `completedAt`.
+
+## 0.4.2 - 2025-01-01
 
 ### Changed
 
