@@ -1,8 +1,10 @@
 import type { Payload, SanitizedConfig } from 'payload'
 
-import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { createVectorizeTask } from '../../src/tasks/vectorize.js'
 import { BULK_EMBEDDINGS_RUNS_SLUG } from '../../src/collections/bulkEmbeddingsRuns.js'
+import { BULK_EMBEDDINGS_BATCHES_SLUG } from '../../src/collections/bulkEmbeddingsBatches.js'
+import { BULK_EMBEDDINGS_INPUT_METADATA_SLUG } from '../../src/collections/bulkEmbeddingInputMetadata.js'
 import {
   BULK_QUEUE_NAMES,
   DEFAULT_DIMS,
@@ -14,11 +16,10 @@ import {
   waitForBulkJobs,
 } from './utils.js'
 import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
-import type { BulkEmbeddingsFns } from '../../src/types.js'
 
 const DIMS = DEFAULT_DIMS
 
-describe('Bulk embed ingest mode with version/time gating', () => {
+describe('Bulk embed ingest mode with streaming API', () => {
   let payload: Payload
   let config: SanitizedConfig
   const dbNameBase = 'bulk_embed_test'
@@ -51,7 +52,6 @@ describe('Bulk embed ingest mode with version/time gating', () => {
   ) => {
     const dbToUse = options?.dbName || dbName
     const secret = options?.secret || 'test-secret'
-    console.log('building payload with pluginOpts', pluginOpts)
     const built = await buildPayloadWithIntegration({
       dbName: dbToUse,
       pluginOpts,
@@ -74,13 +74,6 @@ describe('Bulk embed ingest mode with version/time gating', () => {
     await clearAllCollections(payload)
     vi.restoreAllMocks()
   })
-
-  async function createSucceededBaseline({
-    version = testEmbeddingVersion,
-    completedAt = new Date().toISOString(),
-  } = {}) {
-    return createSucceededBaselineRun(payload, { version, completedAt })
-  }
 
   test('no bulk run is queued on init or doc creation (bulk-only mode)', async () => {
     // Verify that no bulk runs are queued automatically on init
@@ -139,6 +132,41 @@ describe('Bulk embed ingest mode with version/time gating', () => {
       })
     ).docs[0]
     expect(runDoc.status).toBe('succeeded')
+  })
+
+  test('bulk run creates batch records', async () => {
+    // Create a post first
+    await payload.create({ collection: 'posts', data: { title: 'Batch Test' } as any })
+
+    // Manually trigger a bulk run
+    const run = await payload.create({
+      collection: BULK_EMBEDDINGS_RUNS_SLUG,
+      data: {
+        pool: 'default',
+        embeddingVersion: testEmbeddingVersion,
+        status: 'queued',
+      },
+    })
+
+    await payload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
+      task: 'payloadcms-vectorize:prepare-bulk-embedding',
+      input: { runId: String(run.id) },
+      req: { payload } as any,
+      ...(BULK_QUEUE_NAMES.prepareBulkEmbedQueueName
+        ? { queue: BULK_QUEUE_NAMES.prepareBulkEmbedQueueName }
+        : {}),
+    })
+
+    await waitForBulkJobs(payload)
+
+    // Verify batch records were created
+    const batches = await payload.find({
+      collection: BULK_EMBEDDINGS_BATCHES_SLUG as any,
+      where: { run: { equals: String(run.id) } },
+    })
+    expect(batches.totalDocs).toBe(1)
+    expect(batches.docs[0]).toHaveProperty('batchIndex', 0)
+    expect(batches.docs[0]).toHaveProperty('status', 'succeeded')
   })
 
   test('version bump re-embeds all even without updates', async () => {
@@ -283,126 +311,6 @@ describe('Bulk embed ingest mode with version/time gating', () => {
     expect(runDoc.succeeded).toBe(0)
   })
 
-  /*test('updatedAt gating: updated after last bulk is eligible; before is skipped', async () => {
-    await clearAllCollections(payload)
-    const gatingPayload = await buildPayload()
-    const oldPost = await gatingPayload.create({
-      collection: 'posts',
-      data: { title: 'Old' } as any,
-    })
-    await waitForBulkJobs(gatingPayload) // baseline run
-    const baselineTime = new Date()
-    await createSucceededBaseline({ completedAt: baselineTime.toISOString() })
-
-    const newPost = await gatingPayload.create({
-      collection: 'posts',
-      data: { title: 'New' } as any,
-    })
-    await gatingPayload.update({
-      collection: 'posts',
-      id: newPost.id,
-      data: { title: 'New Updated' } as any,
-    })
-
-    await waitForBulkJobs(gatingPayload)
-
-    const embedsOld = await gatingPayload.find({
-      collection: 'default',
-      where: { docId: { equals: String(oldPost.id) } },
-    })
-    const embedsNew = await gatingPayload.find({
-      collection: 'default',
-      where: { docId: { equals: String(newPost.id) } },
-    })
-    expect(embedsOld.totalDocs).toBe(1)
-    expect(embedsNew.totalDocs).toBe(1)
-  })
-
-  test('missing embedding for current version is eligible even if not updated', async () => {
-    const post = await payload.create({ collection: 'posts', data: { title: 'Missing' } as any })
-    await createSucceededBaseline()
-    await payload.delete({
-      collection: 'default',
-      where: { docId: { equals: String(post.id) } },
-    })
-    await waitForBulkJobs(payload)
-    const embeds = await payload.find({
-      collection: 'default',
-      where: { docId: { equals: String(post.id) } },
-    })
-    expect(embeds.totalDocs).toBe(1)
-  })
-
-  test('stale replacement happens at completion, not prepare', async () => {
-    const post = await payload.create({ collection: 'posts', data: { title: 'Stale' } as any })
-    await waitForBulkJobs(payload)
-    await payload.update({
-      collection: 'posts',
-      id: post.id,
-      data: { title: 'Fresh Title' } as any,
-    })
-    const embedsBefore = await payload.find({
-      collection: 'default',
-      where: { docId: { equals: String(post.id) } },
-    })
-    expect(embedsBefore.totalDocs).toBeGreaterThan(0)
-    await waitForBulkJobs(payload)
-    const embedsAfter = await payload.find({
-      collection: 'default',
-      where: { docId: { equals: String(post.id) } },
-    })
-    expect(embedsAfter.docs[0]?.chunkText).toContain('Fresh Title')
-  })
-
-  test('partial outputs only delete/replace succeeded doc IDs', async () => {
-    await clearAllCollections(payload)
-    const partialPayload = await buildPayload({
-      ...basePluginOptions,
-      knowledgePools: {
-        default: {
-          ...basePluginOptions.knowledgePools.default,
-          embeddingConfig: {
-            ...basePluginOptions.knowledgePools.default.embeddingConfig,
-            bulkEmbeddingsFns: createMockBulkEmbeddings({
-              statusSequence: ['succeeded'],
-              partialFailure: { failIds: [] },
-            }),
-          },
-        },
-      },
-    })
-    const post1 = await partialPayload.create({ collection: 'posts', data: { title: 'P1' } as any })
-    const post2 = await partialPayload.create({ collection: 'posts', data: { title: 'P2' } as any })
-    // Rebuild with failIds after IDs are known
-    const partialPayloadWithFails = await buildPayload({
-      ...basePluginOptions,
-      knowledgePools: {
-        default: {
-          ...basePluginOptions.knowledgePools.default,
-          embeddingConfig: {
-            ...basePluginOptions.knowledgePools.default.embeddingConfig,
-            bulkEmbeddingsFns: createMockBulkEmbeddings({
-              statusSequence: ['succeeded'],
-              partialFailure: { failIds: [`posts:${post2.id}:0`] },
-            }),
-          },
-        },
-      },
-    })
-    await waitForBulkJobs(partialPayloadWithFails)
-
-    const embedsP1 = await partialPayloadWithFails.find({
-      collection: 'default',
-      where: { docId: { equals: String(post1.id) } },
-    })
-    const embedsP2 = await partialPayloadWithFails.find({
-      collection: 'default',
-      where: { docId: { equals: String(post2.id) } },
-    })
-    expect(embedsP1.totalDocs).toBe(1)
-    expect(embedsP2.totalDocs).toBe(0)
-  })
-
   test('polling requeues when non-terminal then succeeds', async () => {
     await clearAllCollections(payload)
     const loopPayload = await buildPayload({
@@ -412,30 +320,39 @@ describe('Bulk embed ingest mode with version/time gating', () => {
           ...basePluginOptions.knowledgePools.default,
           embeddingConfig: {
             ...basePluginOptions.knowledgePools.default.embeddingConfig,
-            bulkEmbeddingsFns: createMockBulkEmbeddings({ statusSequence: ['running', 'succeeded'] }),
+            bulkEmbeddingsFns: createMockBulkEmbeddings({
+              statusSequence: ['running', 'succeeded'],
+            }),
           },
         },
       },
     })
-    const queueSpy = vi.spyOn(loopPayload.jobs, 'queue')
-    const opts = {
-      ...basePluginOptions,
-      knowledgePools: {
-        default: {
-          ...basePluginOptions.knowledgePools.default,
-          embeddingConfig: {
-            ...basePluginOptions.knowledgePools.default.embeddingConfig,
-            bulkEmbeddingsFns: createMockBulkEmbeddings({ statusSequence: ['running', 'succeeded'] }),
-          },
-        },
-      },
-    }
+
     const post = await loopPayload.create({ collection: 'posts', data: { title: 'Loop' } as any })
+
+    // Manually trigger bulk run
+    const run = await loopPayload.create({
+      collection: BULK_EMBEDDINGS_RUNS_SLUG,
+      data: { pool: 'default', embeddingVersion: testEmbeddingVersion, status: 'queued' },
+    })
+
+    const queueSpy = vi.spyOn(loopPayload.jobs, 'queue')
+
+    await loopPayload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
+      task: 'payloadcms-vectorize:prepare-bulk-embedding',
+      input: { runId: String(run.id) },
+      req: { payload: loopPayload } as any,
+      ...(BULK_QUEUE_NAMES.prepareBulkEmbedQueueName
+        ? { queue: BULK_QUEUE_NAMES.prepareBulkEmbedQueueName }
+        : {}),
+    })
+
     await waitForBulkJobs(loopPayload)
+
     expect(queueSpy).toHaveBeenCalledWith(
       expect.objectContaining({ task: 'payloadcms-vectorize:poll-or-complete-bulk-embedding' }),
     )
-    await waitForBulkJobs(loopPayload)
+
     const embeds = await loopPayload.find({
       collection: 'default',
       where: { docId: { equals: String(post.id) } },
@@ -443,7 +360,7 @@ describe('Bulk embed ingest mode with version/time gating', () => {
     expect(embeds.totalDocs).toBe(1)
   })
 
-  test('failed polling stops and does not complete embeddings', async () => {
+  test('failed batch marks entire run as failed', async () => {
     await clearAllCollections(payload)
     const failedPayload = await buildPayload({
       ...basePluginOptions,
@@ -457,8 +374,36 @@ describe('Bulk embed ingest mode with version/time gating', () => {
         },
       },
     })
+
     const post = await failedPayload.create({ collection: 'posts', data: { title: 'Fail' } as any })
+
+    // Manually trigger bulk run
+    const run = await failedPayload.create({
+      collection: BULK_EMBEDDINGS_RUNS_SLUG,
+      data: { pool: 'default', embeddingVersion: testEmbeddingVersion, status: 'queued' },
+    })
+
+    await failedPayload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
+      task: 'payloadcms-vectorize:prepare-bulk-embedding',
+      input: { runId: String(run.id) },
+      req: { payload: failedPayload } as any,
+      ...(BULK_QUEUE_NAMES.prepareBulkEmbedQueueName
+        ? { queue: BULK_QUEUE_NAMES.prepareBulkEmbedQueueName }
+        : {}),
+    })
+
     await waitForBulkJobs(failedPayload)
+
+    // Verify run is marked as failed
+    const runDoc = (
+      await (failedPayload as any).find({
+        collection: BULK_EMBEDDINGS_RUNS_SLUG,
+        where: { id: { equals: String(run.id) } },
+      })
+    ).docs[0]
+    expect(runDoc.status).toBe('failed')
+
+    // Verify no embeddings were written
     const embeds = await failedPayload.find({
       collection: 'default',
       where: { docId: { equals: String(post.id) } },
@@ -466,7 +411,7 @@ describe('Bulk embed ingest mode with version/time gating', () => {
     expect(embeds.totalDocs).toBe(0)
   })
 
-  test('canceled polling stops', async () => {
+  test('canceled batch marks entire run as failed', async () => {
     await clearAllCollections(payload)
     const canceledPayload = await buildPayload({
       ...basePluginOptions,
@@ -480,116 +425,34 @@ describe('Bulk embed ingest mode with version/time gating', () => {
         },
       },
     })
+
     const post = await canceledPayload.create({
       collection: 'posts',
       data: { title: 'Cancel' } as any,
     })
+
+    // Manually trigger bulk run
+    const run = await canceledPayload.create({
+      collection: BULK_EMBEDDINGS_RUNS_SLUG,
+      data: { pool: 'default', embeddingVersion: testEmbeddingVersion, status: 'queued' },
+    })
+
+    await canceledPayload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
+      task: 'payloadcms-vectorize:prepare-bulk-embedding',
+      input: { runId: String(run.id) },
+      req: { payload: canceledPayload } as any,
+      ...(BULK_QUEUE_NAMES.prepareBulkEmbedQueueName
+        ? { queue: BULK_QUEUE_NAMES.prepareBulkEmbedQueueName }
+        : {}),
+    })
+
     await waitForBulkJobs(canceledPayload)
+
     const embeds = await canceledPayload.find({
       collection: 'default',
       where: { docId: { equals: String(post.id) } },
     })
     expect(embeds.totalDocs).toBe(0)
-  })
-
-  test('stores metadata records for inputs before provider submit', async () => {
-    await clearAllCollections(payload)
-    const metaPayload = await buildPayload({
-      ...basePluginOptions,
-      knowledgePools: {
-        default: {
-          ...basePluginOptions.knowledgePools.default,
-          extensionFields: [{ name: 'category', type: 'text' }],
-          collections: {
-            posts: {
-              toKnowledgePool: async (doc: any) => [{ chunk: doc.title, category: 'tech' }],
-            },
-          },
-        },
-      },
-    })
-    const createSpy = vi.spyOn(metaPayload, 'create')
-    await metaPayload.create({ collection: 'posts', data: { title: 'Meta' } as any })
-    await waitForBulkJobs(metaPayload)
-    expect(
-      createSpy.mock.calls.some(
-        (call) =>
-          call[0]?.collection === BULK_EMBEDDINGS_INPUT_METADATA_SLUG && call[0]?.data?.inputId,
-      ),
-    ).toBe(true)
-    createSpy.mockRestore()
-  })
-
-  test('extension fields are merged when writing embeddings from metadata table', async () => {
-    await clearAllCollections(payload)
-    const metaPayload = await buildPayload({
-      ...basePluginOptions,
-      knowledgePools: {
-        default: {
-          ...basePluginOptions.knowledgePools.default,
-          extensionFields: [
-            { name: 'category', type: 'text' },
-            { name: 'priority', type: 'number' },
-          ],
-          collections: {
-            posts: {
-              toKnowledgePool: async (doc: any) => [
-                { chunk: doc.title, category: 'tech', priority: 3 },
-              ],
-            },
-          },
-        },
-      },
-    })
-    const post = await metaPayload.create({
-      collection: 'posts',
-      data: { title: 'Ext merge' } as any,
-    })
-    await waitForBulkJobs(metaPayload)
-    const embeds = await metaPayload.find({
-      collection: 'default',
-      where: { docId: { equals: String(post.id) } },
-    })
-    expect(embeds.totalDocs).toBe(1)
-    expect(embeds.docs[0]).toHaveProperty('category', 'tech')
-    expect(embeds.docs[0]).toHaveProperty('priority', 3)
-  })
-
-  test('multiple chunks keep their respective extension fields', async () => {
-    await clearAllCollections(payload)
-    const multiPayload = await buildPayload({
-      ...basePluginOptions,
-      knowledgePools: {
-        default: {
-          ...basePluginOptions.knowledgePools.default,
-          extensionFields: [
-            { name: 'category', type: 'text' },
-            { name: 'priority', type: 'number' },
-          ],
-          collections: {
-            posts: {
-              toKnowledgePool: async () => [
-                { chunk: 'Chunk 1', category: 'a', priority: 1 },
-                { chunk: 'Chunk 2', category: 'b', priority: 2 },
-              ],
-            },
-          },
-        },
-      },
-    })
-    const post = await multiPayload.create({
-      collection: 'posts',
-      data: { title: 'Two' } as any,
-    })
-    await waitForBulkJobs(multiPayload)
-    const embeds = await multiPayload.find({
-      collection: 'default',
-      where: { docId: { equals: String(post.id) } },
-      sort: 'chunkIndex',
-    })
-    expect(embeds.totalDocs).toBe(2)
-    expect(embeds.docs[0]).toMatchObject({ category: 'a', priority: 1, chunkIndex: 0 })
-    expect(embeds.docs[1]).toMatchObject({ category: 'b', priority: 2, chunkIndex: 1 })
   })
 
   test('metadata table is cleaned after successful completion', async () => {
@@ -607,13 +470,255 @@ describe('Bulk embed ingest mode with version/time gating', () => {
         },
       },
     })
+
     await cleanPayload.create({ collection: 'posts', data: { title: 'Cleanup' } as any })
+
+    // Manually trigger bulk run
+    const run = await cleanPayload.create({
+      collection: BULK_EMBEDDINGS_RUNS_SLUG,
+      data: { pool: 'default', embeddingVersion: testEmbeddingVersion, status: 'queued' },
+    })
+
+    await cleanPayload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
+      task: 'payloadcms-vectorize:prepare-bulk-embedding',
+      input: { runId: String(run.id) },
+      req: { payload: cleanPayload } as any,
+      ...(BULK_QUEUE_NAMES.prepareBulkEmbedQueueName
+        ? { queue: BULK_QUEUE_NAMES.prepareBulkEmbedQueueName }
+        : {}),
+    })
+
     await waitForBulkJobs(cleanPayload)
+
     const metadata = await cleanPayload.find({
       collection: BULK_EMBEDDINGS_INPUT_METADATA_SLUG,
       where: { run: { exists: true } },
     })
     expect(metadata.totalDocs).toBe(0)
+  })
+
+  test('metadata table is cleaned after failed run (no partial writes)', async () => {
+    await clearAllCollections(payload)
+    const failPayload = await buildPayload({
+      ...basePluginOptions,
+      knowledgePools: {
+        default: {
+          ...basePluginOptions.knowledgePools.default,
+          embeddingConfig: {
+            ...basePluginOptions.knowledgePools.default.embeddingConfig,
+            bulkEmbeddingsFns: createMockBulkEmbeddings({ statusSequence: ['failed'] }),
+          },
+        },
+      },
+    })
+
+    await failPayload.create({ collection: 'posts', data: { title: 'FailCleanup' } as any })
+
+    // Manually trigger bulk run
+    const run = await failPayload.create({
+      collection: BULK_EMBEDDINGS_RUNS_SLUG,
+      data: { pool: 'default', embeddingVersion: testEmbeddingVersion, status: 'queued' },
+    })
+
+    await failPayload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
+      task: 'payloadcms-vectorize:prepare-bulk-embedding',
+      input: { runId: String(run.id) },
+      req: { payload: failPayload } as any,
+      ...(BULK_QUEUE_NAMES.prepareBulkEmbedQueueName
+        ? { queue: BULK_QUEUE_NAMES.prepareBulkEmbedQueueName }
+        : {}),
+    })
+
+    await waitForBulkJobs(failPayload)
+
+    // Verify metadata is cleaned up even on failure
+    const metadata = await failPayload.find({
+      collection: BULK_EMBEDDINGS_INPUT_METADATA_SLUG,
+      where: { run: { exists: true } },
+    })
+    expect(metadata.totalDocs).toBe(0)
+  })
+
+  test('extension fields are merged when writing embeddings', async () => {
+    await clearAllCollections(payload)
+    const extPayload = await buildPayload({
+      ...basePluginOptions,
+      knowledgePools: {
+        default: {
+          collections: {
+            posts: {
+              toKnowledgePool: async (doc: any) => [
+                { chunk: doc.title, category: 'tech', priority: 3 },
+              ],
+            },
+          },
+          extensionFields: [
+            { name: 'category', type: 'text' },
+            { name: 'priority', type: 'number' },
+          ],
+          embeddingConfig: {
+            ...basePluginOptions.knowledgePools.default.embeddingConfig,
+          },
+        },
+      },
+    } as any)
+
+    const post = await extPayload.create({
+      collection: 'posts',
+      data: { title: 'Ext merge' } as any,
+    })
+
+    // Manually trigger bulk run
+    const run = await extPayload.create({
+      collection: BULK_EMBEDDINGS_RUNS_SLUG,
+      data: { pool: 'default', embeddingVersion: testEmbeddingVersion, status: 'queued' },
+    })
+
+    await extPayload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
+      task: 'payloadcms-vectorize:prepare-bulk-embedding',
+      input: { runId: String(run.id) },
+      req: { payload: extPayload } as any,
+      ...(BULK_QUEUE_NAMES.prepareBulkEmbedQueueName
+        ? { queue: BULK_QUEUE_NAMES.prepareBulkEmbedQueueName }
+        : {}),
+    })
+
+    await waitForBulkJobs(extPayload)
+
+    const embeds = await extPayload.find({
+      collection: 'default',
+      where: { docId: { equals: String(post.id) } },
+    })
+    expect(embeds.totalDocs).toBe(1)
+    expect(embeds.docs[0]).toHaveProperty('category', 'tech')
+    expect(embeds.docs[0]).toHaveProperty('priority', 3)
+  })
+
+  test('multiple chunks keep their respective extension fields', async () => {
+    await clearAllCollections(payload)
+    const multiPayload = await buildPayload({
+      ...basePluginOptions,
+      knowledgePools: {
+        default: {
+          collections: {
+            posts: {
+              toKnowledgePool: async () => [
+                { chunk: 'Chunk 1', category: 'a', priority: 1 },
+                { chunk: 'Chunk 2', category: 'b', priority: 2 },
+              ],
+            },
+          },
+          extensionFields: [
+            { name: 'category', type: 'text' },
+            { name: 'priority', type: 'number' },
+          ],
+          embeddingConfig: {
+            ...basePluginOptions.knowledgePools.default.embeddingConfig,
+          },
+        },
+      },
+    } as any)
+
+    const post = await multiPayload.create({
+      collection: 'posts',
+      data: { title: 'Two' } as any,
+    })
+
+    // Manually trigger bulk run
+    const run = await multiPayload.create({
+      collection: BULK_EMBEDDINGS_RUNS_SLUG,
+      data: { pool: 'default', embeddingVersion: testEmbeddingVersion, status: 'queued' },
+    })
+
+    await multiPayload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
+      task: 'payloadcms-vectorize:prepare-bulk-embedding',
+      input: { runId: String(run.id) },
+      req: { payload: multiPayload } as any,
+      ...(BULK_QUEUE_NAMES.prepareBulkEmbedQueueName
+        ? { queue: BULK_QUEUE_NAMES.prepareBulkEmbedQueueName }
+        : {}),
+    })
+
+    await waitForBulkJobs(multiPayload)
+
+    const embeds = await multiPayload.find({
+      collection: 'default',
+      where: { docId: { equals: String(post.id) } },
+      sort: 'chunkIndex',
+    })
+    expect(embeds.totalDocs).toBe(2)
+    expect(embeds.docs[0]).toMatchObject({ category: 'a', priority: 1, chunkIndex: 0 })
+    expect(embeds.docs[1]).toMatchObject({ category: 'b', priority: 2, chunkIndex: 1 })
+  })
+
+  test('multiple batches are created when flushing after N chunks', async () => {
+    await clearAllCollections(payload)
+
+    // Create mock that flushes after 2 chunks
+    const smallBatchPayload = await buildPayload({
+      ...basePluginOptions,
+      knowledgePools: {
+        default: {
+          ...basePluginOptions.knowledgePools.default,
+          embeddingConfig: {
+            ...basePluginOptions.knowledgePools.default.embeddingConfig,
+            bulkEmbeddingsFns: createMockBulkEmbeddings({
+              statusSequence: ['succeeded'],
+              flushAfterChunks: 2, // Flush after 2 chunks
+            }),
+          },
+        },
+      },
+    })
+
+    // Create 5 posts (should result in 3 batches: 2, 2, 1)
+    for (let i = 0; i < 5; i++) {
+      await smallBatchPayload.create({ collection: 'posts', data: { title: `Post ${i}` } as any })
+    }
+
+    // Manually trigger bulk run
+    const run = await smallBatchPayload.create({
+      collection: BULK_EMBEDDINGS_RUNS_SLUG,
+      data: { pool: 'default', embeddingVersion: testEmbeddingVersion, status: 'queued' },
+    })
+
+    await smallBatchPayload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
+      task: 'payloadcms-vectorize:prepare-bulk-embedding',
+      input: { runId: String(run.id) },
+      req: { payload: smallBatchPayload } as any,
+      ...(BULK_QUEUE_NAMES.prepareBulkEmbedQueueName
+        ? { queue: BULK_QUEUE_NAMES.prepareBulkEmbedQueueName }
+        : {}),
+    })
+
+    await waitForBulkJobs(smallBatchPayload, 15000)
+
+    // Verify multiple batches were created
+    const batches = await smallBatchPayload.find({
+      collection: BULK_EMBEDDINGS_BATCHES_SLUG as any,
+      where: { run: { equals: String(run.id) } },
+      sort: 'batchIndex',
+    })
+    expect(batches.totalDocs).toBe(3)
+    expect(batches.docs[0]).toHaveProperty('batchIndex', 0)
+    expect(batches.docs[1]).toHaveProperty('batchIndex', 1)
+    expect(batches.docs[2]).toHaveProperty('batchIndex', 2)
+
+    // Verify all embeddings were written
+    const embeds = await smallBatchPayload.find({
+      collection: 'default',
+    })
+    expect(embeds.totalDocs).toBe(5)
+
+    // Verify run has correct totalBatches
+    const runDoc = (
+      await (smallBatchPayload as any).find({
+        collection: BULK_EMBEDDINGS_RUNS_SLUG,
+        where: { id: { equals: String(run.id) } },
+      })
+    ).docs[0]
+    expect(runDoc.totalBatches).toBe(3)
+    expect(runDoc.status).toBe('succeeded')
   })
 
   test('realtime mode queues vectorize jobs when realTimeIngestionFn is provided', async () => {
@@ -630,19 +735,7 @@ describe('Bulk embed ingest mode with version/time gating', () => {
             queryFn: makeDummyEmbedQuery(DIMS),
             realTimeIngestionFn: makeDummyEmbedDocs(DIMS),
             // Also provide bulk for testing, but realTimeIngestionFn should take precedence
-            bulkEmbeddingsFns: {
-              prepareBulkEmbeddings: async () => ({
-                providerBatchId: 'noop',
-                status: 'succeeded' as const,
-                counts: { inputs: 0, succeeded: 0, failed: 0 },
-              }),
-              pollBulkEmbeddings: async () => ({ status: 'succeeded' as const }),
-              completeBulkEmbeddings: async () => ({
-                status: 'succeeded' as const,
-                outputs: [],
-                counts: { inputs: 0 },
-              }),
-            },
+            bulkEmbeddingsFns: createMockBulkEmbeddings({ statusSequence: ['succeeded'] }),
           },
         },
       },
@@ -670,5 +763,5 @@ describe('Bulk embed ingest mode with version/time gating', () => {
       where: { docId: { equals: String(post.id) } },
     })
     expect(embeds.totalDocs).toBeGreaterThan(0)
-  })*/
+  })
 })

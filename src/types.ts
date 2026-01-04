@@ -13,8 +13,6 @@ export type CollectionVectorizeOption = {
   toKnowledgePool: ToKnowledgePoolFn
 }
 
-export type IngestMode = 'realtime' | 'bulk'
-
 /** Knowledge pool name identifier */
 export type KnowledgePoolName = string
 
@@ -89,55 +87,65 @@ export type BulkEmbeddingCounts = {
   failed?: number
 }
 
-export type PrepareBulkEmbeddingsArgs = {
-  payload: Payload
-  knowledgePool: KnowledgePoolName
-  embeddingVersion: string
-  inputs: BulkEmbeddingInput[]
-}
-
-export type PrepareBulkEmbeddingsResult = {
-  providerBatchId: string
-  inputFileRef?: string
-  status?: BulkEmbeddingRunStatus
-  counts?: BulkEmbeddingCounts
-}
-
-export type PollBulkEmbeddingsArgs = {
-  payload: Payload
-  knowledgePool: KnowledgePoolName
-  providerBatchId: string
-}
-
 export type PollBulkEmbeddingsResult = {
   status: BulkEmbeddingRunStatus
   counts?: BulkEmbeddingCounts
   error?: string
-  /** Optional delay hint in ms before the next poll */
-  nextPollMs?: number
 }
 
-export type CompleteBulkEmbeddingsArgs = {
-  payload: Payload
-  knowledgePool: KnowledgePoolName
+/** Arguments passed to addChunk callback */
+export type AddChunkArgs = {
+  /** The chunk to add */
+  chunk: BulkEmbeddingInput
+  /** True if this is the last chunk in the run */
+  isLastChunk: boolean
+}
+
+/** Result when user decides to submit a batch */
+export type BatchSubmission = {
+  /** Provider-specific batch identifier */
+  providerBatchId: string
+  /** Optional file reference for the input file */
+  inputFileRef?: string
+  /** The chunks that were submitted in this batch (for metadata tracking) */
+  submittedChunks: BulkEmbeddingInput[]
+}
+
+/** Arguments for polling a single batch */
+export type PollBatchArgs = {
+  /** Provider-specific batch identifier */
   providerBatchId: string
 }
 
-export type CompleteBulkEmbeddingsResult = {
-  status: BulkEmbeddingRunStatus
-  outputs: BulkEmbeddingOutput[]
-  counts?: BulkEmbeddingCounts
-  error?: string
+/** Arguments for completing/downloading a single batch */
+export type CompleteBatchArgs = {
+  /** Provider-specific batch identifier */
+  providerBatchId: string
 }
 
+/**
+ * Bulk embeddings API with user-controlled batching.
+ * User accumulates chunks internally and decides when to flush based on file size.
+ */
 export type BulkEmbeddingsFns = {
-  prepareBulkEmbeddings: (
-    args: PrepareBulkEmbeddingsArgs,
-  ) => Promise<PrepareBulkEmbeddingsResult | void>
-  pollBulkEmbeddings: (args: PollBulkEmbeddingsArgs) => Promise<PollBulkEmbeddingsResult>
-  completeBulkEmbeddings: (
-    args: CompleteBulkEmbeddingsArgs,
-  ) => Promise<CompleteBulkEmbeddingsResult | void>
+  /**
+   * Called for each chunk. User accumulates internally based on file size logic.
+   * - Return null to keep accumulating
+   * - Return BatchSubmission when ready to submit a batch
+   * - When isLastChunk=true, must flush any remaining accumulated chunks
+   *
+   * Example flow when chunk would exceed file limit:
+   * 1. Submit currently accumulated chunks (without this chunk)
+   * 2. Start fresh accumulation with this chunk
+   * 3. Return the BatchSubmission
+   */
+  addChunk: (args: AddChunkArgs) => Promise<BatchSubmission | null>
+
+  /** Poll a specific batch by providerBatchId */
+  pollBatch: (args: PollBatchArgs) => Promise<PollBulkEmbeddingsResult>
+
+  /** Download outputs for a completed batch */
+  completeBatch: (args: CompleteBatchArgs) => Promise<BulkEmbeddingOutput[]>
 }
 
 export type PayloadcmsVectorizeConfig<TPoolNames extends KnowledgePoolName = KnowledgePoolName> = {

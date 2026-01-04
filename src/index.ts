@@ -23,6 +23,10 @@ import {
   createBulkEmbeddingInputMetadataCollection,
 } from './collections/bulkEmbeddingInputMetadata.js'
 import {
+  createBulkEmbeddingsBatchesCollection,
+  BULK_EMBEDDINGS_BATCHES_SLUG,
+} from './collections/bulkEmbeddingsBatches.js'
+import {
   createPrepareBulkEmbeddingTask,
   createPollOrCompleteBulkEmbeddingTask,
 } from './tasks/bulkEmbedAll.js'
@@ -141,6 +145,11 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
       const bulkInputMetadataCollection = createBulkEmbeddingInputMetadataCollection()
       if (!config.collections.find((c) => c.slug === BULK_EMBEDDINGS_INPUT_METADATA_SLUG)) {
         config.collections.push(bulkInputMetadataCollection)
+      }
+      // Ensure bulk batches collection exists once
+      const bulkBatchesCollection = createBulkEmbeddingsBatchesCollection()
+      if (!config.collections.find((c) => c.slug === BULK_EMBEDDINGS_BATCHES_SLUG)) {
+        config.collections.push(bulkBatchesCollection)
       }
 
       // Validate static/dynamic configs share the same pool names

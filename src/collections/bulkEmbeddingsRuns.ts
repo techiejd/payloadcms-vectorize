@@ -44,25 +44,19 @@ export const createBulkEmbeddingsRunsCollection = (): CollectionConfig => ({
       },
     },
     {
-      name: 'inputFileRef',
-      type: 'text',
-      admin: {
-        description: 'Provider file or input reference used for the batch',
-      },
-    },
-    {
-      name: 'providerBatchId',
-      type: 'text',
-      admin: {
-        description: 'Provider batch identifier',
-      },
-    },
-    {
       name: 'status',
       type: 'select',
       options: statusOptions.map((value) => ({ value, label: value })),
       required: true,
       defaultValue: 'queued',
+    },
+    {
+      name: 'totalBatches',
+      type: 'number',
+      defaultValue: 0,
+      admin: {
+        description: 'Total number of batches in this run',
+      },
     },
     {
       name: 'inputs',
@@ -101,9 +95,6 @@ export const createBulkEmbeddingsRunsCollection = (): CollectionConfig => ({
   indexes: [
     {
       fields: ['pool'],
-    },
-    {
-      fields: ['providerBatchId'],
     },
     {
       fields: ['status'],

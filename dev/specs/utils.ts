@@ -7,6 +7,7 @@ import { lexicalEditor } from '@payloadcms/richtext-lexical'
 import { createVectorizeIntegration } from 'payloadcms-vectorize'
 import { BULK_EMBEDDINGS_RUNS_SLUG } from '../../src/collections/bulkEmbeddingsRuns.js'
 import { BULK_EMBEDDINGS_INPUT_METADATA_SLUG } from '../../src/collections/bulkEmbeddingInputMetadata.js'
+import { BULK_EMBEDDINGS_BATCHES_SLUG } from '../../src/collections/bulkEmbeddingsBatches.js'
 import { makeDummyEmbedDocs } from 'helpers/embed.js'
 import type {
   BulkEmbeddingsFns,
@@ -76,55 +77,103 @@ export const BULK_QUEUE_NAMES = {
 type MockOptions = {
   statusSequence: BulkEmbeddingRunStatus[]
   partialFailure?: { failIds: string[] }
+  /** Optional: flush after this many chunks (for testing multi-batch scenarios) */
+  flushAfterChunks?: number
 }
 
+/**
+ * Creates a mock BulkEmbeddingsFns for testing the new addChunk API.
+ * User controls batching - we simulate by optionally flushing after N chunks.
+ */
 export function createMockBulkEmbeddings(
   options: MockOptions,
   dims: number = DEFAULT_DIMS,
 ): BulkEmbeddingsFns {
-  const { statusSequence, partialFailure } = options
-  let callCount = 0
-  let lastInputs: BulkEmbeddingInput[] = []
+  const { statusSequence, partialFailure, flushAfterChunks } = options
+  // Accumulated chunks for current batch
+  let accumulatedChunks: BulkEmbeddingInput[] = []
+  let batchIndex = 0
+
+  // Track inputs per batch (keyed by providerBatchId)
+  const batchInputs = new Map<string, BulkEmbeddingInput[]>()
+  // Track poll call count per batch for status sequence
+  const batchPollCount = new Map<string, number>()
   const embeddings = makeDummyEmbedDocs(dims)
 
   return {
-    prepareBulkEmbeddings: async ({ inputs }) => {
-      lastInputs = inputs
-      return {
-        providerBatchId: `mock-${Date.now()}`,
-        status: 'queued',
-        counts: { inputs: inputs.length },
+    addChunk: async ({ chunk, isLastChunk }) => {
+      // Check if we should flush before adding this chunk
+      if (
+        flushAfterChunks &&
+        accumulatedChunks.length >= flushAfterChunks &&
+        accumulatedChunks.length > 0
+      ) {
+        // Submit what we have (without this chunk)
+        const toSubmit = [...accumulatedChunks]
+        accumulatedChunks = [chunk]
+        const providerBatchId = `mock-batch-${batchIndex}-${Date.now()}`
+        batchInputs.set(providerBatchId, toSubmit)
+        batchPollCount.set(providerBatchId, 0)
+        batchIndex++
+        return {
+          providerBatchId,
+          inputFileRef: `mock-file-${batchIndex - 1}`,
+          submittedChunks: toSubmit,
+        }
       }
+
+      // Add chunk to accumulator
+      accumulatedChunks.push(chunk)
+
+      // If this is the last chunk, flush everything
+      if (isLastChunk && accumulatedChunks.length > 0) {
+        const toSubmit = [...accumulatedChunks]
+        accumulatedChunks = []
+        const providerBatchId = `mock-batch-${batchIndex}-${Date.now()}`
+        batchInputs.set(providerBatchId, toSubmit)
+        batchPollCount.set(providerBatchId, 0)
+        batchIndex++
+        return {
+          providerBatchId,
+          inputFileRef: `mock-file-${batchIndex - 1}`,
+          submittedChunks: toSubmit,
+        }
+      }
+
+      return null
     },
-    pollBulkEmbeddings: async () => {
-      const status = statusSequence[Math.min(callCount++, statusSequence.length - 1)]
+
+    pollBatch: async ({ providerBatchId }) => {
+      const callCount = batchPollCount.get(providerBatchId) ?? 0
+      batchPollCount.set(providerBatchId, callCount + 1)
+      const status = statusSequence[Math.min(callCount, statusSequence.length - 1)]
+      const inputs = batchInputs.get(providerBatchId) ?? []
       const counts =
         status === 'succeeded'
-          ? { inputs: lastInputs.length, succeeded: lastInputs.length, failed: 0 }
+          ? { inputs: inputs.length, succeeded: inputs.length, failed: 0 }
           : undefined
       return {
         status,
         counts,
       }
     },
-    completeBulkEmbeddings: async () => {
-      if (!lastInputs.length) {
-        return { status: 'succeeded', outputs: [], counts: { inputs: 0, succeeded: 0, failed: 0 } }
+
+    completeBatch: async ({ providerBatchId }) => {
+      const inputs = batchInputs.get(providerBatchId) ?? []
+      if (!inputs.length) {
+        return []
       }
-      const vectors = await embeddings(lastInputs.map((i) => i.text))
-      const outputs = lastInputs.map((input, idx) => {
+      const vectors = await embeddings(inputs.map((i) => i.text))
+      const outputs = inputs.map((input, idx) => {
         const shouldFail = partialFailure?.failIds?.includes(input.id)
         return shouldFail
           ? { id: input.id, error: 'fail' }
           : { id: input.id, embedding: vectors[idx] }
       })
-      const succeeded = outputs.filter((o) => (o as any).embedding).length
-      const failed = outputs.length - succeeded
-      return {
-        status: 'succeeded',
-        outputs,
-        counts: { inputs: outputs.length, succeeded, failed },
-      }
+      // Clean up state
+      batchInputs.delete(providerBatchId)
+      batchPollCount.delete(providerBatchId)
+      return outputs
     },
   }
 }
@@ -207,6 +256,7 @@ export const clearAllCollections = async (pl: Payload) => {
   }
 
   await safeDelete(BULK_EMBEDDINGS_RUNS_SLUG)
+  await safeDelete(BULK_EMBEDDINGS_BATCHES_SLUG)
   await safeDelete(BULK_EMBEDDINGS_INPUT_METADATA_SLUG)
   await safeDelete('default')
   await safeDelete('posts')
