@@ -32,10 +32,12 @@ describe('Bulk embed ingest mode with version/time gating', () => {
             toKnowledgePool: async (doc: any) => [{ chunk: doc.title }],
           },
         },
-        embedDocs: makeDummyEmbedDocs(DIMS),
-        embedQuery: makeDummyEmbedQuery(DIMS),
-        embeddingVersion: testEmbeddingVersion,
-        bulkEmbeddings: createMockBulkEmbeddings({ statusSequence: ['succeeded'] }),
+        embeddingConfig: {
+          version: testEmbeddingVersion,
+          queryFn: makeDummyEmbedQuery(DIMS),
+          // No realTimeIngestionFn - bulk-only mode
+          bulkEmbeddingsFns: createMockBulkEmbeddings({ statusSequence: ['succeeded'] }),
+        },
       },
     },
     bulkQueueNames: BULK_QUEUE_NAMES,
@@ -80,87 +82,49 @@ describe('Bulk embed ingest mode with version/time gating', () => {
     return createSucceededBaselineRun(payload, { version, completedAt })
   }
 
-  test('fresh project, no docs → counts 0 baseline', async () => {
-    // onInit queues first run automatically; no docs should yield zero counts
-    await waitForBulkJobs(payload)
-    const runDoc = (
-      await (payload as any).find({
-        collection: BULK_EMBEDDINGS_RUNS_SLUG,
-        where: { pool: { equals: 'default' } },
-        sort: '-createdAt',
-        limit: 1,
-      })
-    ).docs[0]
-    expect(runDoc.inputs).toBe(0)
-    expect(runDoc.succeeded).toBe(0)
-  })
-
-  test('enabling bulk later queues first run automatically', async () => {
-    // Clear state from the default payload built in beforeEach
-    await clearAllCollections(payload)
-
-    // Use a fresh database for the toggle scenario to avoid residual runs
-    const tempDbName = `${dbNameBase}_toggle_${Date.now()}`
-    await createTestDb({ dbName: tempDbName })
-
-    // Start without bulkEmbeddings configured
-    const noBulkOptions = {
-      ...basePluginOptions,
-      disabled: true,
-      knowledgePools: {
-        default: {
-          ...basePluginOptions.knowledgePools.default,
-          bulkEmbeddings: undefined,
-        },
-      },
-    }
-    console.log('building noBulkPayload with noBulkOptions', noBulkOptions)
-    const noBulkPayload = await buildPayload(noBulkOptions as any, {
-      dbName: tempDbName,
-      secret: `secret-nobulk-${Date.now()}`,
-    })
-    console.log('noBulkPayload')
-    // Clear any runs that might have been created by previous payload instance
-    console.log('clearing all')
-    await clearAllCollections(noBulkPayload)
-    console.log('creating post')
-    await noBulkPayload.create({ collection: 'posts', data: { title: 'NoBulk' } as any })
-    console.log('creating post done')
-    // No bulk runs should exist (onInit shouldn't create runs when bulkEmbeddings is undefined)
-    const none = await (noBulkPayload as any).find({
+  test('no bulk run is queued on init or doc creation (bulk-only mode)', async () => {
+    // Verify that no bulk runs are queued automatically on init
+    const runsBeforeCreate = await (payload as any).find({
       collection: BULK_EMBEDDINGS_RUNS_SLUG,
       where: { pool: { equals: 'default' } },
     })
-    console.log('none', none)
-    expect(none.totalDocs).toBe(0)
+    expect(runsBeforeCreate.totalDocs).toBe(0)
 
-    // Rebuild with bulk enabled; onInit should queue the first run
-    const bulkPayload = await buildPayload(basePluginOptions, {
-      dbName: tempDbName,
-      secret: `secret-bulk-${Date.now()}`,
+    // Create a post - should NOT queue a bulk run (bulk must be triggered manually)
+    await payload.create({ collection: 'posts', data: { title: 'First' } as any })
+
+    // Verify still no bulk runs queued
+    const runsAfterCreate = await (payload as any).find({
+      collection: BULK_EMBEDDINGS_RUNS_SLUG,
+      where: { pool: { equals: 'default' } },
     })
-    await bulkPayload.create({ collection: 'posts', data: { title: 'WithBulk' } as any })
-    await waitForBulkJobs(bulkPayload)
-    const runDoc = (
-      await (bulkPayload as any).find({
-        collection: BULK_EMBEDDINGS_RUNS_SLUG,
-        where: { pool: { equals: 'default' } },
-        sort: '-createdAt',
-        limit: 1,
-      })
-    ).docs[0]
-    expect(runDoc).toBeDefined()
-    expect(runDoc.status).toBe('succeeded')
+    expect(runsAfterCreate.totalDocs).toBe(0)
   })
 
-  test('fresh project, add doc → establishes baseline and then embeds all', async () => {
-    // Wait for the initial onInit-queued baseline run to complete (0 docs)
-    await waitForBulkJobs(payload)
-
-    // Now create the post, which will queue another run via afterChange
+  test('manually triggered bulk run embeds documents', async () => {
+    // Create a post first
     const post = await payload.create({ collection: 'posts', data: { title: 'First' } as any })
 
-    // Wait for the post-creation-queued run to complete
+    // Manually trigger a bulk run (simulating API call or admin UI)
+    const run = await payload.create({
+      collection: BULK_EMBEDDINGS_RUNS_SLUG,
+      data: {
+        pool: 'default',
+        embeddingVersion: testEmbeddingVersion,
+        status: 'queued',
+      },
+    })
+
+    await payload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
+      task: 'payloadcms-vectorize:prepare-bulk-embedding',
+      input: { runId: String(run.id) },
+      req: { payload } as any,
+      ...(BULK_QUEUE_NAMES.prepareBulkEmbedQueueName
+        ? { queue: BULK_QUEUE_NAMES.prepareBulkEmbedQueueName }
+        : {}),
+    })
+
+    // Wait for the bulk run to complete
     await waitForBulkJobs(payload)
 
     const embeds = await payload.find({
@@ -171,46 +135,77 @@ describe('Bulk embed ingest mode with version/time gating', () => {
     const runDoc = (
       await (payload as any).find({
         collection: BULK_EMBEDDINGS_RUNS_SLUG,
-        where: { pool: { equals: 'default' } },
-        sort: '-createdAt',
-        limit: 1,
+        where: { id: { equals: String(run.id) } },
       })
     ).docs[0]
     expect(runDoc.status).toBe('succeeded')
   })
 
   test('version bump re-embeds all even without updates', async () => {
-    // TODO(techiejd): Why is this clear all necessary?
     await clearAllCollections(payload)
     const baselineOptions = {
       ...basePluginOptions,
       knowledgePools: {
         default: {
           ...basePluginOptions.knowledgePools.default,
-          embeddingVersion: 'old-version',
-          bulkEmbeddings: createMockBulkEmbeddings({ statusSequence: ['succeeded'] }),
+          embeddingConfig: {
+            ...basePluginOptions.knowledgePools.default.embeddingConfig,
+            version: 'old-version',
+            bulkEmbeddingsFns: createMockBulkEmbeddings({ statusSequence: ['succeeded'] }),
+          },
         },
       },
     }
     const baselinePayload = await buildPayload(baselineOptions)
     await baselinePayload.create({ collection: 'posts', data: { title: 'Old' } as any })
-    await waitForBulkJobs(baselinePayload) // initial baseline run with 'old-version'
+
+    // Manually trigger baseline bulk run
+    const baselineRun = await baselinePayload.create({
+      collection: BULK_EMBEDDINGS_RUNS_SLUG,
+      data: { pool: 'default', embeddingVersion: 'old-version', status: 'queued' },
+    })
+    await baselinePayload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
+      task: 'payloadcms-vectorize:prepare-bulk-embedding',
+      input: { runId: String(baselineRun.id) },
+      req: { payload: baselinePayload } as any,
+      ...(BULK_QUEUE_NAMES.prepareBulkEmbedQueueName
+        ? { queue: BULK_QUEUE_NAMES.prepareBulkEmbedQueueName }
+        : {}),
+    })
+    await waitForBulkJobs(baselinePayload)
 
     const bumpedOptions = {
       ...basePluginOptions,
       knowledgePools: {
         default: {
           ...basePluginOptions.knowledgePools.default,
-          embeddingVersion: 'new-version',
-          bulkEmbeddings: createMockBulkEmbeddings({ statusSequence: ['succeeded'] }),
+          embeddingConfig: {
+            ...basePluginOptions.knowledgePools.default.embeddingConfig,
+            version: 'new-version',
+            bulkEmbeddingsFns: createMockBulkEmbeddings({ statusSequence: ['succeeded'] }),
+          },
         },
       },
     }
-    // rebuild payload with bumped options so onInit queues a version-mismatch run
+    // rebuild payload with bumped version
     const bumpedPayload = await buildPayload(bumpedOptions)
     const postAfter = await bumpedPayload.create({
       collection: 'posts',
       data: { title: 'Old' } as any,
+    })
+
+    // Manually trigger bulk run with new version
+    const newVersionRun = await bumpedPayload.create({
+      collection: BULK_EMBEDDINGS_RUNS_SLUG,
+      data: { pool: 'default', embeddingVersion: 'new-version', status: 'queued' },
+    })
+    await bumpedPayload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
+      task: 'payloadcms-vectorize:prepare-bulk-embedding',
+      input: { runId: String(newVersionRun.id) },
+      req: { payload: bumpedPayload } as any,
+      ...(BULK_QUEUE_NAMES.prepareBulkEmbedQueueName
+        ? { queue: BULK_QUEUE_NAMES.prepareBulkEmbedQueueName }
+        : {}),
     })
     await waitForBulkJobs(bumpedPayload)
 
@@ -222,20 +217,29 @@ describe('Bulk embed ingest mode with version/time gating', () => {
     const runDoc = (
       await (bumpedPayload as any).find({
         collection: BULK_EMBEDDINGS_RUNS_SLUG,
-        where: { pool: { equals: 'default' } },
-        sort: '-createdAt',
-        limit: 1,
+        where: { id: { equals: String(newVersionRun.id) } },
       })
     ).docs[0]
     expect(runDoc.inputs).toBe(1)
   })
 
   test('no version bump and no updates → zero eligible and succeed', async () => {
-    // Wait for initial onInit-queued baseline run
-    await waitForBulkJobs(payload)
-
-    // Create post and wait for it to be embedded (establishes baseline)
+    // Create post first
     const post = await payload.create({ collection: 'posts', data: { title: 'Stable' } as any })
+
+    // Manually trigger baseline bulk run
+    const baselineRun = await payload.create({
+      collection: BULK_EMBEDDINGS_RUNS_SLUG,
+      data: { pool: 'default', embeddingVersion: testEmbeddingVersion, status: 'queued' },
+    })
+    await payload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
+      task: 'payloadcms-vectorize:prepare-bulk-embedding',
+      input: { runId: String(baselineRun.id) },
+      req: { payload } as any,
+      ...(BULK_QUEUE_NAMES.prepareBulkEmbedQueueName
+        ? { queue: BULK_QUEUE_NAMES.prepareBulkEmbedQueueName }
+        : {}),
+    })
     await waitForBulkJobs(payload)
 
     // Verify baseline exists
@@ -357,10 +361,13 @@ describe('Bulk embed ingest mode with version/time gating', () => {
       knowledgePools: {
         default: {
           ...basePluginOptions.knowledgePools.default,
-          bulkEmbeddings: createMockBulkEmbeddings({
-            statusSequence: ['succeeded'],
-            partialFailure: { failIds: [] },
-          }),
+          embeddingConfig: {
+            ...basePluginOptions.knowledgePools.default.embeddingConfig,
+            bulkEmbeddingsFns: createMockBulkEmbeddings({
+              statusSequence: ['succeeded'],
+              partialFailure: { failIds: [] },
+            }),
+          },
         },
       },
     })
@@ -372,10 +379,13 @@ describe('Bulk embed ingest mode with version/time gating', () => {
       knowledgePools: {
         default: {
           ...basePluginOptions.knowledgePools.default,
-          bulkEmbeddings: createMockBulkEmbeddings({
-            statusSequence: ['succeeded'],
-            partialFailure: { failIds: [`posts:${post2.id}:0`] },
-          }),
+          embeddingConfig: {
+            ...basePluginOptions.knowledgePools.default.embeddingConfig,
+            bulkEmbeddingsFns: createMockBulkEmbeddings({
+              statusSequence: ['succeeded'],
+              partialFailure: { failIds: [`posts:${post2.id}:0`] },
+            }),
+          },
         },
       },
     })
@@ -400,7 +410,10 @@ describe('Bulk embed ingest mode with version/time gating', () => {
       knowledgePools: {
         default: {
           ...basePluginOptions.knowledgePools.default,
-          bulkEmbeddings: createMockBulkEmbeddings({ statusSequence: ['running', 'succeeded'] }),
+          embeddingConfig: {
+            ...basePluginOptions.knowledgePools.default.embeddingConfig,
+            bulkEmbeddingsFns: createMockBulkEmbeddings({ statusSequence: ['running', 'succeeded'] }),
+          },
         },
       },
     })
@@ -410,7 +423,10 @@ describe('Bulk embed ingest mode with version/time gating', () => {
       knowledgePools: {
         default: {
           ...basePluginOptions.knowledgePools.default,
-          bulkEmbeddings: createMockBulkEmbeddings({ statusSequence: ['running', 'succeeded'] }),
+          embeddingConfig: {
+            ...basePluginOptions.knowledgePools.default.embeddingConfig,
+            bulkEmbeddingsFns: createMockBulkEmbeddings({ statusSequence: ['running', 'succeeded'] }),
+          },
         },
       },
     }
@@ -434,7 +450,10 @@ describe('Bulk embed ingest mode with version/time gating', () => {
       knowledgePools: {
         default: {
           ...basePluginOptions.knowledgePools.default,
-          bulkEmbeddings: createMockBulkEmbeddings({ statusSequence: ['failed'] }),
+          embeddingConfig: {
+            ...basePluginOptions.knowledgePools.default.embeddingConfig,
+            bulkEmbeddingsFns: createMockBulkEmbeddings({ statusSequence: ['failed'] }),
+          },
         },
       },
     })
@@ -454,7 +473,10 @@ describe('Bulk embed ingest mode with version/time gating', () => {
       knowledgePools: {
         default: {
           ...basePluginOptions.knowledgePools.default,
-          bulkEmbeddings: createMockBulkEmbeddings({ statusSequence: ['canceled'] }),
+          embeddingConfig: {
+            ...basePluginOptions.knowledgePools.default.embeddingConfig,
+            bulkEmbeddingsFns: createMockBulkEmbeddings({ statusSequence: ['canceled'] }),
+          },
         },
       },
     })
@@ -594,7 +616,7 @@ describe('Bulk embed ingest mode with version/time gating', () => {
     expect(metadata.totalDocs).toBe(0)
   })
 
-  test('realtime ingest mode still queues vectorize jobs', async () => {
+  test('realtime mode queues vectorize jobs when realTimeIngestionFn is provided', async () => {
     const realtimeOptions = {
       knowledgePools: {
         default: {
@@ -603,22 +625,24 @@ describe('Bulk embed ingest mode with version/time gating', () => {
               toKnowledgePool: async (doc: any) => [{ chunk: doc.title }],
             },
           },
-          embedDocs: makeDummyEmbedDocs(DIMS),
-          embedQuery: makeDummyEmbedQuery(DIMS),
-          embeddingVersion: testEmbeddingVersion,
-          bulkEmbeddings: {
-            ingestMode: 'realtime' as const,
-            prepareBulkEmbeddings: async () => ({
-              providerBatchId: 'noop',
-              status: 'succeeded' as const,
-              counts: { inputs: 0, succeeded: 0, failed: 0 },
-            }),
-            pollBulkEmbeddings: async () => ({ status: 'succeeded' }),
-            completeBulkEmbeddings: async () => ({
-              status: 'succeeded' as const,
-              outputs: [],
-              counts: { inputs: 0 },
-            }),
+          embeddingConfig: {
+            version: testEmbeddingVersion,
+            queryFn: makeDummyEmbedQuery(DIMS),
+            realTimeIngestionFn: makeDummyEmbedDocs(DIMS),
+            // Also provide bulk for testing, but realTimeIngestionFn should take precedence
+            bulkEmbeddingsFns: {
+              prepareBulkEmbeddings: async () => ({
+                providerBatchId: 'noop',
+                status: 'succeeded' as const,
+                counts: { inputs: 0, succeeded: 0, failed: 0 },
+              }),
+              pollBulkEmbeddings: async () => ({ status: 'succeeded' as const }),
+              completeBulkEmbeddings: async () => ({
+                status: 'succeeded' as const,
+                outputs: [],
+                counts: { inputs: 0 },
+              }),
+            },
           },
         },
       },

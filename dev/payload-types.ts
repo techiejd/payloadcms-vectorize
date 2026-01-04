@@ -68,7 +68,11 @@ export interface Config {
   blocks: {};
   collections: {
     posts: Post;
+    'vector-bulk-embeddings-runs': VectorBulkEmbeddingsRun;
+    'vector-bulk-embedding-input-metadata': VectorBulkEmbeddingInputMetadatum;
     default: Default;
+    bulkDefault: BulkDefault;
+    'payload-kv': PayloadKv;
     users: User;
     'payload-jobs': PayloadJob;
     'payload-locked-documents': PayloadLockedDocument;
@@ -78,7 +82,11 @@ export interface Config {
   collectionsJoins: {};
   collectionsSelect: {
     posts: PostsSelect<false> | PostsSelect<true>;
+    'vector-bulk-embeddings-runs': VectorBulkEmbeddingsRunsSelect<false> | VectorBulkEmbeddingsRunsSelect<true>;
+    'vector-bulk-embedding-input-metadata': VectorBulkEmbeddingInputMetadataSelect<false> | VectorBulkEmbeddingInputMetadataSelect<true>;
     default: DefaultSelect<false> | DefaultSelect<true>;
+    bulkDefault: BulkDefaultSelect<false> | BulkDefaultSelect<true>;
+    'payload-kv': PayloadKvSelect<false> | PayloadKvSelect<true>;
     users: UsersSelect<false> | UsersSelect<true>;
     'payload-jobs': PayloadJobsSelect<false> | PayloadJobsSelect<true>;
     'payload-locked-documents': PayloadLockedDocumentsSelect<false> | PayloadLockedDocumentsSelect<true>;
@@ -88,6 +96,7 @@ export interface Config {
   db: {
     defaultIDType: number;
   };
+  fallbackLocale: null;
   globals: {};
   globalsSelect: {};
   locale: null;
@@ -97,6 +106,8 @@ export interface Config {
   jobs: {
     tasks: {
       'payloadcms-vectorize:vectorize': TaskPayloadcmsVectorizeVectorize;
+      'payloadcms-vectorize:prepare-bulk-embedding': TaskPayloadcmsVectorizePrepareBulkEmbedding;
+      'payloadcms-vectorize:poll-or-complete-bulk-embedding': TaskPayloadcmsVectorizePollOrCompleteBulkEmbedding;
       inline: {
         input: unknown;
         output: unknown;
@@ -134,7 +145,7 @@ export interface Post {
     root: {
       type: string;
       children: {
-        type: string;
+        type: any;
         version: number;
         [k: string]: unknown;
       }[];
@@ -145,6 +156,85 @@ export interface Post {
     };
     [k: string]: unknown;
   } | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * Bulk embedding run records. Created automatically when the Embed all action is triggered.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "vector-bulk-embeddings-runs".
+ */
+export interface VectorBulkEmbeddingsRun {
+  id: number;
+  /**
+   * Knowledge pool slug
+   */
+  pool: string;
+  /**
+   * Embedding version at submission time
+   */
+  embeddingVersion: string;
+  /**
+   * Provider file or input reference used for the batch
+   */
+  inputFileRef?: string | null;
+  /**
+   * Provider batch identifier
+   */
+  providerBatchId?: string | null;
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled';
+  inputs?: number | null;
+  succeeded?: number | null;
+  failed?: number | null;
+  /**
+   * Timestamp when the batch was submitted
+   */
+  submittedAt?: string | null;
+  /**
+   * Timestamp when the batch finished
+   */
+  completedAt?: string | null;
+  /**
+   * Failure reason if the run ended in error
+   */
+  error?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * Stores per-input metadata for bulk embedding runs.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "vector-bulk-embedding-input-metadata".
+ */
+export interface VectorBulkEmbeddingInputMetadatum {
+  id: number;
+  /**
+   * Bulk run this input belongs to
+   */
+  run: number | VectorBulkEmbeddingsRun;
+  inputId: string;
+  /**
+   * Original chunk text
+   */
+  text: string;
+  sourceCollection: string;
+  docId: string;
+  chunkIndex: number;
+  embeddingVersion: string;
+  /**
+   * Extension field values for this chunk
+   */
+  extensionFields?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
   updatedAt: string;
   createdAt: string;
 }
@@ -180,6 +270,54 @@ export interface Default {
   createdAt: string;
 }
 /**
+ * Vector embeddings for search and similarity queries. Created by the payloadcms-vectorize plugin. Embeddings cannot be added or modified, only deleted, through the admin panel. No other restrictions enforced.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "bulkDefault".
+ */
+export interface BulkDefault {
+  id: number;
+  /**
+   * The collection that this embedding belongs to
+   */
+  sourceCollection: string;
+  /**
+   * The ID of the source document
+   */
+  docId: string;
+  /**
+   * The index of this chunk
+   */
+  chunkIndex: number;
+  /**
+   * The original text that was vectorized
+   */
+  chunkText?: string | null;
+  /**
+   * The version of the embedding model used
+   */
+  embeddingVersion?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "payload-kv".
+ */
+export interface PayloadKv {
+  id: number;
+  key: string;
+  data:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+}
+/**
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "users".
  */
@@ -194,6 +332,13 @@ export interface User {
   hash?: string | null;
   loginAttempts?: number | null;
   lockUntil?: string | null;
+  sessions?:
+    | {
+        id: string;
+        createdAt?: string | null;
+        expiresAt: string;
+      }[]
+    | null;
   password?: string | null;
 }
 /**
@@ -248,7 +393,11 @@ export interface PayloadJob {
     | {
         executedAt: string;
         completedAt: string;
-        taskSlug: 'inline' | 'payloadcms-vectorize:vectorize';
+        taskSlug:
+          | 'inline'
+          | 'payloadcms-vectorize:vectorize'
+          | 'payloadcms-vectorize:prepare-bulk-embedding'
+          | 'payloadcms-vectorize:poll-or-complete-bulk-embedding';
         taskID: string;
         input?:
           | {
@@ -281,7 +430,14 @@ export interface PayloadJob {
         id?: string | null;
       }[]
     | null;
-  taskSlug?: ('inline' | 'payloadcms-vectorize:vectorize') | null;
+  taskSlug?:
+    | (
+        | 'inline'
+        | 'payloadcms-vectorize:vectorize'
+        | 'payloadcms-vectorize:prepare-bulk-embedding'
+        | 'payloadcms-vectorize:poll-or-complete-bulk-embedding'
+      )
+    | null;
   queue?: string | null;
   waitUntil?: string | null;
   processing?: boolean | null;
@@ -300,16 +456,24 @@ export interface PayloadLockedDocument {
         value: number | Post;
       } | null)
     | ({
+        relationTo: 'vector-bulk-embeddings-runs';
+        value: number | VectorBulkEmbeddingsRun;
+      } | null)
+    | ({
+        relationTo: 'vector-bulk-embedding-input-metadata';
+        value: number | VectorBulkEmbeddingInputMetadatum;
+      } | null)
+    | ({
         relationTo: 'default';
         value: number | Default;
       } | null)
     | ({
-        relationTo: 'users';
-        value: number | User;
+        relationTo: 'bulkDefault';
+        value: number | BulkDefault;
       } | null)
     | ({
-        relationTo: 'payload-jobs';
-        value: number | PayloadJob;
+        relationTo: 'users';
+        value: number | User;
       } | null);
   globalSlug?: string | null;
   user: {
@@ -365,6 +529,41 @@ export interface PostsSelect<T extends boolean = true> {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "vector-bulk-embeddings-runs_select".
+ */
+export interface VectorBulkEmbeddingsRunsSelect<T extends boolean = true> {
+  pool?: T;
+  embeddingVersion?: T;
+  inputFileRef?: T;
+  providerBatchId?: T;
+  status?: T;
+  inputs?: T;
+  succeeded?: T;
+  failed?: T;
+  submittedAt?: T;
+  completedAt?: T;
+  error?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "vector-bulk-embedding-input-metadata_select".
+ */
+export interface VectorBulkEmbeddingInputMetadataSelect<T extends boolean = true> {
+  run?: T;
+  inputId?: T;
+  text?: T;
+  sourceCollection?: T;
+  docId?: T;
+  chunkIndex?: T;
+  embeddingVersion?: T;
+  extensionFields?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "default_select".
  */
 export interface DefaultSelect<T extends boolean = true> {
@@ -375,6 +574,27 @@ export interface DefaultSelect<T extends boolean = true> {
   embeddingVersion?: T;
   updatedAt?: T;
   createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "bulkDefault_select".
+ */
+export interface BulkDefaultSelect<T extends boolean = true> {
+  sourceCollection?: T;
+  docId?: T;
+  chunkIndex?: T;
+  chunkText?: T;
+  embeddingVersion?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "payload-kv_select".
+ */
+export interface PayloadKvSelect<T extends boolean = true> {
+  key?: T;
+  data?: T;
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
@@ -390,6 +610,13 @@ export interface UsersSelect<T extends boolean = true> {
   hash?: T;
   loginAttempts?: T;
   lockUntil?: T;
+  sessions?:
+    | T
+    | {
+        id?: T;
+        createdAt?: T;
+        expiresAt?: T;
+      };
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
@@ -459,6 +686,22 @@ export interface PayloadMigrationsSelect<T extends boolean = true> {
  * via the `definition` "TaskPayloadcms-vectorize:vectorize".
  */
 export interface TaskPayloadcmsVectorizeVectorize {
+  input?: unknown;
+  output?: unknown;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "TaskPayloadcms-vectorize:prepare-bulk-embedding".
+ */
+export interface TaskPayloadcmsVectorizePrepareBulkEmbedding {
+  input?: unknown;
+  output?: unknown;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "TaskPayloadcms-vectorize:poll-or-complete-bulk-embedding".
+ */
+export interface TaskPayloadcmsVectorizePollOrCompleteBulkEmbedding {
   input?: unknown;
   output?: unknown;
 }

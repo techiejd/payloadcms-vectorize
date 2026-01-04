@@ -28,11 +28,33 @@ export const createBulkEmbedHandler = (
       }
 
       const payload = req.payload
+
+      // Check for existing queued run for this pool - return it instead of creating a new one
+      const existingQueuedRun = await payload.find({
+        collection: BULK_EMBEDDINGS_RUNS_SLUG,
+        where: {
+          and: [{ pool: { equals: knowledgePool } }, { status: { equals: 'queued' } }],
+        },
+        limit: 1,
+      })
+
+      if (existingQueuedRun.totalDocs > 0) {
+        const existing = existingQueuedRun.docs[0] as any
+        return Response.json(
+          {
+            runId: String(existing.id),
+            status: existing.status,
+            message: `A bulk embedding run is already queued for this knowledge pool`,
+          },
+          { status: 200 },
+        )
+      }
+
       const run = await payload.create({
         collection: BULK_EMBEDDINGS_RUNS_SLUG,
         data: {
           pool: knowledgePool,
-          embeddingVersion: poolConfig.embeddingVersion,
+          embeddingVersion: poolConfig.embeddingConfig.version,
           status: 'queued',
         },
       })

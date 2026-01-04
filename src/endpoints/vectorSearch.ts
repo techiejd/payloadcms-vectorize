@@ -60,9 +60,9 @@ export const createVectorSearchHandler = <TPoolNames extends KnowledgePoolName>(
 
       const payload = req.payload
 
-      // Generate embedding for the query using pool-specific embedQuery
+      // Generate embedding for the query using pool-specific queryFn
       const queryEmbedding = await (async () => {
-        const qE = await poolConfig.embedQuery(query)
+        const qE = await poolConfig.embeddingConfig.queryFn(query)
         return Array.isArray(qE) ? qE : Array.from(qE)
       })()
 

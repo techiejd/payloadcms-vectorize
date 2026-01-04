@@ -43,7 +43,7 @@ export const createEmbeddingsCollection = (
 
                 if (!pluginOptions?.knowledgePools?.[poolName]) return false
 
-                return !!pluginOptions.knowledgePools[poolName].bulkEmbeddings
+                return !!pluginOptions.knowledgePools[poolName].embeddingConfig.bulkEmbeddingsFns
               },
             },
           },

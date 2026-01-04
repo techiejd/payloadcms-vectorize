@@ -74,7 +74,6 @@ export function makeVoyageBulkEmbeddingsConfig(): BulkEmbeddingsFns {
   >()
 
   return {
-    ingestMode: 'bulk',
     prepareBulkEmbeddings: async ({ inputs }) => {
       try {
         // Create JSONL content for Voyage batch

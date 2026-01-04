@@ -53,7 +53,7 @@ type EmbeddingConfig = {
    * If not provided, then there bulk embedding is not available
    */
   bulkEmbeddingsFns?: BulkEmbeddingsFns
-  /** If both realTimeIngestionFn and bulkEmbeddingsConfig are not provided, then embedding is essentially disabled */
+  /** If both realTimeIngestionFn and bulkEmbeddingsConfig are not provided, then embedding for this knowledge pool is essentially disabled */
 }
 
 export type BulkEmbeddingRunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled'

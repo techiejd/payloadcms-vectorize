@@ -64,9 +64,9 @@ async function loadRunAndConfig({
       `[payloadcms-vectorize] knowledgePool "${poolName}" not found for bulk embed run ${runId}`,
     )
   }
-  if (!dynamicConfig.bulkEmbeddings) {
+  if (!dynamicConfig.embeddingConfig.bulkEmbeddingsFns) {
     throw new Error(
-      `[payloadcms-vectorize] knowledgePool "${poolName}" does not have bulkEmbeddings configured`,
+      `[payloadcms-vectorize] knowledgePool "${poolName}" does not have bulkEmbeddingsFns configured`,
     )
   }
   return { run, poolName, dynamicConfig }
@@ -95,8 +95,8 @@ export const createPrepareBulkEmbeddingTask = ({
         knowledgePools,
       })
 
-      const callbacks = dynamicConfig.bulkEmbeddings!
-      const embeddingVersion = dynamicConfig.embeddingVersion
+      const callbacks = dynamicConfig.embeddingConfig.bulkEmbeddingsFns!
+      const embeddingVersion = dynamicConfig.embeddingConfig.version
 
       const latestSucceededRun = await payload.find({
         collection: BULK_EMBEDDINGS_RUNS_SLUG,
@@ -227,9 +227,9 @@ export const createPollOrCompleteBulkEmbeddingTask = ({
         knowledgePools,
       })
 
-      const callbacks = dynamicConfig.bulkEmbeddings!
+      const callbacks = dynamicConfig.embeddingConfig.bulkEmbeddingsFns!
       const providerBatchId = (run as any).providerBatchId
-      const embeddingVersion = dynamicConfig.embeddingVersion
+      const embeddingVersion = dynamicConfig.embeddingConfig.version
 
       // Check if already terminal
       const currentStatus = (run as any).status
@@ -401,7 +401,8 @@ async function persistVectorColumn(args: {
   try {
     await runSQL(sql, [literal, id])
   } catch (e) {
-    payload.logger.error('[payloadcms-vectorize] Failed to persist vector column', e as Error)
+    const errorMessage = (e as Error).message || (e as any).toString()
+    payload.logger.error(`[payloadcms-vectorize] Failed to persist vector column: ${errorMessage}`)
     throw e
   }
 }

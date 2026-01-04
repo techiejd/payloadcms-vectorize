@@ -199,14 +199,14 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
       let bulkIngestEnabled = false
       for (const poolName in pluginOptions.knowledgePools) {
         const dynamicConfig = pluginOptions.knowledgePools[poolName]
-        if ((dynamicConfig.bulkEmbeddings?.ingestMode || 'realtime') === 'bulk') {
+        if (dynamicConfig.embeddingConfig.bulkEmbeddingsFns) {
           bulkIngestEnabled = true
           break
         }
       }
       if (bulkIngestEnabled && !pluginOptions.bulkQueueNames) {
         throw new Error(
-          '[payloadcms-vectorize] bulkQueueNames is required when any knowledge pool uses bulk ingest mode (bulkEmbeddings.ingestMode === \"bulk\").',
+          '[payloadcms-vectorize] bulkQueueNames is required when any knowledge pool has bulk embedding configured (embeddingConfig.bulkEmbeddingsFns).',
         )
       }
 
@@ -257,45 +257,26 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
                 const collectionConfig = dynamic.collections[collectionSlug]
                 if (!collectionConfig) continue
 
-                if ((dynamic.bulkEmbeddings?.ingestMode || 'realtime') === 'bulk') {
-                  console.log(
-                    '[payloadcms-vectorize] afterChange enqueue bulk run',
-                    pool,
-                    dynamic.bulkEmbeddings,
-                  )
-                  // In bulk mode, queue a bulk run and let poll/completion handle deletes
-                  const run = await payload.create({
-                    collection: BULK_EMBEDDINGS_RUNS_SLUG,
-                    data: {
-                      pool,
-                      embeddingVersion: dynamic.embeddingVersion,
-                      status: 'queued',
-                    },
-                  })
+                const { realTimeIngestionFn } = dynamic.embeddingConfig
 
-                  await payload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
-                    task: 'payloadcms-vectorize:prepare-bulk-embedding',
-                    input: { runId: String(run.id) },
-                    req,
-                    ...(pluginOptions.bulkQueueNames?.prepareBulkEmbedQueueName
-                      ? { queue: pluginOptions.bulkQueueNames.prepareBulkEmbedQueueName }
+                // Only queue real-time vectorization if realTimeIngestionFn is provided
+                // Bulk embedding is only triggered manually via API (/vector-bulk-embed) or admin UI
+                if (realTimeIngestionFn) {
+                  await payload.jobs.queue<'payloadcms-vectorize:vectorize'>({
+                    task: 'payloadcms-vectorize:vectorize',
+                    input: {
+                      doc,
+                      collection: collectionSlug,
+                      knowledgePool: pool,
+                    },
+                    req: req,
+                    ...(pluginOptions.realtimeQueueName
+                      ? { queue: pluginOptions.realtimeQueueName }
                       : {}),
                   })
-                  continue
                 }
-
-                await payload.jobs.queue<'payloadcms-vectorize:vectorize'>({
-                  task: 'payloadcms-vectorize:vectorize',
-                  input: {
-                    doc,
-                    collection: collectionSlug,
-                    knowledgePool: pool,
-                  },
-                  req: req,
-                  ...(pluginOptions.realtimeQueueName
-                    ? { queue: pluginOptions.realtimeQueueName }
-                    : {}),
-                })
+                // If no realTimeIngestionFn, nothing happens on doc change
+                // User must trigger bulk embedding manually
               }
               return
             },
@@ -342,42 +323,6 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
             dims: staticConfig.dims,
             ivfflatLists: staticConfig.ivfflatLists,
           })
-
-          // If bulk ingest is configured for this pool, ensure a baseline run exists and is queued
-          const dynamicConfig = pluginOptions.knowledgePools?.[poolName]
-          if (dynamicConfig?.bulkEmbeddings?.ingestMode === 'bulk') {
-            const existingSucceeded = await payload.find({
-              collection: BULK_EMBEDDINGS_RUNS_SLUG,
-              where: {
-                and: [{ pool: { equals: poolName } }, { status: { equals: 'succeeded' } }],
-              },
-              limit: 1,
-              sort: '-completedAt',
-            })
-            if (!existingSucceeded.totalDocs) {
-              console.log(
-                '[payloadcms-vectorize] queuing baseline bulk run',
-                poolName,
-                dynamicConfig?.bulkEmbeddings,
-              )
-              const run = await payload.create({
-                collection: BULK_EMBEDDINGS_RUNS_SLUG,
-                data: {
-                  pool: poolName,
-                  embeddingVersion: dynamicConfig.embeddingVersion,
-                  status: 'queued',
-                },
-              })
-              await payload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
-                task: 'payloadcms-vectorize:prepare-bulk-embedding',
-                input: { runId: String(run.id) },
-                req: { payload } as any,
-                ...(pluginOptions.bulkQueueNames?.prepareBulkEmbedQueueName
-                  ? { queue: pluginOptions.bulkQueueNames.prepareBulkEmbedQueueName }
-                  : {}),
-              })
-            }
-          }
         }
       }
 
