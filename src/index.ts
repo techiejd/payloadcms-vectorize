@@ -271,18 +271,18 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
                 // Only queue real-time vectorization if realTimeIngestionFn is provided
                 // Bulk embedding is only triggered manually via API (/vector-bulk-embed) or admin UI
                 if (realTimeIngestionFn) {
-                  await payload.jobs.queue<'payloadcms-vectorize:vectorize'>({
-                    task: 'payloadcms-vectorize:vectorize',
-                    input: {
-                      doc,
-                      collection: collectionSlug,
-                      knowledgePool: pool,
-                    },
-                    req: req,
-                    ...(pluginOptions.realtimeQueueName
-                      ? { queue: pluginOptions.realtimeQueueName }
-                      : {}),
-                  })
+                await payload.jobs.queue<'payloadcms-vectorize:vectorize'>({
+                  task: 'payloadcms-vectorize:vectorize',
+                  input: {
+                    doc,
+                    collection: collectionSlug,
+                    knowledgePool: pool,
+                  },
+                  req: req,
+                  ...(pluginOptions.realtimeQueueName
+                    ? { queue: pluginOptions.realtimeQueueName }
+                    : {}),
+                })
                 }
                 // If no realTimeIngestionFn, nothing happens on doc change
                 // User must trigger bulk embedding manually

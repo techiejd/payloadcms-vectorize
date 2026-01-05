@@ -1,10 +1,8 @@
-import type { Payload } from 'payload'
+import type { Payload, SanitizedConfig } from 'payload'
 
-import config from '@payload-config'
-import { getPayload } from 'payload'
 import { beforeAll, describe, expect, test } from 'vitest'
-import { makeDummyEmbedDocs, testEmbeddingVersion } from 'helpers/embed.js'
-import { chunkRichText } from 'helpers/chunkers.js'
+import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
+import { chunkRichText, chunkText } from 'helpers/chunkers.js'
 import { createHeadlessEditor } from '@payloadcms/richtext-lexical/lexical/headless'
 import {
   $getRoot,
@@ -14,21 +12,97 @@ import {
 } from '@payloadcms/richtext-lexical/lexical'
 import { $createHeadingNode } from '@payloadcms/richtext-lexical/lexical/rich-text'
 import { PostgresPayload } from '../../src/types.js'
-import { editorConfigFactory, getEnabledNodes } from '@payloadcms/richtext-lexical'
-import { DIMS, embeddingsCollection, getInitialMarkdownContent } from './constants.js'
-import { waitForVectorizationJobs } from './utils.js'
+import { editorConfigFactory, getEnabledNodes, lexicalEditor } from '@payloadcms/richtext-lexical'
+import { DIMS, getInitialMarkdownContent } from './constants.js'
+import { createTestDb, waitForVectorizationJobs } from './utils.js'
+import { postgresAdapter } from '@payloadcms/db-postgres'
+import { buildConfig, getPayload } from 'payload'
+import { createVectorizeIntegration } from 'payloadcms-vectorize'
 
 const embedFn = makeDummyEmbedDocs(DIMS)
+const embeddingsCollection = 'default'
 
 describe('Plugin integration tests', () => {
   let payload: Payload
+  let config: SanitizedConfig
   let postId: string
   let markdownContent: SerializedEditorState
+  const dbName = `int_test_${Date.now()}`
+
   beforeAll(async () => {
-    const _config = await config
-    payload = await getPayload({ config: _config, cron: true })
-    markdownContent = await getInitialMarkdownContent(_config)
+    await createTestDb({ dbName })
+
+    // Create isolated integration for this test suite
+    const integration = createVectorizeIntegration({
+      default: {
+        dims: DIMS,
+        ivfflatLists: 1,
+      },
+    })
+
+    config = await buildConfig({
+      secret: 'test-secret',
+      editor: lexicalEditor(),
+      collections: [
+        {
+          slug: 'posts',
+          fields: [
+            { name: 'title', type: 'text' },
+            { name: 'content', type: 'richText' },
+          ],
+        },
+      ],
+      db: postgresAdapter({
+        extensions: ['vector'],
+        afterSchemaInit: [integration.afterSchemaInitHook],
+        pool: {
+          connectionString: `postgresql://postgres:password@localhost:5433/${dbName}`,
+        },
+      }),
+      plugins: [
+        integration.payloadcmsVectorize({
+          knowledgePools: {
+            default: {
+              collections: {
+                posts: {
+                  toKnowledgePool: async (doc, pl) => {
+                    const chunks: Array<{ chunk: string }> = []
+                    if (doc.title) {
+                      const titleChunks = chunkText(doc.title)
+                      chunks.push(...titleChunks.map((chunk) => ({ chunk })))
+                    }
+                    if (doc.content) {
+                      const contentChunks = await chunkRichText(doc.content, pl)
+                      chunks.push(...contentChunks.map((chunk) => ({ chunk })))
+                    }
+                    return chunks
+                  },
+                },
+              },
+              embeddingConfig: {
+                version: testEmbeddingVersion,
+                queryFn: makeDummyEmbedQuery(DIMS),
+                realTimeIngestionFn: makeDummyEmbedDocs(DIMS),
+              },
+            },
+          },
+        }),
+      ],
+      jobs: {
+        tasks: [],
+        autoRun: [
+          {
+            cron: '*/5 * * * * *',
+            limit: 10,
+          },
+        ],
+      },
+    })
+
+    payload = await getPayload({ config, key: `int-test-${Date.now()}`, cron: true })
+    markdownContent = await getInitialMarkdownContent(config)
   })
+
   test('adds embeddings collection with vector column', async () => {
     // Check schema for embeddings collection
     const collections = payload.collections

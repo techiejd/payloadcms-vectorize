@@ -105,10 +105,6 @@ export type AddChunkArgs = {
 export type BatchSubmission = {
   /** Provider-specific batch identifier */
   providerBatchId: string
-  /** Optional file reference for the input file */
-  inputFileRef?: string
-  /** The chunks that were submitted in this batch (for metadata tracking) */
-  submittedChunks: BulkEmbeddingInput[]
 }
 
 /** Arguments for polling a single batch */
@@ -123,6 +119,14 @@ export type CompleteBatchArgs = {
   providerBatchId: string
 }
 
+/** Arguments passed to onError callback */
+export type OnBulkErrorArgs = {
+  /** All provider batch IDs that were created during this run */
+  providerBatchIds: string[]
+  /** The error that caused the failure */
+  error: Error
+}
+
 /**
  * Bulk embeddings API with user-controlled batching.
  * User accumulates chunks internally and decides when to flush based on file size.
@@ -132,11 +136,14 @@ export type BulkEmbeddingsFns = {
    * Called for each chunk. User accumulates internally based on file size logic.
    * - Return null to keep accumulating
    * - Return BatchSubmission when ready to submit a batch
-   * - When isLastChunk=true, must flush any remaining accumulated chunks
+   *
+   * **Important contract about which chunks are included:**
+   * - When `isLastChunk=false` and you return a submission: all pending chunks EXCEPT the current one were submitted
+   * - When `isLastChunk=true` and you return a submission: all pending chunks INCLUDING the current one were submitted
    *
    * Example flow when chunk would exceed file limit:
-   * 1. Submit currently accumulated chunks (without this chunk)
-   * 2. Start fresh accumulation with this chunk
+   * 1. Check if adding current chunk would exceed your provider's file size limit
+   * 2. If yes: submit currently accumulated chunks (without this chunk), start fresh with this chunk
    * 3. Return the BatchSubmission
    */
   addChunk: (args: AddChunkArgs) => Promise<BatchSubmission | null>
@@ -146,6 +153,12 @@ export type BulkEmbeddingsFns = {
 
   /** Download outputs for a completed batch */
   completeBatch: (args: CompleteBatchArgs) => Promise<BulkEmbeddingOutput[]>
+
+  /**
+   * Called when the bulk run fails. Use this to clean up provider-side resources
+   * (e.g., delete uploaded files, cancel batches). The run can be re-queued after cleanup.
+   */
+  onError?: (args: OnBulkErrorArgs) => Promise<void>
 }
 
 export type PayloadcmsVectorizeConfig<TPoolNames extends KnowledgePoolName = KnowledgePoolName> = {

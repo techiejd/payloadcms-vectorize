@@ -57,13 +57,6 @@ export const createBulkEmbeddingsBatchesCollection = (): CollectionConfig => ({
       },
     },
     {
-      name: 'inputFileRef',
-      type: 'text',
-      admin: {
-        description: 'Provider file reference for the input file',
-      },
-    },
-    {
       name: 'status',
       type: 'select',
       options: statusOptions.map((value) => ({ value, label: value })),
@@ -126,4 +119,3 @@ export const createBulkEmbeddingsBatchesCollection = (): CollectionConfig => ({
     },
   ],
 })
-

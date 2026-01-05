@@ -9,14 +9,18 @@ describe('jobs.tasks merging', () => {
     expect(tasks).toEqual(
       expect.arrayContaining([
         { slug: 'payloadcms-vectorize:vectorize', handler: expect.any(Function) },
-        { slug: 'payloadcms-vectorize:bulk-embed-all', handler: expect.any(Function) },
+        { slug: 'payloadcms-vectorize:prepare-bulk-embedding', handler: expect.any(Function) },
+        {
+          slug: 'payloadcms-vectorize:poll-or-complete-bulk-embedding',
+          handler: expect.any(Function),
+        },
       ]),
     )
   })
 })
 
-describe('/vector-search endpoint', () => {
-  test('adds the endpoint by default', async () => {
+describe('endpoints: /vector-search, /vector-bulk-embed', () => {
+  test('adds the endpoints by default', async () => {
     const cfg = await buildDummyConfig({})
     const endpoints = cfg.endpoints
     expect(Array.isArray(endpoints)).toBe(true)

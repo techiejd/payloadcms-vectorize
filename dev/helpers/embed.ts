@@ -152,11 +152,7 @@ export function makeVoyageBulkEmbeddingsConfig(): BulkEmbeddingsFns {
 
     batchIndex++
 
-    return {
-      providerBatchId,
-      inputFileRef: fileId,
-      submittedChunks: chunks,
-    }
+    return { providerBatchId }
   }
 
   return {
@@ -298,6 +294,36 @@ export function makeVoyageBulkEmbeddingsConfig(): BulkEmbeddingsFns {
         console.error('Voyage completeBatch error:', error)
         throw error
       }
+    },
+
+    onError: async ({ providerBatchIds, error }) => {
+      console.log(
+        `Voyage bulk run failed: ${error.message}. Cleaning up ${providerBatchIds.length} batches...`,
+      )
+
+      // Cancel any running batches
+      for (const batchId of providerBatchIds) {
+        try {
+          await fetch(`https://api.voyageai.com/v1/batches/${batchId}/cancel`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${process.env.VOYAGE_API_KEY}`,
+            },
+          })
+        } catch (cancelError) {
+          console.error(`Failed to cancel batch ${batchId}:`, cancelError)
+        }
+      }
+
+      // Clean up local state
+      for (const batchId of providerBatchIds) {
+        batchOutputFiles.delete(batchId)
+      }
+
+      // Reset accumulator state for potential retry
+      accumulatedChunks = []
+      accumulatedSize = 0
+      batchIndex = 0
     },
   }
 }

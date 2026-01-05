@@ -1,6 +1,6 @@
 import type { Payload, SanitizedConfig } from 'payload'
 
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
 import { createVectorizeTask } from '../../src/tasks/vectorize.js'
 import { BULK_EMBEDDINGS_RUNS_SLUG } from '../../src/collections/bulkEmbeddingsRuns.js'
 import { BULK_EMBEDDINGS_BATCHES_SLUG } from '../../src/collections/bulkEmbeddingsBatches.js'
@@ -22,8 +22,7 @@ const DIMS = DEFAULT_DIMS
 describe('Bulk embed ingest mode with streaming API', () => {
   let payload: Payload
   let config: SanitizedConfig
-  const dbNameBase = 'bulk_embed_test'
-  let dbName: string
+  const dbName = `bulk_embed_test_${Date.now()}`
 
   const basePluginOptions = {
     knowledgePools: {
@@ -44,34 +43,40 @@ describe('Bulk embed ingest mode with streaming API', () => {
     bulkQueueNames: BULK_QUEUE_NAMES,
   }
 
-  const makeDbName = () => `${dbNameBase}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
-
-  const buildPayload = async (
-    pluginOpts = basePluginOptions,
-    options?: { dbName?: string; secret?: string },
-  ) => {
-    const dbToUse = options?.dbName || dbName
-    const secret = options?.secret || 'test-secret'
+  // Helper to build payload with custom options using the SAME database
+  const buildPayloadWithOptions = async (
+    pluginOpts: any,
+    keyPrefix: string = 'custom',
+  ): Promise<Payload> => {
     const built = await buildPayloadWithIntegration({
-      dbName: dbToUse,
+      dbName,
       pluginOpts,
-      secret,
+      secret: 'test-secret',
       dims: DIMS,
-      key: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      key: `${keyPrefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    })
+    return built.payload
+  }
+
+  beforeAll(async () => {
+    await createTestDb({ dbName })
+    const built = await buildPayloadWithIntegration({
+      dbName,
+      pluginOpts: basePluginOptions,
+      secret: 'test-secret',
+      dims: DIMS,
+      key: `base-${Date.now()}`,
     })
     payload = built.payload
     config = built.config
-    return payload
-  }
+  })
 
   beforeEach(async () => {
-    dbName = makeDbName()
-    await createTestDb({ dbName })
-    await buildPayload()
+    // Clear data before each test but keep the same DB/payload
+    await clearAllCollections(payload)
   })
 
   afterEach(async () => {
-    await clearAllCollections(payload)
     vi.restoreAllMocks()
   })
 
@@ -170,7 +175,6 @@ describe('Bulk embed ingest mode with streaming API', () => {
   })
 
   test('version bump re-embeds all even without updates', async () => {
-    await clearAllCollections(payload)
     const baselineOptions = {
       ...basePluginOptions,
       knowledgePools: {
@@ -184,7 +188,7 @@ describe('Bulk embed ingest mode with streaming API', () => {
         },
       },
     }
-    const baselinePayload = await buildPayload(baselineOptions)
+    const baselinePayload = await buildPayloadWithOptions(baselineOptions, 'baseline')
     await baselinePayload.create({ collection: 'posts', data: { title: 'Old' } as any })
 
     // Manually trigger baseline bulk run
@@ -216,7 +220,7 @@ describe('Bulk embed ingest mode with streaming API', () => {
       },
     }
     // rebuild payload with bumped version
-    const bumpedPayload = await buildPayload(bumpedOptions)
+    const bumpedPayload = await buildPayloadWithOptions(bumpedOptions, 'bumped')
     const postAfter = await bumpedPayload.create({
       collection: 'posts',
       data: { title: 'Old' } as any,
@@ -312,8 +316,7 @@ describe('Bulk embed ingest mode with streaming API', () => {
   })
 
   test('polling requeues when non-terminal then succeeds', async () => {
-    await clearAllCollections(payload)
-    const loopPayload = await buildPayload({
+    const loopPayload = await buildPayloadWithOptions({
       ...basePluginOptions,
       knowledgePools: {
         default: {
@@ -361,8 +364,7 @@ describe('Bulk embed ingest mode with streaming API', () => {
   })
 
   test('failed batch marks entire run as failed', async () => {
-    await clearAllCollections(payload)
-    const failedPayload = await buildPayload({
+    const failedPayload = await buildPayloadWithOptions({
       ...basePluginOptions,
       knowledgePools: {
         default: {
@@ -412,8 +414,7 @@ describe('Bulk embed ingest mode with streaming API', () => {
   })
 
   test('canceled batch marks entire run as failed', async () => {
-    await clearAllCollections(payload)
-    const canceledPayload = await buildPayload({
+    const canceledPayload = await buildPayloadWithOptions({
       ...basePluginOptions,
       knowledgePools: {
         default: {
@@ -455,9 +456,59 @@ describe('Bulk embed ingest mode with streaming API', () => {
     expect(embeds.totalDocs).toBe(0)
   })
 
+  test('onError callback is called when batch fails', async () => {
+    // Track onError calls
+    let onErrorCalled = false
+    let onErrorArgs: { providerBatchIds: string[]; error: Error } | null = null
+
+    const errorPayload = await buildPayloadWithOptions({
+      ...basePluginOptions,
+      knowledgePools: {
+        default: {
+          ...basePluginOptions.knowledgePools.default,
+          embeddingConfig: {
+            ...basePluginOptions.knowledgePools.default.embeddingConfig,
+            bulkEmbeddingsFns: createMockBulkEmbeddings({
+              statusSequence: ['failed'],
+              onErrorCallback: (args) => {
+                onErrorCalled = true
+                onErrorArgs = args
+              },
+            }),
+          },
+        },
+      },
+    })
+
+    await errorPayload.create({ collection: 'posts', data: { title: 'Error Test' } as any })
+
+    // Manually trigger bulk run
+    const run = await errorPayload.create({
+      collection: BULK_EMBEDDINGS_RUNS_SLUG,
+      data: { pool: 'default', embeddingVersion: testEmbeddingVersion, status: 'queued' },
+    })
+
+    await errorPayload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
+      task: 'payloadcms-vectorize:prepare-bulk-embedding',
+      input: { runId: String(run.id) },
+      req: { payload: errorPayload } as any,
+      ...(BULK_QUEUE_NAMES.prepareBulkEmbedQueueName
+        ? { queue: BULK_QUEUE_NAMES.prepareBulkEmbedQueueName }
+        : {}),
+    })
+
+    await waitForBulkJobs(errorPayload)
+
+    // Verify onError was called
+    expect(onErrorCalled).toBe(true)
+    expect(onErrorArgs).not.toBeNull()
+    expect(onErrorArgs!.providerBatchIds.length).toBeGreaterThan(0)
+    expect(onErrorArgs!.error).toBeInstanceOf(Error)
+    expect(onErrorArgs!.error.message).toContain('failed')
+  })
+
   test('metadata table is cleaned after successful completion', async () => {
-    await clearAllCollections(payload)
-    const cleanPayload = await buildPayload({
+    const cleanPayload = await buildPayloadWithOptions({
       ...basePluginOptions,
       knowledgePools: {
         default: {
@@ -498,8 +549,7 @@ describe('Bulk embed ingest mode with streaming API', () => {
   })
 
   test('metadata table is cleaned after failed run (no partial writes)', async () => {
-    await clearAllCollections(payload)
-    const failPayload = await buildPayload({
+    const failPayload = await buildPayloadWithOptions({
       ...basePluginOptions,
       knowledgePools: {
         default: {
@@ -540,8 +590,7 @@ describe('Bulk embed ingest mode with streaming API', () => {
   })
 
   test('extension fields are merged when writing embeddings', async () => {
-    await clearAllCollections(payload)
-    const extPayload = await buildPayload({
+    const extPayload = await buildPayloadWithOptions({
       ...basePluginOptions,
       knowledgePools: {
         default: {
@@ -595,8 +644,7 @@ describe('Bulk embed ingest mode with streaming API', () => {
   })
 
   test('multiple chunks keep their respective extension fields', async () => {
-    await clearAllCollections(payload)
-    const multiPayload = await buildPayload({
+    const multiPayload = await buildPayloadWithOptions({
       ...basePluginOptions,
       knowledgePools: {
         default: {
@@ -652,10 +700,8 @@ describe('Bulk embed ingest mode with streaming API', () => {
   })
 
   test('multiple batches are created when flushing after N chunks', async () => {
-    await clearAllCollections(payload)
-
     // Create mock that flushes after 2 chunks
-    const smallBatchPayload = await buildPayload({
+    const smallBatchPayload = await buildPayloadWithOptions({
       ...basePluginOptions,
       knowledgePools: {
         default: {
@@ -742,7 +788,7 @@ describe('Bulk embed ingest mode with streaming API', () => {
       bulkQueueNames: BULK_QUEUE_NAMES,
     }
 
-    const realtimePayload = await buildPayload(realtimeOptions as any)
+    const realtimePayload = await buildPayloadWithOptions(realtimeOptions as any, 'realtime')
     const post = await realtimePayload.create({
       collection: 'posts',
       data: { title: 'Realtime Test' } as any,

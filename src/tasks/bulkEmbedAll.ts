@@ -210,9 +210,11 @@ export const createPollOrCompleteBulkEmbeddingTask = ({
       }
 
       // Load all batches for this run
+      // Convert runId to number for postgres relationship queries
+      const runIdNum = parseInt(input.runId, 10)
       const batchesResult = await payload.find({
         collection: BULK_EMBEDDINGS_BATCHES_SLUG,
-        where: { run: { equals: input.runId } },
+        where: { run: { equals: runIdNum } },
         limit: 1000,
         sort: 'batchIndex',
       })
@@ -220,10 +222,10 @@ export const createPollOrCompleteBulkEmbeddingTask = ({
 
       if (batches.length === 0) {
         // No batches found - this shouldn't happen but handle gracefully
-        await payload.update({
-          id: input.runId,
-          collection: BULK_EMBEDDINGS_RUNS_SLUG,
-          data: {
+      await payload.update({
+        id: input.runId,
+        collection: BULK_EMBEDDINGS_RUNS_SLUG,
+        data: {
             status: 'failed',
             error: 'No batches found for run',
             completedAt: new Date().toISOString(),
@@ -260,12 +262,12 @@ export const createPollOrCompleteBulkEmbeddingTask = ({
             status: pollResult.status,
             succeededCount: pollResult.counts?.succeeded,
             failedCount: pollResult.counts?.failed,
-            error: pollResult.error,
+          error: pollResult.error,
             ...(TERMINAL_STATUSES.has(pollResult.status)
               ? { completedAt: new Date().toISOString() }
               : {}),
-          },
-        })
+        },
+      })
 
         if (pollResult.status === 'failed' || pollResult.status === 'canceled') {
           anyFailed = true
@@ -292,6 +294,14 @@ export const createPollOrCompleteBulkEmbeddingTask = ({
           collection: BULK_EMBEDDINGS_INPUT_METADATA_SLUG,
           where: { run: { equals: (run as any).id } },
         })
+        // Call onError callback so user can clean up provider-side resources
+        if (callbacks.onError) {
+          const providerBatchIds = batches.map((b: any) => b.providerBatchId as string)
+          await callbacks.onError({
+            providerBatchIds,
+            error: new Error('One or more batches failed'),
+          })
+        }
         return { output: { runId: input.runId, status: 'failed' } }
       }
 
@@ -329,16 +339,25 @@ export const createPollOrCompleteBulkEmbeddingTask = ({
         })
 
         // Cleanup metadata
-        await payload.delete({
-          collection: BULK_EMBEDDINGS_INPUT_METADATA_SLUG,
-          where: { run: { equals: (run as any).id } },
-        })
+      await payload.delete({
+        collection: BULK_EMBEDDINGS_INPUT_METADATA_SLUG,
+        where: { run: { equals: (run as any).id } },
+      })
 
-        return {
-          output: {
-            runId: input.runId,
+        // If completion failed, call onError so user can clean up provider resources
+        if (!completionResult.success && callbacks.onError) {
+          const providerBatchIds = batches.map((b: any) => b.providerBatchId as string)
+          await callbacks.onError({
+            providerBatchIds,
+            error: new Error(completionResult.error || 'Completion failed'),
+          })
+        }
+
+      return {
+        output: {
+          runId: input.runId,
             status: completionResult.success ? 'succeeded' : 'failed',
-          },
+        },
         }
       }
 
@@ -451,10 +470,16 @@ async function streamAndBatchMissingEmbeddings(args: {
     }
   }
 
-  // Now stream chunks to addChunk, tracking which is last
+  // Track pending chunks - plugin manages this queue
+  const pendingChunks: CollectedEmbeddingInput[] = []
+
+  // Stream chunks to addChunk, tracking which is last
   for (let i = 0; i < allChunks.length; i++) {
     const collectedChunk = allChunks[i]
     const isLastChunk = i === allChunks.length - 1
+
+    // Add to pending queue BEFORE calling addChunk
+    pendingChunks.push(collectedChunk)
 
     const submission = await addChunk({
       chunk: { id: collectedChunk.id, text: collectedChunk.text },
@@ -462,44 +487,52 @@ async function streamAndBatchMissingEmbeddings(args: {
     })
 
     if (submission) {
-      // User submitted a batch - store metadata for those chunks
-      await Promise.all(
-        submission.submittedChunks.map((submittedChunk) => {
-          // Find the full metadata for this chunk
-          const fullChunk = allChunks.find((c) => c.id === submittedChunk.id)
-          if (!fullChunk) return Promise.resolve()
+      // User submitted a batch
+      // - If isLastChunk: all pending chunks were submitted
+      // - If not isLastChunk: all except current were submitted (current starts fresh)
+      let submittedChunks: CollectedEmbeddingInput[]
+      if (isLastChunk) {
+        submittedChunks = pendingChunks.splice(0)
+      } else {
+        submittedChunks = pendingChunks.splice(0, pendingChunks.length - 1)
+      }
 
-          return payload.create({
+      // Convert runId to number for postgres relationships
+      const runIdNum = parseInt(runId, 10)
+
+      // Store metadata for submitted chunks
+      await Promise.all(
+        submittedChunks.map((chunk) =>
+          payload.create({
             collection: BULK_EMBEDDINGS_INPUT_METADATA_SLUG,
             data: {
-              run: runId,
-              inputId: fullChunk.id,
-              text: fullChunk.text,
-              sourceCollection: fullChunk.metadata.sourceCollection,
-              docId: fullChunk.metadata.docId,
-              chunkIndex: fullChunk.metadata.chunkIndex,
-              embeddingVersion: fullChunk.metadata.embeddingVersion,
-              extensionFields: fullChunk.metadata.extensionFields,
+              run: runIdNum,
+              inputId: chunk.id,
+              text: chunk.text,
+              sourceCollection: chunk.metadata.sourceCollection,
+              docId: chunk.metadata.docId,
+              chunkIndex: chunk.metadata.chunkIndex,
+              embeddingVersion: chunk.metadata.embeddingVersion,
+              extensionFields: chunk.metadata.extensionFields,
             },
-          })
-        }),
+          }),
+        ),
       )
 
       // Create batch record
       await payload.create({
         collection: BULK_EMBEDDINGS_BATCHES_SLUG,
         data: {
-          run: runId,
+          run: runIdNum,
           batchIndex,
           providerBatchId: submission.providerBatchId,
-          inputFileRef: submission.inputFileRef,
           status: 'queued',
-          inputCount: submission.submittedChunks.length,
+          inputCount: submittedChunks.length,
           submittedAt: new Date().toISOString(),
         },
       })
 
-      totalInputs += submission.submittedChunks.length
+      totalInputs += submittedChunks.length
       batchIndex++
     }
   }
@@ -687,6 +720,9 @@ async function loadInputMetadataByRun(args: { payload: Payload; runId: string })
     }
   >()
 
+  // Convert runId to number for postgres relationship queries
+  const runIdNum = parseInt(runId, 10)
+  
   let page = 1
   const limit = 100
   while (true) {
@@ -694,7 +730,7 @@ async function loadInputMetadataByRun(args: { payload: Payload; runId: string })
       collection: BULK_EMBEDDINGS_INPUT_METADATA_SLUG,
       page,
       limit,
-      where: { run: { equals: runId } },
+      where: { run: { equals: runIdNum } },
       sort: 'inputId',
     })
     const docs = (res as any)?.docs || []

@@ -129,14 +129,17 @@ export default buildConfig({
             { name: 'category', type: 'text' },
             { name: 'priority', type: 'number' },
           ],
-          embedDocs,
-          embedQuery,
-          embeddingVersion: 'v1.0.0',
+          embeddingConfig: {
+            version: 'v1.0.0',
+            queryFn: embedQuery,
+            realTimeIngestionFn: embedDocs,
+            // bulkEmbeddingsFns: { ... } // Optional: for batch API support
+          },
         },
       },
       // Optional plugin options:
-      // queueName: 'custom-queue',
-      // endpointOverrides: { path: '/custom-vector-search', enabled: true }, // will be /api/custom-vector-search
+      // realtimeQueueName: 'custom-queue',
+      // endpointOverrides: { path: '/custom-vector-search', enabled: true },
       // disabled: false,
     }),
   ],
@@ -194,47 +197,161 @@ The embeddings collection name will be the same as the knowledge pool name.
 **2. Dynamic Config** (passed to `payloadcmsVectorize`):
 
 - `collections`: `Record<string, CollectionVectorizeOption>` - Collections and their chunking configs
-- `embedDocs`: `EmbedDocsFn` - Function to embed multiple documents
-- `embedQuery`: `EmbedQueryFn` - Function to embed search queries
-- `embeddingVersion`: `string` - Version string for tracking model changes
 - `extensionFields?`: `Field[]` - Optional fields to extend the embeddings collection schema
-- `bulkEmbeddings?`: Configuration for bulk embedding operations:
-  - `ingestMode?`: `'realtime' | 'bulk'` - Default `'realtime'` queues embeddings immediately. `'bulk'` skips realtime embedding, deletes stale vectors on updates, and relies on the bulk job to backfill.
-  - `prepareBulkEmbeddings(args)`: Callback to prepare a bulk embedding batch
-  - `pollBulkEmbeddings(args)`: Callback to poll the status of a bulk embedding batch
-  - `completeBulkEmbeddings(args)`: Callback to retrieve completed embeddings from a batch
-    If `bulkEmbeddings` is omitted for a pool, the "Embed all" button is disabled and bulk is not available.
+- `embeddingConfig`: Embedding configuration object:
+  - `version`: `string` - Version string for tracking model changes
+  - `queryFn`: `EmbedQueryFn` - Function to embed search queries
+  - `realTimeIngestionFn?`: `EmbedDocsFn` - Function for real-time embedding on document changes
+  - `bulkEmbeddingsFns?`: Streaming bulk embedding callbacks (see below)
+
+If `realTimeIngestionFn` is provided, documents are embedded immediately on create/update.
+If only `bulkEmbeddingsFns` is provided (no `realTimeIngestionFn`), embedding only happens via manual bulk runs.
+If neither is provided, embedding is disabled for that pool.
+
+### Bulk Embeddings API
+
+The bulk embedding API is designed for large-scale embedding using provider batch APIs (like Voyage AI). **Bulk runs are never auto-queued** - they must be triggered manually via the admin UI or API.
+
+#### The Streaming Model
+
+The plugin streams chunks to your callbacks one at a time, giving you full control over batching based on your provider's file size limits:
+
+```typescript
+type BulkEmbeddingsFns = {
+  addChunk: (args: AddChunkArgs) => Promise<BatchSubmission | null>
+  pollBatch: (args: PollBatchArgs) => Promise<PollBulkEmbeddingsResult>
+  completeBatch: (args: CompleteBatchArgs) => Promise<BulkEmbeddingOutput[]>
+  onError?: (args: OnBulkErrorArgs) => Promise<void>
+}
+```
+
+#### `addChunk` - Accumulate and Submit
+
+Called for each chunk. You manage your own accumulation and decide when to submit based on file size.
+
+```typescript
+type AddChunkArgs = {
+  chunk: { id: string; text: string }
+  isLastChunk: boolean
+}
+
+type BatchSubmission = {
+  providerBatchId: string
+}
+```
+
+**Return values:**
+
+- `null` - "I'm accumulating this chunk, not ready to submit yet"
+- `{ providerBatchId }` - "I just submitted a batch to my provider"
+
+**⚠️ Important contract about which chunks are included in a submission:**
+
+- When `isLastChunk=false` and you return a submission: all pending chunks **EXCEPT** the current one were submitted (current chunk starts fresh accumulation)
+- When `isLastChunk=true` and you return a submission: all pending chunks **INCLUDING** the current one were submitted
+
+**Example implementation:**
+
+```typescript
+let accumulated: BulkEmbeddingInput[] = []
+let accumulatedSize = 0
+const FILE_SIZE_LIMIT = 50 * 1024 * 1024 // 50MB
+
+addChunk: async ({ chunk, isLastChunk }) => {
+  const chunkSize = JSON.stringify(chunk).length
+
+  // Would exceed limit? Submit what we have, keep current for next batch
+  if (accumulatedSize + chunkSize > FILE_SIZE_LIMIT && accumulated.length > 0) {
+    const result = await submitToProvider(accumulated)
+    accumulated = [chunk] // Start fresh WITH current chunk
+    accumulatedSize = chunkSize
+    return { providerBatchId: result.id }
+  }
+
+  accumulated.push(chunk)
+  accumulatedSize += chunkSize
+
+  // Last chunk? Must flush everything
+  if (isLastChunk && accumulated.length > 0) {
+    const result = await submitToProvider(accumulated)
+    accumulated = []
+    accumulatedSize = 0
+    return { providerBatchId: result.id }
+  }
+
+  return null
+}
+```
+
+**Note:** If a single chunk exceeds your provider's file size limit, you'll need to handle that edge case in your implementation (e.g., skip it, split it, or fail gracefully).
+
+#### `pollBatch` - Check Status
+
+Called repeatedly until the batch reaches a terminal status.
+
+```typescript
+type PollBatchArgs = { providerBatchId: string }
+
+type PollBulkEmbeddingsResult = {
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled'
+  counts?: { inputs?: number; succeeded?: number; failed?: number }
+  error?: string
+}
+```
+
+#### `completeBatch` - Download Results
+
+Called after all batches succeed. Download the embeddings from your provider.
+
+```typescript
+type CompleteBatchArgs = { providerBatchId: string }
+
+type BulkEmbeddingOutput = {
+  id: string // Must match the chunk.id from addChunk
+  embedding?: number[]
+  error?: string
+}
+```
+
+#### `onError` - Cleanup on Failure (Optional)
+
+Called when the bulk run fails. Use this to clean up provider-side resources (delete files, cancel batches). The run can be re-queued after cleanup.
+
+```typescript
+type OnBulkErrorArgs = {
+  providerBatchIds: string[]
+  error: Error
+}
+```
 
 ### Bulk Task Model
 
-When bulk ingest mode is enabled, the plugin uses separate Payload jobs for reliability with long-running providers:
+The plugin uses separate Payload jobs for reliability with long-running providers:
 
-- **`prepare-bulk-embedding`**: One-shot task that collects missing embeddings and submits them to the provider. Short-lived.
-- **`poll-or-complete-bulk-embedding`**: Polls the provider status and completes embedding ingestion when ready. Can requeue itself until completion.
+- **`prepare-bulk-embedding`**: Streams through documents, calls your `addChunk` for each chunk, creates batch records.
+- **`poll-or-complete-bulk-embedding`**: Polls all batches, requeues itself until done, then atomically writes all embeddings.
 
 ### Queue Configuration
 
 For production deployments with bulk embedding:
 
 ```typescript
-// Recommended production setup
 plugins: [
   payloadcmsVectorize({
     knowledgePools: { /* ... */ },
-    realtimeQueueName: 'vectorize-realtime', // Separate realtime jobs (Optional)
+    realtimeQueueName: 'vectorize-realtime',
     bulkQueueNames: {
-      prepareBulkEmbedQueueName: 'vectorize-bulk-prepare', // Daily bulk preparation (Required if any knowledge pool uses bulk ingestion)
-      pollOrCompleteQueueName: 'vectorize-bulk-poll',       // Frequent polling/completion (Required if any knowledge pool uses bulk ingestion)
+      prepareBulkEmbedQueueName: 'vectorize-bulk-prepare',
+      pollOrCompleteQueueName: 'vectorize-bulk-poll',
     },
   }),
 ]
 
 jobs: {
-  // Payload processes jobs via autoRun. Use different schedules for different workloads.
   autoRun: [
-    { cron: '*/5 * * * * *', limit: 10, queue: 'vectorize-realtime' }, // Optional: Process realtime jobs every 5 seconds
-    { cron: '0 0 * * * *', limit: 1, queue: 'vectorize-bulk-prepare' }, // Required: Run bulk preparation once per hour (or daily)
-    { cron: '*/30 * * * * *', limit: 5, queue: 'vectorize-bulk-poll' }, // Required: Poll bulk status every 30 seconds
+    { cron: '*/5 * * * * *', limit: 10, queue: 'vectorize-realtime' },
+    { cron: '0 0 * * * *', limit: 1, queue: 'vectorize-bulk-prepare' },
+    { cron: '*/30 * * * * *', limit: 5, queue: 'vectorize-bulk-poll' },
   ],
 }
 ```
@@ -354,11 +471,11 @@ Search for similar content using vector similarity.
 }
 ```
 
-### Bulk embedding (Embed all)
+### Bulk Embedding (Embed All)
 
-- Each knowledge pool’s embeddings list shows an **Embed all** admin button that queues a `payloadcms-vectorize:bulk-embed-all` job.
-- Bulk runs only include documents that are missing embeddings for the pool’s current `embeddingVersion`.
-- Progress is recorded in the `vector-bulk-embeddings-runs` collection (fields: `pool`, `embeddingVersion`, `providerBatchId`, `status`, counts, timestamps, `error`).
+- Each knowledge pool's embeddings list shows an **Embed all** admin button that triggers a bulk run.
+- Bulk runs only include documents missing embeddings for the pool's current `embeddingConfig.version`.
+- Progress is recorded in `vector-bulk-embeddings-runs` and `vector-bulk-embeddings-batches` collections.
 - Endpoint: **POST** `/api/vector-bulk-embed`
 
 ```jsonc
@@ -367,13 +484,11 @@ Search for similar content using vector similarity.
 }
 ```
 
-Bulk callbacks are provider-agnostic:
+The bulk embedding process is **atomic**: either all embeddings are written or none are. If any batch fails, the run is marked failed and no partial writes occur.
 
-- `prepareBulkEmbeddings({ payload, knowledgePool, embeddingVersion, inputs })`
-- `pollBulkEmbeddings({ payload, knowledgePool, providerBatchId })`
-- `completeBulkEmbeddings({ payload, knowledgePool, providerBatchId })`
+**Error Recovery:** If a run fails, you can re-queue it. If you provided an `onError` callback, it will be called with all `providerBatchIds` so you can clean up provider-side resources before retrying.
 
-If `bulkEmbeddings` is not provided, the plugin falls back to running `embedDocs` locally.
+If `bulkEmbeddingsFns` is not provided, the "Embed all" button is disabled.
 
 ## Changelog
 
@@ -419,6 +534,7 @@ Thank you for the stars! The following updates have been completed:
 
 The following features are planned for future releases based on community interest and stars:
 
+- **Bulk prepare progress visibility**: Real-time progress tracking during the prepare phase for large collections
 - **Migrations for vector dimensions**: Easy migration tools for changing vector dimensions and/or ivfflatLists after initial setup
 - **MongoDB support**: Extend vector search capabilities to MongoDB databases
 - **Vercel support**: Optimized deployment and configuration for Vercel hosting

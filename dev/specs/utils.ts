@@ -79,6 +79,8 @@ type MockOptions = {
   partialFailure?: { failIds: string[] }
   /** Optional: flush after this many chunks (for testing multi-batch scenarios) */
   flushAfterChunks?: number
+  /** Optional: callback to track onError calls for testing */
+  onErrorCallback?: (args: { providerBatchIds: string[]; error: Error }) => void
 }
 
 /**
@@ -89,7 +91,7 @@ export function createMockBulkEmbeddings(
   options: MockOptions,
   dims: number = DEFAULT_DIMS,
 ): BulkEmbeddingsFns {
-  const { statusSequence, partialFailure, flushAfterChunks } = options
+  const { statusSequence, partialFailure, flushAfterChunks, onErrorCallback } = options
   // Accumulated chunks for current batch
   let accumulatedChunks: BulkEmbeddingInput[] = []
   let batchIndex = 0
@@ -115,11 +117,7 @@ export function createMockBulkEmbeddings(
         batchInputs.set(providerBatchId, toSubmit)
         batchPollCount.set(providerBatchId, 0)
         batchIndex++
-        return {
-          providerBatchId,
-          inputFileRef: `mock-file-${batchIndex - 1}`,
-          submittedChunks: toSubmit,
-        }
+        return { providerBatchId }
       }
 
       // Add chunk to accumulator
@@ -133,11 +131,7 @@ export function createMockBulkEmbeddings(
         batchInputs.set(providerBatchId, toSubmit)
         batchPollCount.set(providerBatchId, 0)
         batchIndex++
-        return {
-          providerBatchId,
-          inputFileRef: `mock-file-${batchIndex - 1}`,
-          submittedChunks: toSubmit,
-        }
+        return { providerBatchId }
       }
 
       return null
@@ -174,6 +168,21 @@ export function createMockBulkEmbeddings(
       batchInputs.delete(providerBatchId)
       batchPollCount.delete(providerBatchId)
       return outputs
+    },
+
+    onError: async ({ providerBatchIds, error }) => {
+      // Clean up state
+      for (const batchId of providerBatchIds) {
+        batchInputs.delete(batchId)
+        batchPollCount.delete(batchId)
+      }
+      accumulatedChunks = []
+      batchIndex = 0
+
+      // Call the test callback if provided
+      if (onErrorCallback) {
+        onErrorCallback({ providerBatchIds, error })
+      }
     },
   }
 }
