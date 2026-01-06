@@ -23,7 +23,7 @@ export default defineConfig(() => {
       exclude: ['**/e2e.spec.{ts,js}', '**/node_modules/**'],
       // Run test files sequentially to avoid global state interference
       // (embeddingsTables map and Payload instance caching)
-      fileParallelism: false,
+      // fileParallelism: false,
     },
   }
 })

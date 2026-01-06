@@ -104,27 +104,14 @@ export function createMockBulkEmbeddings(
 
   return {
     addChunk: async ({ chunk, isLastChunk }) => {
-      // Check if we should flush before adding this chunk
-      if (
-        flushAfterChunks &&
-        accumulatedChunks.length >= flushAfterChunks &&
-        accumulatedChunks.length > 0
-      ) {
-        // Submit what we have (without this chunk)
-        const toSubmit = [...accumulatedChunks]
-        accumulatedChunks = [chunk]
-        const providerBatchId = `mock-batch-${batchIndex}-${Date.now()}`
-        batchInputs.set(providerBatchId, toSubmit)
-        batchPollCount.set(providerBatchId, 0)
-        batchIndex++
-        return { providerBatchId }
-      }
-
-      // Add chunk to accumulator
+      // Add current chunk to accumulator
       accumulatedChunks.push(chunk)
 
-      // If this is the last chunk, flush everything
-      if (isLastChunk && accumulatedChunks.length > 0) {
+      // Determine if we should flush
+      const shouldFlushDueToSize = flushAfterChunks && accumulatedChunks.length >= flushAfterChunks
+      const shouldFlush = shouldFlushDueToSize || isLastChunk
+
+      if (shouldFlush && accumulatedChunks.length > 0) {
         const toSubmit = [...accumulatedChunks]
         accumulatedChunks = []
         const providerBatchId = `mock-batch-${batchIndex}-${Date.now()}`

@@ -222,10 +222,10 @@ export const createPollOrCompleteBulkEmbeddingTask = ({
 
       if (batches.length === 0) {
         // No batches found - this shouldn't happen but handle gracefully
-      await payload.update({
-        id: input.runId,
-        collection: BULK_EMBEDDINGS_RUNS_SLUG,
-        data: {
+        await payload.update({
+          id: input.runId,
+          collection: BULK_EMBEDDINGS_RUNS_SLUG,
+          data: {
             status: 'failed',
             error: 'No batches found for run',
             completedAt: new Date().toISOString(),
@@ -262,12 +262,12 @@ export const createPollOrCompleteBulkEmbeddingTask = ({
             status: pollResult.status,
             succeededCount: pollResult.counts?.succeeded,
             failedCount: pollResult.counts?.failed,
-          error: pollResult.error,
+            error: pollResult.error,
             ...(TERMINAL_STATUSES.has(pollResult.status)
               ? { completedAt: new Date().toISOString() }
               : {}),
-        },
-      })
+          },
+        })
 
         if (pollResult.status === 'failed' || pollResult.status === 'canceled') {
           anyFailed = true
@@ -339,10 +339,10 @@ export const createPollOrCompleteBulkEmbeddingTask = ({
         })
 
         // Cleanup metadata
-      await payload.delete({
-        collection: BULK_EMBEDDINGS_INPUT_METADATA_SLUG,
-        where: { run: { equals: (run as any).id } },
-      })
+        await payload.delete({
+          collection: BULK_EMBEDDINGS_INPUT_METADATA_SLUG,
+          where: { run: { equals: (run as any).id } },
+        })
 
         // If completion failed, call onError so user can clean up provider resources
         if (!completionResult.success && callbacks.onError) {
@@ -353,11 +353,11 @@ export const createPollOrCompleteBulkEmbeddingTask = ({
           })
         }
 
-      return {
-        output: {
-          runId: input.runId,
+        return {
+          output: {
+            runId: input.runId,
             status: completionResult.success ? 'succeeded' : 'failed',
-        },
+          },
         }
       }
 
@@ -722,7 +722,7 @@ async function loadInputMetadataByRun(args: { payload: Payload; runId: string })
 
   // Convert runId to number for postgres relationship queries
   const runIdNum = parseInt(runId, 10)
-  
+
   let page = 1
   const limit = 100
   while (true) {

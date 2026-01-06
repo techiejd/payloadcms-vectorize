@@ -67,6 +67,7 @@ async function ensurePgvectorArtifacts(args: {
       for (const sql of sqls) {
         await postgresPayload.db.drizzle.execute(sql)
       }
+
     }
     postgresPayload.logger.info('[payloadcms-vectorize] pgvector extension/columns/index ensured')
   } catch (err) {
@@ -364,3 +365,4 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
     payloadcmsVectorize,
   }
 }
+
