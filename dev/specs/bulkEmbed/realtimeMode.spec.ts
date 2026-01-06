@@ -74,3 +74,4 @@ describe('Bulk embed - realtime mode', () => {
     expect(embeds.totalDocs).toBeGreaterThan(0)
   })
 })
+
