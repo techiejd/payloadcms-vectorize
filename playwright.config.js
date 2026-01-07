@@ -48,7 +48,7 @@ export default defineConfig({
     command:
       'cross-env DOTENV_CONFIG_PATH=dev/.env.test NODE_OPTIONS=--require=dotenv/config next dev dev --turbo',
     reuseExistingServer: true,
-	timeout:180_000,
+    timeout: 180_000,
     url: 'http://localhost:3000/admin',
   },
 })

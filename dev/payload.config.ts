@@ -17,6 +17,7 @@ import { fileURLToPath } from 'url'
 import { testEmailAdapter } from './helpers/testEmailAdapter.js'
 import { seed } from './seed.js'
 import { chunkRichText, chunkText } from './helpers/chunkers.js'
+import { createMockBulkEmbeddings } from './specs/utils.js'
 
 const filename = fileURLToPath(import.meta.url)
 const dirname = path.dirname(filename)
@@ -35,6 +36,12 @@ const ivfflatLists = Number(process.env.IVFFLATLISTS)
 const embedDocs = process.env.USE_VOYAGE !== undefined ? voyageEmbedDocs : makeDummyEmbedDocs(dims)
 const embedQuery =
   process.env.USE_VOYAGE !== undefined ? voyageEmbedQuery : makeDummyEmbedQuery(dims)
+const bulkEmbeddingsFns =
+  process.env.USE_VOYAGE !== undefined
+    ? makeVoyageBulkEmbeddingsConfig()
+    : createMockBulkEmbeddings({
+        statusSequence: ['queued', 'running', 'running', 'succeeded'],
+      })
 const ssl =
   process.env.DATABASE_URI !== undefined
     ? {
@@ -50,7 +57,7 @@ const { afterSchemaInitHook, payloadcmsVectorize } = createVectorizeIntegration(
   },
   bulkDefault: {
     dims,
-    ivfflatLists, // Another rule of thumb: ivfflatLists = total_number_of_vectors / 1000. Helps with working memory usage.
+    ivfflatLists,
   },
 })
 
@@ -138,7 +145,7 @@ const buildConfigWithPostgres = async () => {
               version: testEmbeddingVersion,
               queryFn: embedQuery,
               realTimeIngestionFn: embedDocs,
-              bulkEmbeddingsFns: makeVoyageBulkEmbeddingsConfig(),
+              bulkEmbeddingsFns,
             },
           },
           bulkDefault: {
@@ -163,7 +170,7 @@ const buildConfigWithPostgres = async () => {
             embeddingConfig: {
               version: testEmbeddingVersion,
               queryFn: embedQuery,
-              bulkEmbeddingsFns: makeVoyageBulkEmbeddingsConfig(),
+              bulkEmbeddingsFns,
             },
           },
         },

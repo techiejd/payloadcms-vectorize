@@ -25,8 +25,8 @@ export default defineConfig(() => {
       // (embeddingsTables map and Payload instance caching)
       fileParallelism: false,
       // Disable parallel test execution within files as well
-      threads: false,
-      maxConcurrency: 1,
+      //threads: false,
+      //maxConcurrency: 1,
     },
   }
 })

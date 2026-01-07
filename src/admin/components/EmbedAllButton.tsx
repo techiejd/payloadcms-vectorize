@@ -19,7 +19,7 @@ export const EmbedAllButton: React.FC<EmbedAllButtonProps> = ({
   hasBulkEmbeddings,
 }) => {
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [message, setMessage] = useState<string | null>(null)
+  const [message, setMessage] = useState<{ text: string; runId?: string } | null>(null)
 
   const handleClick = async () => {
     setIsSubmitting(true)
@@ -34,12 +34,12 @@ export const EmbedAllButton: React.FC<EmbedAllButtonProps> = ({
       })
       const data = await res.json()
       if (!res.ok) {
-        setMessage(data?.error || 'Failed to queue bulk embed run')
+        setMessage({ text: data?.error || 'Failed to queue bulk embed run' })
         return
       }
-      setMessage(`Queued bulk embed run ${data.runId}`)
+      setMessage({ text: 'Queued bulk embed run', runId: data.runId })
     } catch (error: any) {
-      setMessage(error?.message || 'Failed to queue bulk embed run')
+      setMessage({ text: error?.message || 'Failed to queue bulk embed run' })
     } finally {
       setIsSubmitting(false)
     }
@@ -71,7 +71,23 @@ export const EmbedAllButton: React.FC<EmbedAllButtonProps> = ({
       >
         {isSubmitting ? 'Submitting…' : 'Embed all'}
       </button>
-      {message ? <span style={{ fontSize: '0.9rem' }}>{message}</span> : null}
+      {message ? (
+        <span style={{ fontSize: '0.9rem' }}>
+          {message.text}
+          {message.runId ? (
+            <>
+              {' '}
+              <a
+                href={`/admin/collections/vector-bulk-embeddings-runs/${message.runId}`}
+                style={{ textDecoration: 'underline' }}
+                data-testid="bulk-run-link"
+              >
+                #{message.runId}
+              </a>
+            </>
+          ) : null}
+        </span>
+      ) : null}
     </div>
   )
 }
