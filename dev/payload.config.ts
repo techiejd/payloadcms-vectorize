@@ -145,7 +145,6 @@ const buildConfigWithPostgres = async () => {
               version: testEmbeddingVersion,
               queryFn: embedQuery,
               realTimeIngestionFn: embedDocs,
-              bulkEmbeddingsFns,
             },
           },
           bulkDefault: {

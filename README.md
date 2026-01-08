@@ -148,6 +148,21 @@ export default buildConfig({
 
 **Important:** `knowledgePools` must have **different names than your collections**—reusing a collection name for a knowledge pool **will cause schema conflicts**. (In this example, the knowledge pool is named 'main' and a collection named 'main' will be created.)
 
+### 1.5. Generate Import Map (Required for Admin UI)
+
+After configuring the plugin, you must generate the import map so that Payload can resolve client components (like the "Embed all" button) in the admin UI for bulk embeddings:
+
+```bash
+pnpm run generate:importmap
+```
+
+**⚠️ Important:** Run this command:
+
+- After initial plugin setup
+- If the "Embed all" button doesn't appear in the admin UI
+
+The import map tells Payload how to resolve component paths (like `'payloadcms-vectorize/client#EmbedAllButton'`) to actual React components. Without it, client components referenced in your collection configs won't render.
+
 ### 2. Search Your Content
 
 The plugin automatically creates a `/api/vector-search` endpoint:
@@ -474,6 +489,7 @@ Search for similar content using vector similarity.
 ### Bulk Embedding (Embed All)
 
 - Each knowledge pool's embeddings list shows an **Embed all** admin button that triggers a bulk run.
+- **Note:** Make sure you've run `pnpm run generate:importmap` after plugin configuration, otherwise the button won't appear.
 - Bulk runs only include documents missing embeddings for the pool's current `embeddingConfig.version`.
 - Progress is recorded in `vector-bulk-embeddings-runs` and `vector-bulk-embeddings-batches` collections.
 - Endpoint: **POST** `/api/vector-bulk-embed`

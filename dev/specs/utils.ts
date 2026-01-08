@@ -8,7 +8,7 @@ import { createVectorizeIntegration } from 'payloadcms-vectorize'
 import { BULK_EMBEDDINGS_RUNS_SLUG } from '../../src/collections/bulkEmbeddingsRuns.js'
 import { BULK_EMBEDDINGS_INPUT_METADATA_SLUG } from '../../src/collections/bulkEmbeddingInputMetadata.js'
 import { BULK_EMBEDDINGS_BATCHES_SLUG } from '../../src/collections/bulkEmbeddingsBatches.js'
-import { makeDummyEmbedDocs } from 'helpers/embed.js'
+import { makeDummyEmbedDocs } from '../helpers/embed.js'
 import type {
   BulkEmbeddingsFns,
   BulkEmbeddingInput,

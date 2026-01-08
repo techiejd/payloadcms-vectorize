@@ -10,6 +10,7 @@ import { BULK_EMBEDDINGS_RUNS_SLUG } from '../collections/bulkEmbeddingsRuns.js'
 import { BULK_EMBEDDINGS_INPUT_METADATA_SLUG } from '../collections/bulkEmbeddingInputMetadata.js'
 import { BULK_EMBEDDINGS_BATCHES_SLUG } from '../collections/bulkEmbeddingsBatches.js'
 import { isPostgresPayload, PostgresPayload, BulkEmbeddingInput } from '../types.js'
+import toSnakeCase from 'to-snake-case'
 
 type PrepareBulkEmbeddingTaskInput = {
   runId: string
@@ -622,7 +623,7 @@ async function completeAllBatchesAtomically(args: {
 
       await persistVectorColumn({
         payload,
-        poolName,
+        poolName: toSnakeCase(poolName),
         vector: embeddingArray,
         id: String((created as any)?.id ?? ''),
       })
@@ -657,7 +658,7 @@ async function persistVectorColumn(args: {
   const postgresPayload = payload as PostgresPayload
   const schemaName = postgresPayload.db.schemaName || 'public'
   const literal = `[${Array.from(vector).join(',')}]`
-  const sql = `UPDATE "${schemaName}"."${poolName}" SET embedding = $1 WHERE id = $2`
+  const sql = `UPDATE "${schemaName}"."${toSnakeCase(poolName)}" SET embedding = $1 WHERE id = $2`
   const runSQL = async (statement: string, params?: any[]) => {
     if (postgresPayload.db.pool?.query) return postgresPayload.db.pool.query(statement, params)
     if (postgresPayload.db.drizzle?.execute) return postgresPayload.db.drizzle.execute(statement)

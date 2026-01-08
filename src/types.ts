@@ -1,5 +1,23 @@
 import type { CollectionSlug, Payload, Field, Where } from 'payload'
 
+/**
+ * Extended Payload type with vectorize plugin methods
+ */
+export type VectorizedPayload<TPoolNames extends KnowledgePoolName = KnowledgePoolName> =
+  Payload & {
+    /** Check if bulk embedding is enabled for a knowledge pool */
+    _isBulkEmbedEnabled: (knowledgePool: TPoolNames) => boolean
+  }
+
+/**
+ * Type guard to check if a Payload instance has vectorize extensions
+ */
+export function isVectorizedPayload(payload: Payload): payload is VectorizedPayload {
+  return (
+    '_isBulkEmbedEnabled' in payload && typeof (payload as any)._isBulkEmbedEnabled === 'function'
+  )
+}
+
 export type EmbedDocsFn = (texts: string[]) => Promise<number[][] | Float32Array[]>
 export type EmbedQueryFn = (text: string) => Promise<number[] | Float32Array>
 

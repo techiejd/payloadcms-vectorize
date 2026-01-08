@@ -1,5 +1,6 @@
 import type { Config, Payload } from 'payload'
 import { customType } from '@payloadcms/db-postgres/drizzle/pg-core'
+import toSnakeCase from 'to-snake-case'
 
 import { createEmbeddingsCollection } from './collections/embeddings.js'
 import type {
@@ -8,6 +9,7 @@ import type {
   KnowledgePoolName,
   KnowledgePoolStaticConfig,
   KnowledgePoolDynamicConfig,
+  VectorizedPayload,
 } from './types.js'
 import { isPostgresPayload } from './types.js'
 import type { PostgresAdapterArgs } from '@payloadcms/db-postgres'
@@ -109,10 +111,12 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
         },
       })
 
-      const table = schema?.tables?.[poolName]
+      // Drizzle converts camelCase collection slugs to snake_case table names
+      const tableName = toSnakeCase(poolName)
+      const table = schema?.tables?.[tableName]
       if (!table) {
         throw new Error(
-          `[payloadcms-vectorize] Embeddings table "${poolName}" not found during schema initialization. Ensure the collection has been registered.`,
+          `[payloadcms-vectorize] Embeddings table "${poolName}" (table: "${tableName}") not found during schema initialization. Ensure the collection has been registered.`,
         )
       }
 
@@ -321,14 +325,25 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
 
       const incomingOnInit = config.onInit
       config.onInit = async (payload) => {
-        if (incomingOnInit) await incomingOnInit(payload)
+        if (incomingOnInit)
+          await incomingOnInit(payload)
+
+          // Add _isBulkEmbedEnabled method to payload object
+          // This allows checking if bulk embedding is enabled for a knowledge pool
+        ;(payload as VectorizedPayload<TPoolNames>)._isBulkEmbedEnabled = (
+          knowledgePool: TPoolNames,
+        ): boolean => {
+          const poolConfig = pluginOptions.knowledgePools[knowledgePool]
+          return !!poolConfig?.embeddingConfig?.bulkEmbeddingsFns
+        }
 
         // Ensure pgvector artifacts for each knowledge pool
         for (const poolName in staticConfigs) {
           const staticConfig = staticConfigs[poolName]
+          // Drizzle converts camelCase collection slugs to snake_case table names
           await ensurePgvectorArtifacts({
             payload,
-            tableName: poolName,
+            tableName: toSnakeCase(poolName),
             dims: staticConfig.dims,
             ivfflatLists: staticConfig.ivfflatLists,
           })

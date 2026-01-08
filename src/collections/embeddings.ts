@@ -1,5 +1,6 @@
 import type { CollectionConfig, Field } from 'payload'
-import type { KnowledgePoolName } from '../types.js'
+import type { KnowledgePoolName, VectorizedPayload } from '../types.js'
+import { isVectorizedPayload } from '../types.js'
 
 const RESERVED_FIELDS = ['sourceCollection', 'docId', 'chunkIndex', 'chunkText', 'embeddingVersion']
 
@@ -31,19 +32,22 @@ export const createEmbeddingsCollection = (
             path: 'payloadcms-vectorize/client#EmbedAllButton',
             exportName: 'EmbedAllButton',
             serverProps: {
-              hasBulkEmbeddings: ({ payload, params }: { payload: any; params: any }) => {
-                // Get the knowledge pool name from the collection slug
-                const poolName = params?.slug as string
-                if (!poolName) return false
+              hasBulkEmbeddings: ({ payload, params }: { payload: any; params: any }): boolean => {
+                // Get the knowledge pool name from params.segments
+                // params structure: { segments: [ 'collections', 'bulkDefault' ] }
+                const poolName = params?.segments?.[1]
 
-                // Access plugin options from payload config
-                const pluginOptions = payload.config.plugins?.find(
-                  (p: any) => p.payloadcmsVectorize,
-                )?.payloadcmsVectorize
+                // Use the _isBulkEmbedEnabled method added by the plugin
+                if (poolName && typeof poolName === 'string' && isVectorizedPayload(payload)) {
+                  return payload._isBulkEmbedEnabled(poolName)
+                }
 
-                if (!pluginOptions?.knowledgePools?.[poolName]) return false
-
-                return !!pluginOptions.knowledgePools[poolName].embeddingConfig.bulkEmbeddingsFns
+                return false
+              },
+              collectionSlug: ({ params }: { payload: any; params: any }): string => {
+                // Get the knowledge pool name from params.segments
+                // params structure: { segments: [ 'collections', 'bulkDefault' ] }
+                return params?.segments?.[1] || ''
               },
             },
           },

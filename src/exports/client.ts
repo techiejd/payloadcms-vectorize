@@ -1,1 +1,1 @@
-export { EmbedAllButton } from '../admin/components/EmbedAllButton.js'
+export { EmbedAllButton } from '../admin/components/EmbedAllButton/index.js'
