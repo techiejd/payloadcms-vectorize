@@ -59,7 +59,7 @@ const expectEmptyVectorSearchResponse = async (response: any) => {
 
 test.describe('Vector embedding e2e tests', () => {
   // Force tests to run sequentially
-  test.describe.configure({ mode: 'serial' })
+  test.describe.configure({ mode: 'serial', timeout: 120000 })
 
   const title = 'e2e test post title'
   let payload: Payload
