@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## 0.5.0 - 2026-01-03
+## 0.5.0 - 2026-01-08
 
 ### Breaking Changes
 
@@ -24,6 +24,11 @@ All notable changes to this project will be documented in this file.
 - Added tests for bulk polling error conditions (`failed`, `canceled` statuses)
 - Added tests for bulk fan-in behavior (multiple documents processed in single run)
 - Improved test coverage for edge cases in bulk embedding workflow
+
+## 0.4.4 - 2025-01-08
+
+- Fixes bug where you can't have collections that are not snake_case.
+- Should work as long as you follow any convention that can be parsed by to-snake-case's toSnakeCase.
 
 ## 0.4.3 - 2025-01-02
 

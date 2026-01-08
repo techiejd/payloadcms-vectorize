@@ -4,18 +4,17 @@ import { getPayload } from 'payload'
 import { beforeAll, describe, expect, test } from 'vitest'
 import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
 import { type SerializedEditorState } from '@payloadcms/richtext-lexical/lexical'
+import { buildDummyConfig, DIMS, getInitialMarkdownContent } from './constants.js'
 import {
-  buildDummyConfig,
-  DIMS,
-  getInitialMarkdownContent,
-  integration,
-  plugin,
-} from './constants.js'
-import { createTestDb, waitForVectorizationJobs } from './utils.js'
+  BULK_QUEUE_NAMES,
+  createMockBulkEmbeddings,
+  createTestDb,
+  waitForVectorizationJobs,
+} from './utils.js'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { chunkRichText, chunkText } from 'helpers/chunkers.js'
 import { createVectorSearchHandler } from '../../src/endpoints/vectorSearch.js'
-import type { KnowledgePoolDynamicConfig } from 'payloadcms-vectorize'
+import { createVectorizeIntegration, type KnowledgePoolDynamicConfig } from 'payloadcms-vectorize'
 
 const embedFn = makeDummyEmbedQuery(DIMS)
 
@@ -52,6 +51,22 @@ async function performVectorSearch(
 
   return await searchHandler(mockRequest)
 }
+
+const integration = createVectorizeIntegration({
+  default: {
+    dims: DIMS,
+    ivfflatLists: 1,
+  },
+  nonSnakeCasePost: {
+    dims: DIMS,
+    ivfflatLists: 1,
+  },
+  'test-non-snake-case-post': {
+    dims: DIMS,
+    ivfflatLists: 1,
+  },
+})
+const plugin = integration.payloadcmsVectorize
 
 describe('Search endpoint integration tests', () => {
   let payload: Payload
@@ -114,7 +129,58 @@ describe('Search endpoint integration tests', () => {
                 realTimeIngestionFn: makeDummyEmbedDocs(DIMS),
               },
             },
+            nonSnakeCasePost: {
+              collections: {
+                posts: {
+                  toKnowledgePool: async (doc, payload) => {
+                    const chunks: Array<{ chunk: string }> = []
+                    // Process title
+                    if (doc.title) {
+                      const titleChunks = chunkText(doc.title)
+                      chunks.push(...titleChunks.map((chunk) => ({ chunk })))
+                    }
+                    // Process content
+                    if (doc.content) {
+                      const contentChunks = await chunkRichText(doc.content, payload)
+                      chunks.push(...contentChunks.map((chunk) => ({ chunk })))
+                    }
+                    return chunks
+                  },
+                },
+              },
+              embeddingConfig: {
+                version: testEmbeddingVersion,
+                queryFn: makeDummyEmbedQuery(DIMS),
+                realTimeIngestionFn: makeDummyEmbedDocs(DIMS),
+              },
+            },
+            'test-non-snake-case-post': {
+              collections: {
+                posts: {
+                  toKnowledgePool: async (doc, payload) => {
+                    const chunks: Array<{ chunk: string }> = []
+                    // Process title
+                    if (doc.title) {
+                      const titleChunks = chunkText(doc.title)
+                      chunks.push(...titleChunks.map((chunk) => ({ chunk })))
+                    }
+                    // Process content
+                    if (doc.content) {
+                      const contentChunks = await chunkRichText(doc.content, payload)
+                      chunks.push(...contentChunks.map((chunk) => ({ chunk })))
+                    }
+                    return chunks
+                  },
+                },
+              },
+              embeddingConfig: {
+                version: testEmbeddingVersion,
+                queryFn: makeDummyEmbedQuery(DIMS),
+                bulkEmbeddingsFns: createMockBulkEmbeddings({ statusSequence: ['succeeded'] }),
+              },
+            },
           },
+          bulkQueueNames: BULK_QUEUE_NAMES,
         }),
       ],
     })
