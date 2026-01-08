@@ -6,6 +6,7 @@ import {
   KnowledgePoolDynamicConfig,
   ToKnowledgePoolFn,
 } from '../types.js'
+import toSnakeCase from 'to-snake-case'
 
 type VectorizeTaskInput = {
   doc: Record<string, any>
@@ -159,7 +160,9 @@ async function runVectorizeTask(args: {
       const literal = `[${Array.from(vector).join(',')}]`
       const postgresPayload = payload as PostgresPayload
       const schemaName = postgresPayload.db.schemaName || 'public'
-      const sql = `UPDATE "${schemaName}"."${poolName}" SET embedding = $1 WHERE id = $2` as string
+      // Drizzle converts camelCase collection slugs to snake_case table names
+      const sql =
+        `UPDATE "${schemaName}"."${toSnakeCase(poolName)}" SET embedding = $1 WHERE id = $2` as string
       try {
         await runSQL(sql, [literal, id])
       } catch (e) {
