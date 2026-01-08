@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.4.4 - 2025-01-08
+
+- Fixes bug where you can't have collections that are not snake_case.
+- Should work as long as you follow any convention that can be parsed by to-snake-case's toSnakeCase.
+
 ## 0.4.3 - 2025-01-02
 
 - Added runtime validation for `toKnowledgePool` entries (requires `chunk` string).

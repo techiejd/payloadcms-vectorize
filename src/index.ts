@@ -14,6 +14,7 @@ import type { PostgresAdapterArgs } from '@payloadcms/db-postgres'
 import { createVectorizeTask } from './tasks/vectorize.js'
 import { createVectorSearchHandler } from './endpoints/vectorSearch.js'
 import { clearEmbeddingsTables, registerEmbeddingsTable } from './drizzle/tables.js'
+import toSnakeCase from 'to-snake-case'
 
 export type * from './types.js'
 
@@ -92,10 +93,12 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
         },
       })
 
-      const table = schema?.tables?.[poolName]
+      // Drizzle converts camelCase collection slugs to snake_case table names
+      const tableName = toSnakeCase(poolName)
+      const table = schema?.tables?.[tableName]
       if (!table) {
         throw new Error(
-          `[payloadcms-vectorize] Embeddings table "${poolName}" not found during schema initialization. Ensure the collection has been registered.`,
+          `[payloadcms-vectorize] Embeddings table "${poolName}" (table: "${tableName}") not found during schema initialization. Ensure the collection has been registered.`,
         )
       }
 
@@ -260,7 +263,8 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
           const staticConfig = staticConfigs[poolName]
           await ensurePgvectorArtifacts({
             payload,
-            tableName: poolName,
+            // Drizzle converts camelCase collection slugs to snake_case table names
+            tableName: toSnakeCase(poolName),
             dims: staticConfig.dims,
             ivfflatLists: staticConfig.ivfflatLists,
           })
