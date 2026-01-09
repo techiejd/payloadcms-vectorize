@@ -128,14 +128,8 @@ export function createMockBulkEmbeddings(
       const callCount = batchPollCount.get(providerBatchId) ?? 0
       batchPollCount.set(providerBatchId, callCount + 1)
       const status = statusSequence[Math.min(callCount, statusSequence.length - 1)]
-      const inputs = batchInputs.get(providerBatchId) ?? []
-      const counts =
-        status === 'succeeded'
-          ? { inputs: inputs.length, succeeded: inputs.length, failed: 0 }
-          : undefined
       return {
         status,
-        counts,
       }
     },
 

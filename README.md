@@ -255,6 +255,12 @@ type BatchSubmission = {
 }
 ```
 
+**About the `chunk.id` field:**
+
+- **Plugin-generated**: The plugin automatically generates a unique `id` for each chunk (format: `${collectionSlug}:${docId}:${chunkIndex}`). You don't need to create it.
+- **Purpose**: The `id` is used to correlate embedding outputs back to their original inputs, ensuring each embedding is correctly associated with its source document and chunk.
+- **Usage**: When submitting batches to your provider, you must pass this `id` along with the text (e.g., as `custom_id` in Voyage AI's batch API). This allows your provider to return the `id` with each embedding result.
+
 **Return values:**
 
 - `null` - "I'm accumulating this chunk, not ready to submit yet"
@@ -327,6 +333,12 @@ type BulkEmbeddingOutput = {
   error?: string
 }
 ```
+
+**About the `id` field in outputs:**
+
+- **Correlation**: The `id` in each `BulkEmbeddingOutput` must match the `chunk.id` that was passed to `addChunk`. This is how the plugin correlates outputs back to their original inputs.
+- **Extraction**: When processing your provider's response, extract the `id` that you originally sent (e.g., from Voyage's `custom_id` field) and include it in the returned `BulkEmbeddingOutput`.
+- **Example**: If you sent `{ custom_id: "posts:123:0", input: [...] }` to your provider, extract `result.custom_id` from the response and return `{ id: result.custom_id, embedding: [...] }`.
 
 #### `onError` - Cleanup on Failure (Optional)
 

@@ -54,7 +54,7 @@ export type KnowledgePoolDynamicConfig = {
   embeddingConfig: EmbeddingConfig
 }
 
-type EmbeddingConfig = {
+export type EmbeddingConfig = {
   /** Version string to track embedding model/version - stored in each embedding document */
   version: string
   /** Embedding function for query provided by the user
@@ -75,7 +75,7 @@ type EmbeddingConfig = {
 export type BulkEmbeddingRunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled'
 
 export type BulkEmbeddingInput = {
-  /** Stable identifier for correlating outputs (should be unique per chunk) */
+  /** Stable identifier for correlating outputs (is unique per chunk) */
   id: string
   /** Raw text to embed */
   text: string
@@ -99,15 +99,8 @@ export type BulkEmbeddingOutput = {
   error?: string | null
 }
 
-export type BulkEmbeddingCounts = {
-  inputs?: number
-  succeeded?: number
-  failed?: number
-}
-
 export type PollBulkEmbeddingsResult = {
   status: BulkEmbeddingRunStatus
-  counts?: BulkEmbeddingCounts
   error?: string
 }
 
@@ -226,7 +219,7 @@ export type PostgresPayload = any & {
 // Job task argument types
 export type VectorizeTaskArgs = {
   payload: any
-  pluginOptions: PayloadcmsVectorizeConfig & { embeddingsCollectionSlug?: string }
+  pluginOptions: PayloadcmsVectorizeConfig
   doc: Record<string, any>
   collection: string
   knowledgePool: KnowledgePoolName

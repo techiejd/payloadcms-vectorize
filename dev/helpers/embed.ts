@@ -228,13 +228,6 @@ export function makeVoyageBulkEmbeddingsConfig(): BulkEmbeddingsFns {
 
         return {
           status,
-          counts: batchData.request_counts
-            ? {
-                inputs: batchData.request_counts.total || 0,
-                succeeded: batchData.request_counts.completed || 0,
-                failed: batchData.request_counts.failed || 0,
-              }
-            : undefined,
         }
       } catch (error) {
         console.error('Voyage pollBatch error:', error)

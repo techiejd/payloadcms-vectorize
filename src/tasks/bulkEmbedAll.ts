@@ -261,8 +261,6 @@ export const createPollOrCompleteBulkEmbeddingTask = ({
           collection: BULK_EMBEDDINGS_BATCHES_SLUG,
           data: {
             status: pollResult.status,
-            succeededCount: pollResult.counts?.succeeded,
-            failedCount: pollResult.counts?.failed,
             error: pollResult.error,
             ...(TERMINAL_STATUSES.has(pollResult.status)
               ? { completedAt: new Date().toISOString() }

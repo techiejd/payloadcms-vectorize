@@ -34,7 +34,41 @@ import {
 } from './tasks/bulkEmbedAll.js'
 import { createBulkEmbedHandler } from './endpoints/bulkEmbed.js'
 
-export type * from './types.js'
+export type {
+  KnowledgePoolStaticConfig,
+  PayloadcmsVectorizeConfig,
+
+  // PayloadcmsVectorizeConfig
+  KnowledgePoolDynamicConfig,
+  KnowledgePoolName,
+
+  // KnowledgePoolDynamicConfig,
+  CollectionVectorizeOption,
+  EmbeddingConfig,
+
+  // CollectionVectorizeOption
+  ToKnowledgePoolFn,
+
+  // EmbeddingConfig
+  EmbedQueryFn,
+  EmbedDocsFn,
+  BulkEmbeddingsFns,
+
+  // BulkEmbeddingsFns
+  AddChunkArgs,
+  BatchSubmission,
+  PollBatchArgs,
+  PollBulkEmbeddingsResult,
+  CompleteBatchArgs,
+  BulkEmbeddingOutput,
+  OnBulkErrorArgs,
+
+  // AddChunkArgs
+  BulkEmbeddingInput,
+
+  // PollBulkEmbeddingsResult
+  BulkEmbeddingRunStatus,
+} from './types.js'
 
 async function ensurePgvectorArtifacts(args: {
   payload: Payload
