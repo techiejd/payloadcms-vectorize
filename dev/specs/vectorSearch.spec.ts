@@ -8,8 +8,13 @@ import { buildDummyConfig, DIMS, getInitialMarkdownContent } from './constants.j
 import { createTestDb, waitForVectorizationJobs } from './utils.js'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { chunkRichText, chunkText } from 'helpers/chunkers.js'
-import { createVectorSearchHandler } from '../../src/endpoints/vectorSearch.js'
+import { createVectorSearchHandlers } from '../../src/endpoints/vectorSearch.js'
 import { createVectorizeIntegration, type KnowledgePoolDynamicConfig } from 'payloadcms-vectorize'
+import {
+  expectValidVectorSearchResults,
+  expectResultsOrderedBySimilarity,
+  expectResultsRespectWhere,
+} from './helpers/vectorSearchExpectations.js'
 
 const embedFn = makeDummyEmbedQuery(DIMS)
 
@@ -29,7 +34,7 @@ async function performVectorSearch(
       embeddingVersion: testEmbeddingVersion,
     },
   }
-  const searchHandler = createVectorSearchHandler(knowledgePools)
+  const searchHandler = createVectorSearchHandlers(knowledgePools).requestHandler
 
   // Create a mock request object
   const mockRequest = {
@@ -190,32 +195,21 @@ describe('Search endpoint integration tests', () => {
     const json = await response.json()
 
     expect(json).toHaveProperty('results')
-    expect(Array.isArray(json.results)).toBe(true)
-    expect(json.results.length).toBeGreaterThan(0)
-
-    expect(json.results).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          sourceCollection: 'posts',
-          docId: String(post.id),
-          chunkIndex: 0,
-          chunkText: titleAndQuery,
-          embeddingVersion: testEmbeddingVersion,
-        }),
-      ]),
-    )
+    expectValidVectorSearchResults(json.results, {
+      checkShape: true,
+      expectedTitle: {
+        title: titleAndQuery,
+        postId: String(post.id),
+        embeddingVersion: testEmbeddingVersion,
+      },
+    })
   })
 
   test('search results are ordered by similarity (highest first)', async () => {
     const response = await performVectorSearch(payload, titleAndQuery)
     const json = await response.json()
 
-    expect(json.results.length).toBeGreaterThan(1)
-
-    // Check that results are ordered by similarity (descending)
-    for (let i = 0; i < json.results.length - 1; i++) {
-      expect(json.results[i].similarity).toBeGreaterThanOrEqual(json.results[i + 1].similarity)
-    }
+    expectResultsOrderedBySimilarity(json.results)
   })
 
   test('search handles empty query gracefully', async () => {
@@ -280,8 +274,7 @@ describe('Search endpoint integration tests', () => {
         docId: { equals: String(post1.id) },
       })
       const jsonFiltered = await responseFiltered.json()
-      expect(jsonFiltered.results.length).toBeGreaterThan(0)
-      expect(jsonFiltered.results.every((r: any) => r.docId === String(post1.id))).toBe(true)
+      expectResultsRespectWhere(jsonFiltered.results, (r) => r.docId === String(post1.id))
     })
   })
 })

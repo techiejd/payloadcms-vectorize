@@ -26,10 +26,27 @@ import type {
 } from 'payloadcms-vectorize'
 import { getEmbeddingsTable } from '../drizzle/tables.js'
 
-export const createVectorSearchHandler = <TPoolNames extends KnowledgePoolName>(
+export const createVectorSearchHandlers = <TPoolNames extends KnowledgePoolName>(
   knowledgePools: Record<TPoolNames, KnowledgePoolDynamicConfig>,
 ) => {
-  const _vectorSearch: PayloadHandler = async (req) => {
+  const vectorSearch = async (
+    payload: BasePayload,
+    query: string,
+    knowledgePool: TPoolNames,
+    limit?: number,
+    where?: Where,
+  ) => {
+    const poolConfig = knowledgePools[knowledgePool]
+    // Generate embedding for the query using pool-specific embedQuery
+    const queryEmbedding = await (async () => {
+      const qE = await poolConfig.embedQuery(query)
+      return Array.isArray(qE) ? qE : Array.from(qE)
+    })()
+
+    // Perform cosine similarity search using Drizzle
+    return await performCosineSearch(payload, queryEmbedding, knowledgePool, limit, where)
+  }
+  const requestHandler: PayloadHandler = async (req) => {
     if (!req || !req.json) {
       return Response.json({ error: 'Request is required' }, { status: 400 })
     }
@@ -60,27 +77,14 @@ export const createVectorSearchHandler = <TPoolNames extends KnowledgePoolName>(
 
       const payload = req.payload
 
-      // Generate embedding for the query using pool-specific embedQuery
-      const queryEmbedding = await (async () => {
-        const qE = await poolConfig.embedQuery(query)
-        return Array.isArray(qE) ? qE : Array.from(qE)
-      })()
-
-      // Perform cosine similarity search using Drizzle
-      const results = await performCosineSearch(
-        payload,
-        queryEmbedding,
-        knowledgePool,
-        limit,
-        where,
-      )
+      const results = await vectorSearch(payload, query, knowledgePool, limit, where)
 
       return Response.json({ results })
     } catch (error) {
       return Response.json({ error: 'Internal server error' }, { status: 500 })
     }
   }
-  return _vectorSearch
+  return { vectorSearch, requestHandler }
 }
 
 async function performCosineSearch(

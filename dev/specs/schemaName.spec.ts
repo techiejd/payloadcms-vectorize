@@ -10,7 +10,7 @@ import type { PostgresPayload } from '../../src/types.js'
 
 import { buildDummyConfig, DIMS, integration, plugin } from './constants.js'
 import { createTestDb, waitForVectorizationJobs } from './utils.js'
-import { createVectorSearchHandler } from '../../src/endpoints/vectorSearch.js'
+import { createVectorSearchHandlers } from '../../src/endpoints/vectorSearch.js'
 import type { KnowledgePoolDynamicConfig } from 'payloadcms-vectorize'
 const CUSTOM_SCHEMA = 'custom'
 
@@ -173,7 +173,7 @@ describe('Custom schemaName support', () => {
         embeddingVersion: testEmbeddingVersion,
       },
     }
-    const searchHandler = createVectorSearchHandler(knowledgePools)
+    const searchHandler = createVectorSearchHandlers(knowledgePools).requestHandler
 
     const mockRequest = {
       json: async () => ({
