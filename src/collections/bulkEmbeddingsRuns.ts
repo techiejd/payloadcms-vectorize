@@ -90,6 +90,14 @@ export const createBulkEmbeddingsRunsCollection = (): CollectionConfig => ({
         description: 'Failure reason if the run ended in error',
       },
     },
+    {
+      name: 'failedChunkData',
+      type: 'json',
+      admin: {
+        description:
+          'Data about chunks that failed during completion (collection, documentId, chunkIndex)',
+      },
+    },
   ],
   timestamps: true,
   indexes: [

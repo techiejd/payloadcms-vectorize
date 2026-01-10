@@ -17,7 +17,12 @@ const dbName = `bulk_onerror_${Date.now()}`
 describe('Bulk embed - onError callback', () => {
   let payload: Payload
   let onErrorCalled = false
-  let onErrorArgs: { providerBatchIds: string[]; error: Error } | null = null
+  let onErrorArgs: {
+    providerBatchIds: string[]
+    error: Error
+    failedChunkData?: Array<{ collection: string; documentId: string; chunkIndex: number }>
+    failedChunkCount?: number
+  } | null = null
 
   beforeAll(async () => {
     await createTestDb({ dbName })

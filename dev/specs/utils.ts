@@ -80,7 +80,12 @@ type MockOptions = {
   /** Optional: flush after this many chunks (for testing multi-batch scenarios) */
   flushAfterChunks?: number
   /** Optional: callback to track onError calls for testing */
-  onErrorCallback?: (args: { providerBatchIds: string[]; error: Error }) => void
+  onErrorCallback?: (args: {
+    providerBatchIds: string[]
+    error: Error
+    failedChunkData?: Array<{ collection: string; documentId: string; chunkIndex: number }>
+    failedChunkCount?: number
+  }) => void
 }
 
 /**

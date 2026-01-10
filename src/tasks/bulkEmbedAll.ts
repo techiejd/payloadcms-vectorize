@@ -9,7 +9,12 @@ import {
 import { BULK_EMBEDDINGS_RUNS_SLUG } from '../collections/bulkEmbeddingsRuns.js'
 import { BULK_EMBEDDINGS_INPUT_METADATA_SLUG } from '../collections/bulkEmbeddingInputMetadata.js'
 import { BULK_EMBEDDINGS_BATCHES_SLUG } from '../collections/bulkEmbeddingsBatches.js'
-import { isPostgresPayload, PostgresPayload, BulkEmbeddingInput } from '../types.js'
+import {
+  isPostgresPayload,
+  PostgresPayload,
+  BulkEmbeddingInput,
+  FailedChunkData,
+} from '../types.js'
 import toSnakeCase from 'to-snake-case'
 
 type PrepareBulkEmbeddingTaskInput = {
@@ -315,9 +320,9 @@ export const createPollOrCompleteBulkEmbeddingTask = ({
         return { output: { runId: input.runId, status: 'polling' } }
       }
 
-      // All batches succeeded - complete the embeddings atomically
+      // All batches succeeded - complete the embeddings (writes successful chunks, tracks failures)
       if (allSucceeded) {
-        const completionResult = await completeAllBatchesAtomically({
+        const completionResult = await completeBatches({
           payload,
           runId: input.runId,
           poolName,
@@ -333,6 +338,10 @@ export const createPollOrCompleteBulkEmbeddingTask = ({
             succeeded: completionResult.succeededCount,
             failed: completionResult.failedCount,
             error: completionResult.error,
+            failedChunkData:
+              completionResult.failedChunkData.length > 0
+                ? completionResult.failedChunkData
+                : undefined,
             completedAt: new Date().toISOString(),
           },
         })
@@ -343,12 +352,23 @@ export const createPollOrCompleteBulkEmbeddingTask = ({
           where: { run: { equals: (run as any).id } },
         })
 
-        // If completion failed, call onError so user can clean up provider resources
-        if (!completionResult.success && callbacks.onError) {
+        // Call onError if completion failed OR if there were partial chunk failures
+        if (callbacks.onError && (!completionResult.success || completionResult.failedCount > 0)) {
           const providerBatchIds = batches.map((b: any) => b.providerBatchId as string)
           await callbacks.onError({
             providerBatchIds,
-            error: new Error(completionResult.error || 'Completion failed'),
+            error: new Error(
+              completionResult.error ||
+                (completionResult.failedCount > 0
+                  ? `${completionResult.failedCount} chunk(s) failed during completion`
+                  : 'Completion failed'),
+            ),
+            failedChunkData:
+              completionResult.failedChunkData.length > 0
+                ? completionResult.failedChunkData
+                : undefined,
+            failedChunkCount:
+              completionResult.failedCount > 0 ? completionResult.failedCount : undefined,
           })
         }
 
@@ -540,9 +560,13 @@ async function streamAndBatchMissingEmbeddings(args: {
 }
 
 /**
- * Complete all batches atomically - download all outputs and write all embeddings
+ * Complete all batches - download all outputs and write successful embeddings.
+ *
+ * Note: This function writes partial results. If some chunks fail during completion,
+ * successful embeddings are still written. Only failed chunks are skipped.
+ * The operation is atomic in that if an exception is thrown, nothing is written.
  */
-async function completeAllBatchesAtomically(args: {
+async function completeBatches(args: {
   payload: Payload
   runId: string
   poolName: KnowledgePoolName
@@ -554,6 +578,7 @@ async function completeAllBatchesAtomically(args: {
   success: boolean
   succeededCount: number
   failedCount: number
+  failedChunkData: FailedChunkData[]
   error?: string
 }> {
   const { payload, runId, poolName, batches, callbacks } = args
@@ -571,9 +596,22 @@ async function completeAllBatchesAtomically(args: {
       allOutputs.push(...outputs)
     }
 
-    // Filter successful outputs
+    // Filter successful outputs and collect failed chunk data
     const successfulOutputs = allOutputs.filter((o) => !o.error && o.embedding)
-    const failedCount = allOutputs.length - successfulOutputs.length
+    const failedChunkData: FailedChunkData[] = []
+    for (const output of allOutputs) {
+      if (output.error) {
+        const meta = metadataById.get(output.id)
+        if (meta) {
+          failedChunkData.push({
+            collection: meta.sourceCollection,
+            documentId: meta.docId,
+            chunkIndex: meta.chunkIndex,
+          })
+        }
+      }
+    }
+    const failedCount = failedChunkData.length
 
     // Collect unique doc keys for deletion
     const docKeys = new Set<string>()
@@ -631,6 +669,7 @@ async function completeAllBatchesAtomically(args: {
       success: true,
       succeededCount: successfulOutputs.length,
       failedCount,
+      failedChunkData,
     }
   } catch (error) {
     const errorMessage = (error as Error).message || String(error)
@@ -638,6 +677,7 @@ async function completeAllBatchesAtomically(args: {
       success: false,
       succeededCount: 0,
       failedCount: 0,
+      failedChunkData: [],
       error: `Completion failed: ${errorMessage}`,
     }
   }

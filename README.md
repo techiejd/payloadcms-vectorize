@@ -342,21 +342,38 @@ type BulkEmbeddingOutput = {
 
 #### `onError` - Cleanup on Failure (Optional)
 
-Called when the bulk run fails. Use this to clean up provider-side resources (delete files, cancel batches). The run can be re-queued after cleanup.
+Called when the bulk run fails OR when there are partial chunk failures. Use this to clean up provider-side resources (delete files, cancel batches) and handle failed chunks. The run can be re-queued after cleanup.
 
 ```typescript
+type FailedChunkData = {
+  collection: string // Source collection slug
+  documentId: string // Source document ID
+  chunkIndex: number // Index of the chunk within the document
+}
+
 type OnBulkErrorArgs = {
   providerBatchIds: string[]
   error: Error
+  /** Data about chunks that failed during completion */
+  failedChunkData?: FailedChunkData[]
+  /** Count of failed chunks */
+  failedChunkCount?: number
 }
 ```
+
+**Error handling behavior:**
+
+- **Batch failures**: If any batch fails during polling, the entire run fails and `onError` is called.
+- **Partial chunk failures**: If individual chunks fail during completion (e.g., provider returned an error for specific inputs), the run still succeeds but `onError` is called with `failedChunkData` and `failedChunkCount`.
+- **Failed chunk data**: The `failedChunkData` array contains structured information about failed chunks, including `collection`, `documentId`, and `chunkIndex`. This data is also stored in the run record (`failedChunkData` field) for later inspection and potential retry.
+- **Partial success**: Successful embeddings are still written even when some chunks fail. Only the failed chunks are skipped.
 
 ### Bulk Task Model
 
 The plugin uses separate Payload jobs for reliability with long-running providers:
 
 - **`prepare-bulk-embedding`**: Streams through documents, calls your `addChunk` for each chunk, creates batch records.
-- **`poll-or-complete-bulk-embedding`**: Polls all batches, requeues itself until done, then atomically writes all embeddings.
+- **`poll-or-complete-bulk-embedding`**: Polls all batches, requeues itself until done, then writes all successful embeddings (partial chunk failures are allowed).
 
 ### Queue Configuration
 
@@ -512,7 +529,12 @@ Search for similar content using vector similarity.
 }
 ```
 
-The bulk embedding process is **atomic**: either all embeddings are written or none are. If any batch fails, the run is marked failed and no partial writes occur.
+The bulk embedding process has **two levels of atomicity**:
+
+- **Batch level**: If any batch fails during polling, the entire run fails and no embeddings are written. This is fully atomic.
+- **Chunk level**: If individual chunks fail during completion (e.g., provider returns errors for specific inputs), the run still succeeds and successful embeddings are written. Failed chunks are tracked in `failedChunkData` (with structured `collection`, `documentId`, and `chunkIndex` fields) and passed to the `onError` callback for cleanup.
+
+This design allows for partial success: if 100 chunks are processed and 2 fail, 98 embeddings are written and the 2 failures are tracked for potential retry.
 
 **Error Recovery:** If a run fails, you can re-queue it. If you provided an `onError` callback, it will be called with all `providerBatchIds` so you can clean up provider-side resources before retrying.
 

@@ -130,12 +130,26 @@ export type CompleteBatchArgs = {
   providerBatchId: string
 }
 
+/** Data about a failed chunk during bulk embedding completion */
+export type FailedChunkData = {
+  /** Source collection slug */
+  collection: string
+  /** Source document ID */
+  documentId: string
+  /** Index of the chunk within the document */
+  chunkIndex: number
+}
+
 /** Arguments passed to onError callback */
 export type OnBulkErrorArgs = {
   /** All provider batch IDs that were created during this run */
   providerBatchIds: string[]
   /** The error that caused the failure */
   error: Error
+  /** Optional: Data about chunks that failed during completion */
+  failedChunkData?: FailedChunkData[]
+  /** Optional: Count of failed chunks (for quick summary without iterating failedChunkData) */
+  failedChunkCount?: number
 }
 
 /**
