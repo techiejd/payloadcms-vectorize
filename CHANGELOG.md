@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## 0.5.0 - 2026-01-08
+## 0.5.0 - 2026-01-10
 
 ### Breaking Changes
 
@@ -24,6 +24,38 @@ All notable changes to this project will be documented in this file.
 - Added tests for bulk polling error conditions (`failed`, `canceled` statuses)
 - Added tests for bulk fan-in behavior (multiple documents processed in single run)
 - Improved test coverage for edge cases in bulk embedding workflow
+
+## 0.4.5 - 2025-01-09
+
+### Added
+
+- **Local API**: Added `payload.search()` and `payload.queueEmbed()` methods directly on the Payload instance for programmatic vector search without HTTP requests
+- `payload.search(params)` - Perform vector search programmatically with the same parameters as the HTTP endpoint
+- `payload.queueEmbed(params)` - Manually queue vectorization jobs for documents (by ID or with document object)
+- `isVectorizedPayload(payload)` - Type guard to check if a Payload instance has vectorize extensions
+
+### Example
+
+```typescript
+import { isVectorizedPayload, type VectorizedPayload } from 'payloadcms-vectorize'
+
+const payload = await getPayload({ config, cron: true })
+
+if (isVectorizedPayload(payload)) {
+  // Search programmatically
+  const results = await payload.search({
+    query: 'search query',
+    knowledgePool: 'main',
+    limit: 10,
+  })
+
+  // Queue embedding manually
+  await payload.queueEmbed({
+    collection: 'posts',
+    docId: 'post-id',
+  })
+}
+```
 
 ## 0.4.4 - 2025-01-08
 

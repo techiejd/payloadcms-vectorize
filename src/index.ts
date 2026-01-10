@@ -1,4 +1,4 @@
-import type { Config, Payload } from 'payload'
+import type { Config, Payload, PayloadRequest } from 'payload'
 import { customType } from '@payloadcms/db-postgres/drizzle/pg-core'
 import toSnakeCase from 'to-snake-case'
 
@@ -10,11 +10,12 @@ import type {
   KnowledgePoolStaticConfig,
   KnowledgePoolDynamicConfig,
   VectorizedPayload,
+  VectorSearchQuery,
 } from './types.js'
 import { isPostgresPayload } from './types.js'
 import type { PostgresAdapterArgs } from '@payloadcms/db-postgres'
 import { createVectorizeTask } from './tasks/vectorize.js'
-import { createVectorSearchHandler } from './endpoints/vectorSearch.js'
+import { createVectorSearchHandlers } from './endpoints/vectorSearch.js'
 import { clearEmbeddingsTables, registerEmbeddingsTable } from './drizzle/tables.js'
 import {
   createBulkEmbeddingsRunsCollection,
@@ -284,12 +285,45 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
         tasks,
       }
 
+      const collectionToEmbedQueue = new Map<
+        string,
+        (doc: any, payload: Payload, req?: PayloadRequest) => Promise<void>
+      >()
+
       // Extend configured collections with hooks
       for (const [collectionSlug, pools] of collectionToPools.entries()) {
         const collection = config.collections.find((c) => c.slug === collectionSlug)
         if (!collection) {
           throw new Error(`[payloadcms-vectorize] Collection ${collectionSlug} not found`)
         }
+
+        const embedQueue = async (doc: any, payload: Payload, req?: PayloadRequest) => {
+          // Queue vectorization jobs for ALL knowledge pools containing this collection
+          for (const { pool, dynamic } of pools) {
+            const collectionConfig = dynamic.collections[collectionSlug]
+            if (!collectionConfig) continue
+
+            // Only queue real-time vectorization if realTimeIngestionFn is provided
+            if (!dynamic.embeddingConfig.realTimeIngestionFn) continue
+            // If no realTimeIngestionFn, nothing happens on doc change
+            // User must trigger bulk embedding manually
+
+            await payload.jobs.queue<'payloadcms-vectorize:vectorize'>({
+              task: 'payloadcms-vectorize:vectorize',
+              input: {
+                doc,
+                collection: collectionSlug,
+                knowledgePool: pool,
+              },
+              req: req,
+              ...(pluginOptions.realtimeQueueName
+                ? { queue: pluginOptions.realtimeQueueName }
+                : {}),
+            })
+          }
+        }
+
+        collectionToEmbedQueue.set(collectionSlug, embedQueue)
 
         collection.hooks = {
           ...(collection.hooks || {}),
@@ -298,34 +332,7 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
             async (args) => {
               const { doc, req } = args
               const payload = req.payload
-
-              // Queue vectorization jobs for ALL knowledge pools containing this collection
-              for (const { pool, dynamic } of pools) {
-                const collectionConfig = dynamic.collections[collectionSlug]
-                if (!collectionConfig) continue
-
-                const { realTimeIngestionFn } = dynamic.embeddingConfig
-
-                // Only queue real-time vectorization if realTimeIngestionFn is provided
-                // Bulk embedding is only triggered manually via API (/vector-bulk-embed) or admin UI
-                if (realTimeIngestionFn) {
-                  await payload.jobs.queue<'payloadcms-vectorize:vectorize'>({
-                    task: 'payloadcms-vectorize:vectorize',
-                    input: {
-                      doc,
-                      collection: collectionSlug,
-                      knowledgePool: pool,
-                    },
-                    req: req,
-                    ...(pluginOptions.realtimeQueueName
-                      ? { queue: pluginOptions.realtimeQueueName }
-                      : {}),
-                  })
-                }
-                // If no realTimeIngestionFn, nothing happens on doc change
-                // User must trigger bulk embedding manually
-              }
-              return
+              return embedQueue(doc, payload, req)
             },
           ],
           afterDelete: [
@@ -358,19 +365,61 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
       }
 
       const incomingOnInit = config.onInit
+      const vectorSearchHandlers = createVectorSearchHandlers(pluginOptions.knowledgePools)
       config.onInit = async (payload) => {
         if (incomingOnInit)
           await incomingOnInit(payload)
 
           // Add _isBulkEmbedEnabled method to payload object
           // This allows checking if bulk embedding is enabled for a knowledge pool
-        ;(payload as VectorizedPayload<TPoolNames>)._isBulkEmbedEnabled = (
-          knowledgePool: TPoolNames,
-        ): boolean => {
-          const poolConfig = pluginOptions.knowledgePools[knowledgePool]
-          return !!poolConfig?.embeddingConfig?.bulkEmbeddingsFns
+        ;(payload as VectorizedPayload<TPoolNames>) = {
+          ...(payload as any),
+          _isBulkEmbedEnabled: (knowledgePool: TPoolNames): boolean => {
+            const poolConfig = pluginOptions.knowledgePools[knowledgePool]
+            return !!poolConfig?.embeddingConfig?.bulkEmbeddingsFns
+          },
+          search: (params: VectorSearchQuery<TPoolNames>) =>
+            vectorSearchHandlers.vectorSearch(
+              payload,
+              params.query,
+              params.knowledgePool,
+              params.limit,
+              params.where,
+            ),
+          queueEmbed: async (
+            params:
+              | {
+                  collection: string
+                  docId: string
+                }
+              | {
+                  collection: string
+                  doc: Record<string, any>
+                },
+          ) => {
+            const collection = params.collection
+            let doc: Record<string, any>
+            if ('docId' in params && params.docId) {
+              doc = await payload.findByID({
+                collection: collection as any,
+                id: params.docId,
+              })
+            } else if ('doc' in params && params.doc) {
+              doc = params.doc
+            } else {
+              throw new Error(
+                `[payloadcms-vectorize] queueEmbed requires either docId or doc parameter`,
+              )
+            }
+            const embedQueue = collectionToEmbedQueue.get(collection)
+            if (!embedQueue) {
+              throw new Error(
+                `[payloadcms-vectorize] Collection "${collection}" is not configured for vectorization`,
+              )
+            }
+            return embedQueue(doc, payload)
+          },
         }
-
         // Ensure pgvector artifacts for each knowledge pool
         for (const poolName in staticConfigs) {
           const staticConfig = staticConfigs[poolName]
@@ -393,7 +442,7 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
           {
             path,
             method: 'post' as const,
-            handler: createVectorSearchHandler(pluginOptions.knowledgePools),
+            handler: vectorSearchHandlers.requestHandler,
           },
           {
             path: '/vector-bulk-embed',

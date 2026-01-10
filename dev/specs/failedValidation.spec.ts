@@ -4,7 +4,7 @@ import { getPayload } from 'payload'
 import { describe, expect, test } from 'vitest'
 
 import { createVectorizeIntegration } from '../../src/index.js'
-import { waitForVectorizationJobs } from './utils.js'
+import { createTestDb, waitForVectorizationJobs } from './utils.js'
 
 const DIMS = 8
 
@@ -18,8 +18,9 @@ const { afterSchemaInitHook, payloadcmsVectorize } = createVectorizeIntegration(
   },
 })
 
-const buildMalformedConfig = async () =>
-  buildConfig({
+const buildMalformedConfig = async () => {
+  await createTestDb({ dbName: 'failed_validation_test' })
+  return buildConfig({
     jobs: {
       tasks: [],
       autoRun: [
@@ -40,7 +41,8 @@ const buildMalformedConfig = async () =>
       afterSchemaInit: [afterSchemaInitHook],
       pool: {
         connectionString:
-          process.env.DATABASE_URI || 'postgresql://postgres:password@localhost:5433/payload_test',
+          process.env.DATABASE_URI ||
+          'postgresql://postgres:password@localhost:5433/failed_validation_test',
       },
     }),
     plugins: [
@@ -64,6 +66,7 @@ const buildMalformedConfig = async () =>
     ],
     secret: 'failed-validation-secret',
   })
+}
 
 describe('Validation failures mark jobs as errored', () => {
   test('malformed chunk entry fails the vectorize job', async () => {

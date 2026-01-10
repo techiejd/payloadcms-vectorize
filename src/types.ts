@@ -7,6 +7,18 @@ export type VectorizedPayload<TPoolNames extends KnowledgePoolName = KnowledgePo
   Payload & {
     /** Check if bulk embedding is enabled for a knowledge pool */
     _isBulkEmbedEnabled: (knowledgePool: TPoolNames) => boolean
+    search: (params: VectorSearchQuery<TPoolNames>) => Promise<Array<VectorSearchResult>>
+    queueEmbed: (
+      params:
+        | {
+            collection: string
+            docId: string
+          }
+        | {
+            collection: string
+            doc: Record<string, any>
+          },
+    ) => Promise<void>
   }
 
 /**
@@ -14,7 +26,12 @@ export type VectorizedPayload<TPoolNames extends KnowledgePoolName = KnowledgePo
  */
 export function isVectorizedPayload(payload: Payload): payload is VectorizedPayload {
   return (
-    '_isBulkEmbedEnabled' in payload && typeof (payload as any)._isBulkEmbedEnabled === 'function'
+    '_isBulkEmbedEnabled' in payload &&
+    typeof (payload as any)._isBulkEmbedEnabled === 'function' &&
+    'search' in payload &&
+    typeof (payload as any).search === 'function' &&
+    'queueEmbed' in payload &&
+    typeof (payload as any).queueEmbed === 'function'
   )
 }
 
