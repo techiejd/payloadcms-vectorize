@@ -5,7 +5,7 @@ import { buildDummyConfig, DIMS, integration, plugin } from './constants.js'
 import { createTestDb, waitForVectorizationJobs } from './utils.js'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { chunkRichText, chunkText } from 'helpers/chunkers.js'
-import { createVectorSearchHandler } from '../../src/endpoints/vectorSearch.js'
+import { createVectorSearchHandlers } from '../../src/endpoints/vectorSearch.js'
 import type { KnowledgePoolDynamicConfig } from 'payloadcms-vectorize'
 
 describe('extensionFields', () => {
@@ -120,7 +120,7 @@ describe('extensionFields', () => {
     const knowledgePools: Record<string, KnowledgePoolDynamicConfig> = {
       default: defaultKnowledgePool,
     }
-    const searchHandler = createVectorSearchHandler(knowledgePools)
+    const searchHandler = createVectorSearchHandlers(knowledgePools).requestHandler
     const mockRequest = {
       json: async () => ({
         query: testQuery,

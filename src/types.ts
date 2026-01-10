@@ -1,5 +1,36 @@
 import type { CollectionSlug, Payload, Field, Where } from 'payload'
 
+/**
+ * Extended Payload type with vectorize plugin methods
+ */
+export type VectorizedPayload<TPoolNames extends KnowledgePoolName = KnowledgePoolName> =
+  Payload & {
+    search: (params: VectorSearchQuery<TPoolNames>) => Promise<Array<VectorSearchResult>>
+    queueEmbed: (
+      params:
+        | {
+            collection: string
+            docId: string
+          }
+        | {
+            collection: string
+            doc: Record<string, any>
+          },
+    ) => Promise<void>
+  }
+
+/**
+ * Type guard to check if a Payload instance has vectorize extensions
+ */
+export function isVectorizedPayload(payload: Payload): payload is VectorizedPayload {
+  return (
+    'search' in payload &&
+    typeof (payload as any).search === 'function' &&
+    'queueEmbed' in payload &&
+    typeof (payload as any).queueEmbed === 'function'
+  )
+}
+
 export type EmbedDocsFn = (texts: string[]) => Promise<number[][] | Float32Array[]>
 export type EmbedQueryFn = (text: string) => Promise<number[] | Float32Array>
 
