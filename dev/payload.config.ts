@@ -59,6 +59,10 @@ const { afterSchemaInitHook, payloadcmsVectorize } = createVectorizeIntegration(
     dims,
     ivfflatLists,
   },
+  failingBulkDefault: {
+    dims,
+    ivfflatLists,
+  },
 })
 
 const buildConfigWithPostgres = async () => {
@@ -170,6 +174,33 @@ const buildConfigWithPostgres = async () => {
               version: testEmbeddingVersion,
               queryFn: embedQuery,
               bulkEmbeddingsFns,
+            },
+          },
+          failingBulkDefault: {
+            collections: {
+              posts: {
+                toKnowledgePool: async (doc, payload) => {
+                  const chunks: Array<{ chunk: string }> = []
+                  // Process title
+                  if (doc.title) {
+                    const titleChunks = chunkText(doc.title)
+                    chunks.push(...titleChunks.map((chunk) => ({ chunk })))
+                  }
+                  // Process content
+                  if (doc.content) {
+                    const contentChunks = await chunkRichText(doc.content, payload)
+                    chunks.push(...contentChunks.map((chunk) => ({ chunk })))
+                  }
+                  return chunks
+                },
+              },
+            },
+            embeddingConfig: {
+              version: testEmbeddingVersion,
+              queryFn: embedQuery,
+              bulkEmbeddingsFns: createMockBulkEmbeddings({
+                statusSequence: ['queued', 'running', 'failed'],
+              }),
             },
           },
         },

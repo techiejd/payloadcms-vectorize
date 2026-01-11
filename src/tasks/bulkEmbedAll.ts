@@ -215,16 +215,28 @@ export const createPollOrCompleteBulkEmbeddingTask = ({
         return { output: { runId: input.runId, status: currentStatus } }
       }
 
-      // Load all batches for this run
+      // Load all batches for this run with pagination to handle >1000 batches
       // Convert runId to number for postgres relationship queries
       const runIdNum = parseInt(input.runId, 10)
-      const batchesResult = await payload.find({
-        collection: BULK_EMBEDDINGS_BATCHES_SLUG,
-        where: { run: { equals: runIdNum } },
-        limit: 1000,
-        sort: 'batchIndex',
-      })
-      const batches = (batchesResult as any)?.docs || []
+      const batches: any[] = []
+      let batchPage = 1
+      const batchLimit = 100 // Smaller pages for better memory management
+
+      while (true) {
+        const batchesResult = await payload.find({
+          collection: BULK_EMBEDDINGS_BATCHES_SLUG,
+          where: { run: { equals: runIdNum } },
+          limit: batchLimit,
+          page: batchPage,
+          sort: 'batchIndex',
+        })
+        const pageDocs = (batchesResult as any)?.docs || []
+        batches.push(...pageDocs)
+
+        const totalPages = (batchesResult as any)?.totalPages ?? batchPage
+        if (batchPage >= totalPages || pageDocs.length === 0) break
+        batchPage++
+      }
 
       if (batches.length === 0) {
         // No batches found - this shouldn't happen but handle gracefully
@@ -240,73 +252,155 @@ export const createPollOrCompleteBulkEmbeddingTask = ({
         return { output: { runId: input.runId, status: 'failed' } }
       }
 
-      // Poll each non-terminal batch
-      let allSucceeded = true
-      let anyFailed = false
+      // Poll each non-terminal batch and complete succeeded ones incrementally
       let anyRunning = false
+      let totalSucceeded = 0
+      let totalFailed = 0
+      const allFailedChunkData: FailedChunkData[] = []
+      const batchStatuses = new Map<string, string>() // Track batch statuses as we process
 
+      // Initialize with current statuses
       for (const batch of batches) {
-        const batchStatus = batch.status as string
-        if (TERMINAL_STATUSES.has(batchStatus)) {
-          if (batchStatus !== 'succeeded') {
-            anyFailed = true
-            allSucceeded = false
+        batchStatuses.set(String(batch.id), batch.status as string)
+        // Accumulate counts from already completed batches
+        if (TERMINAL_STATUSES.has(batch.status as string)) {
+          if (batch.status === 'succeeded') {
+            totalSucceeded += batch.succeededCount || 0
+            totalFailed += batch.failedCount || 0
           }
-          continue
-        }
-
-        // Poll this batch
-        const pollResult = await callbacks.pollBatch({
-          providerBatchId: batch.providerBatchId,
-        })
-
-        // Update batch status
-        await payload.update({
-          id: batch.id,
-          collection: BULK_EMBEDDINGS_BATCHES_SLUG,
-          data: {
-            status: pollResult.status,
-            error: pollResult.error,
-            ...(TERMINAL_STATUSES.has(pollResult.status)
-              ? { completedAt: new Date().toISOString() }
-              : {}),
-          },
-        })
-
-        if (pollResult.status === 'failed' || pollResult.status === 'canceled') {
-          anyFailed = true
-          allSucceeded = false
-        } else if (!TERMINAL_STATUSES.has(pollResult.status)) {
-          anyRunning = true
-          allSucceeded = false
         }
       }
 
-      // If any batch failed, mark the entire run as failed
-      if (anyFailed) {
+      for (const batch of batches) {
+        const batchStatus = batchStatuses.get(String(batch.id)) as string
+
+        // Skip batches that are already completed
+        if (TERMINAL_STATUSES.has(batchStatus)) {
+          continue
+        }
+
+        // Poll batch and complete if succeeded (streams embeddings via onChunk callback)
+        try {
+          const completionResult = await pollAndCompleteSingleBatch({
+            payload,
+            runId: input.runId,
+            poolName,
+            batch,
+            callbacks,
+          })
+
+          // Update batch status and counts
+          await payload.update({
+            id: batch.id,
+            collection: BULK_EMBEDDINGS_BATCHES_SLUG,
+            data: {
+              status: completionResult.status,
+              error: completionResult.error,
+              ...(TERMINAL_STATUSES.has(completionResult.status)
+                ? { completedAt: new Date().toISOString() }
+                : {}),
+              ...(completionResult.status === 'succeeded'
+                ? {
+                    succeededCount: completionResult.succeededCount,
+                    failedCount: completionResult.failedCount,
+                  }
+                : {}),
+            },
+          })
+
+          // Track the new status
+          batchStatuses.set(String(batch.id), completionResult.status)
+
+          // Accumulate counts from newly succeeded batches
+          if (completionResult.status === 'succeeded') {
+            totalSucceeded += completionResult.succeededCount
+            totalFailed += completionResult.failedCount
+            allFailedChunkData.push(...completionResult.failedChunkData)
+          }
+
+          // Track if still running (queued or running)
+          if (completionResult.status === 'queued' || completionResult.status === 'running') {
+            anyRunning = true
+          }
+          // Failed/canceled batches - leave them, can be re-run later
+        } catch (error) {
+          // Completion failed - mark batch as failed
+          const errorMessage = (error as Error).message || String(error)
+          await payload.update({
+            id: batch.id,
+            collection: BULK_EMBEDDINGS_BATCHES_SLUG,
+            data: {
+              status: 'failed',
+              error: `Completion failed: ${errorMessage}`,
+              completedAt: new Date().toISOString(),
+            },
+          })
+          batchStatuses.set(String(batch.id), 'failed')
+        }
+      }
+
+      // Check if all batches are complete
+      const allBatchesComplete = Array.from(batchStatuses.values()).every((status) =>
+        TERMINAL_STATUSES.has(status),
+      )
+
+      if (allBatchesComplete) {
+        // All batches are done - finalize the run
+        const hasAnySucceeded = Array.from(batchStatuses.values()).some(
+          (status) => status === 'succeeded',
+        )
+
+        // Check if any batches are failed (not just canceled) - we keep metadata for potential retries
+        const hasFailedBatches = Array.from(batchStatuses.values()).some(
+          (status) => status === 'failed',
+        )
+
         await payload.update({
           id: input.runId,
           collection: BULK_EMBEDDINGS_RUNS_SLUG,
           data: {
-            status: 'failed',
-            error: 'One or more batches failed',
+            status: hasAnySucceeded ? 'succeeded' : 'failed',
+            succeeded: totalSucceeded,
+            failed: totalFailed,
+            failedChunkData: allFailedChunkData.length > 0 ? allFailedChunkData : undefined,
             completedAt: new Date().toISOString(),
           },
         })
-        // Cleanup metadata without writing embeddings
-        await payload.delete({
-          collection: BULK_EMBEDDINGS_INPUT_METADATA_SLUG,
-          where: { run: { equals: (run as any).id } },
-        })
-        // Call onError callback so user can clean up provider-side resources
-        if (callbacks.onError) {
+
+        // Cleanup metadata for succeeded batches only
+        // Keep metadata for failed batches to allow retry functionality
+        const succeededBatchIds = Array.from(batchStatuses.entries())
+          .filter(([_, status]) => status === 'succeeded')
+          .map(([id, _]) => parseInt(id, 10))
+
+        if (succeededBatchIds.length > 0) {
+          await payload.delete({
+            collection: BULK_EMBEDDINGS_INPUT_METADATA_SLUG,
+            where: { batch: { in: succeededBatchIds } },
+          })
+        }
+
+        // Call onError if there were any failures
+        if (callbacks.onError && (totalFailed > 0 || !hasAnySucceeded)) {
           const providerBatchIds = batches.map((b: any) => b.providerBatchId as string)
           await callbacks.onError({
             providerBatchIds,
-            error: new Error('One or more batches failed'),
+            error: new Error(
+              totalFailed > 0
+                ? `${totalFailed} chunk(s) failed during completion`
+                : 'All batches failed',
+            ),
+            failedChunkData: allFailedChunkData.length > 0 ? allFailedChunkData : undefined,
+            failedChunkCount: totalFailed > 0 ? totalFailed : undefined,
           })
         }
-        return { output: { runId: input.runId, status: 'failed' } }
+
+        return {
+          output: {
+            runId: input.runId,
+            status: hasAnySucceeded ? 'succeeded' : 'failed',
+          },
+        }
       }
 
       // If still running, requeue this task
@@ -320,67 +414,47 @@ export const createPollOrCompleteBulkEmbeddingTask = ({
         return { output: { runId: input.runId, status: 'polling' } }
       }
 
-      // All batches succeeded - complete the embeddings (writes successful chunks, tracks failures)
-      if (allSucceeded) {
-        const completionResult = await completeBatches({
-          payload,
-          runId: input.runId,
-          poolName,
-          batches,
-          callbacks,
-        })
+      // Edge case: allBatchesComplete is false but anyRunning is false
+      // This happens when all batches are in 'canceled' or 'failed' status but we didn't detect it above
+      // Check if all batches are canceled
+      const allCanceled = Array.from(batchStatuses.values()).every(
+        (status) => status === 'canceled',
+      )
 
+      if (allCanceled) {
         await payload.update({
           id: input.runId,
           collection: BULK_EMBEDDINGS_RUNS_SLUG,
           data: {
-            status: completionResult.success ? 'succeeded' : 'failed',
-            succeeded: completionResult.succeededCount,
-            failed: completionResult.failedCount,
-            error: completionResult.error,
-            failedChunkData:
-              completionResult.failedChunkData.length > 0
-                ? completionResult.failedChunkData
-                : undefined,
+            status: 'canceled',
             completedAt: new Date().toISOString(),
           },
         })
-
-        // Cleanup metadata
-        await payload.delete({
-          collection: BULK_EMBEDDINGS_INPUT_METADATA_SLUG,
-          where: { run: { equals: (run as any).id } },
-        })
-
-        // Call onError if completion failed OR if there were partial chunk failures
-        if (callbacks.onError && (!completionResult.success || completionResult.failedCount > 0)) {
-          const providerBatchIds = batches.map((b: any) => b.providerBatchId as string)
-          await callbacks.onError({
-            providerBatchIds,
-            error: new Error(
-              completionResult.error ||
-                (completionResult.failedCount > 0
-                  ? `${completionResult.failedCount} chunk(s) failed during completion`
-                  : 'Completion failed'),
-            ),
-            failedChunkData:
-              completionResult.failedChunkData.length > 0
-                ? completionResult.failedChunkData
-                : undefined,
-            failedChunkCount:
-              completionResult.failedCount > 0 ? completionResult.failedCount : undefined,
-          })
-        }
-
-        return {
-          output: {
-            runId: input.runId,
-            status: completionResult.success ? 'succeeded' : 'failed',
-          },
-        }
+        return { output: { runId: input.runId, status: 'canceled' } }
       }
 
-      return { output: { runId: input.runId, status: 'unknown' } }
+      // Fallback: mark as failed with diagnostic info
+      const statusCounts = Array.from(batchStatuses.values()).reduce(
+        (acc, status) => {
+          acc[status] = (acc[status] || 0) + 1
+          return acc
+        },
+        {} as Record<string, number>,
+      )
+      payload.logger.warn(
+        `[payloadcms-vectorize] Run ${input.runId} reached unexpected state. Batch statuses: ${JSON.stringify(statusCounts)}`,
+      )
+
+      await payload.update({
+        id: input.runId,
+        collection: BULK_EMBEDDINGS_RUNS_SLUG,
+        data: {
+          status: 'failed',
+          error: `Run reached unexpected state. Batch statuses: ${JSON.stringify(statusCounts)}`,
+          completedAt: new Date().toISOString(),
+        },
+      })
+      return { output: { runId: input.runId, status: 'failed' } }
     },
   }
 
@@ -390,6 +464,10 @@ export const createPollOrCompleteBulkEmbeddingTask = ({
 /**
  * Stream through missing embeddings, calling addChunk for each.
  * User controls batching via addChunk return value.
+ *
+ * Uses a two-pass approach:
+ * 1. First pass: count total chunks to know when we reach the last one
+ * 2. Second pass: stream chunks without holding all in memory
  */
 async function streamAndBatchMissingEmbeddings(args: {
   payload: Payload
@@ -419,15 +497,14 @@ async function streamAndBatchMissingEmbeddings(args: {
 
   const includeAll = versionMismatch || !hasBaseline
   const lastCompletedAtDate = lastBulkCompletedAt ? new Date(lastBulkCompletedAt) : undefined
-
-  let batchIndex = 0
-  let totalInputs = 0
   const collectionSlugs = Object.keys(dynamicConfig.collections)
 
-  // Collect all chunks first to know which is the last one
-  const allChunks: CollectedEmbeddingInput[] = []
+  // First pass: count total chunks to know the last one
+  // We store minimal info (docId + chunkCount) to avoid OOM
+  type DocChunkInfo = { collectionSlug: string; docId: string; chunkCount: number }
+  const docsToProcess: DocChunkInfo[] = []
+  let totalChunkCount = 0
 
-  // Iterate through all collections and their documents
   for (const collectionSlug of collectionSlugs) {
     const collectionConfig = dynamicConfig.collections[collectionSlug]
     if (!collectionConfig) continue
@@ -436,7 +513,6 @@ async function streamAndBatchMissingEmbeddings(args: {
     let page = 1
     const limit = 50
 
-    // Paginate through source collection docs
     while (true) {
       const res = await payload.find({
         collection: collectionSlug,
@@ -465,22 +541,14 @@ async function streamAndBatchMissingEmbeddings(args: {
         if (!shouldInclude) continue
 
         const chunkData = await toKnowledgePool(doc, payload)
-        for (let idx = 0; idx < chunkData.length; idx++) {
-          const chunkEntry = chunkData[idx]
-          if (!chunkEntry?.chunk) continue
-
-          const { chunk, ...extensionFields } = chunkEntry
-          allChunks.push({
-            id: `${collectionSlug}:${doc.id}:${idx}`,
-            text: chunk,
-            metadata: {
-              sourceCollection: collectionSlug,
-              docId: String(doc.id),
-              chunkIndex: idx,
-              embeddingVersion,
-              extensionFields,
-            },
+        const validChunkCount = chunkData.filter((c) => c?.chunk).length
+        if (validChunkCount > 0) {
+          docsToProcess.push({
+            collectionSlug,
+            docId: String(doc.id),
+            chunkCount: validChunkCount,
           })
+          totalChunkCount += validChunkCount
         }
       }
 
@@ -489,70 +557,108 @@ async function streamAndBatchMissingEmbeddings(args: {
     }
   }
 
-  // Track pending chunks - plugin manages this queue
+  // If no chunks, return early
+  if (totalChunkCount === 0) {
+    return { batchCount: 0, totalInputs: 0 }
+  }
+
+  // Second pass: stream chunks without holding all in memory
+  let batchIndex = 0
+  let totalInputs = 0
+  let processedChunkCount = 0
   const pendingChunks: CollectedEmbeddingInput[] = []
 
-  // Stream chunks to addChunk, tracking which is last
-  for (let i = 0; i < allChunks.length; i++) {
-    const collectedChunk = allChunks[i]
-    const isLastChunk = i === allChunks.length - 1
+  for (const docInfo of docsToProcess) {
+    const collectionConfig = dynamicConfig.collections[docInfo.collectionSlug]
+    if (!collectionConfig) continue
 
-    // Add to pending queue BEFORE calling addChunk
-    pendingChunks.push(collectedChunk)
-
-    const submission = await addChunk({
-      chunk: { id: collectedChunk.id, text: collectedChunk.text },
-      isLastChunk,
+    // Re-fetch the document to get its data
+    const doc = await payload.findByID({
+      collection: docInfo.collectionSlug as any,
+      id: docInfo.docId,
     })
+    if (!doc) continue
 
-    if (submission) {
-      // User submitted a batch
-      // - If isLastChunk: all pending chunks were submitted
-      // - If not isLastChunk: all except current were submitted (current starts fresh)
-      let submittedChunks: CollectedEmbeddingInput[]
-      if (isLastChunk) {
-        submittedChunks = pendingChunks.splice(0)
-      } else {
-        submittedChunks = pendingChunks.splice(0, pendingChunks.length - 1)
+    const toKnowledgePool = collectionConfig.toKnowledgePool
+    const chunkData = await toKnowledgePool(doc, payload)
+
+    for (let idx = 0; idx < chunkData.length; idx++) {
+      const chunkEntry = chunkData[idx]
+      if (!chunkEntry?.chunk) continue
+
+      processedChunkCount++
+      const isLastChunk = processedChunkCount === totalChunkCount
+
+      const { chunk, ...extensionFields } = chunkEntry
+      const collectedChunk: CollectedEmbeddingInput = {
+        id: `${docInfo.collectionSlug}:${doc.id}:${idx}`,
+        text: chunk,
+        metadata: {
+          sourceCollection: docInfo.collectionSlug,
+          docId: String(doc.id),
+          chunkIndex: idx,
+          embeddingVersion,
+          extensionFields,
+        },
       }
 
-      // Convert runId to number for postgres relationships
-      const runIdNum = parseInt(runId, 10)
+      // Add to pending queue BEFORE calling addChunk
+      pendingChunks.push(collectedChunk)
 
-      // Store metadata for submitted chunks
-      await Promise.all(
-        submittedChunks.map((chunk) =>
-          payload.create({
-            collection: BULK_EMBEDDINGS_INPUT_METADATA_SLUG,
-            data: {
-              run: runIdNum,
-              inputId: chunk.id,
-              text: chunk.text,
-              sourceCollection: chunk.metadata.sourceCollection,
-              docId: chunk.metadata.docId,
-              chunkIndex: chunk.metadata.chunkIndex,
-              embeddingVersion: chunk.metadata.embeddingVersion,
-              extensionFields: chunk.metadata.extensionFields,
-            },
-          }),
-        ),
-      )
-
-      // Create batch record
-      await payload.create({
-        collection: BULK_EMBEDDINGS_BATCHES_SLUG,
-        data: {
-          run: runIdNum,
-          batchIndex,
-          providerBatchId: submission.providerBatchId,
-          status: 'queued',
-          inputCount: submittedChunks.length,
-          submittedAt: new Date().toISOString(),
-        },
+      const submission = await addChunk({
+        chunk: { id: collectedChunk.id, text: collectedChunk.text },
+        isLastChunk,
       })
 
-      totalInputs += submittedChunks.length
-      batchIndex++
+      if (submission) {
+        // User submitted a batch
+        // - If isLastChunk: all pending chunks were submitted
+        // - If not isLastChunk: all except current were submitted (current starts fresh)
+        let submittedChunks: CollectedEmbeddingInput[]
+        if (isLastChunk) {
+          submittedChunks = pendingChunks.splice(0)
+        } else {
+          submittedChunks = pendingChunks.splice(0, pendingChunks.length - 1)
+        }
+
+        // Convert runId to number for postgres relationships
+        const runIdNum = parseInt(runId, 10)
+
+        // Store metadata for submitted chunks
+        await Promise.all(
+          submittedChunks.map((c) =>
+            payload.create({
+              collection: BULK_EMBEDDINGS_INPUT_METADATA_SLUG,
+              data: {
+                run: runIdNum,
+                inputId: c.id,
+                text: c.text,
+                sourceCollection: c.metadata.sourceCollection,
+                docId: c.metadata.docId,
+                chunkIndex: c.metadata.chunkIndex,
+                embeddingVersion: c.metadata.embeddingVersion,
+                extensionFields: c.metadata.extensionFields,
+              },
+            }),
+          ),
+        )
+
+        // Create batch record
+        await payload.create({
+          collection: BULK_EMBEDDINGS_BATCHES_SLUG,
+          data: {
+            run: runIdNum,
+            batchIndex,
+            providerBatchId: submission.providerBatchId,
+            status: 'queued',
+            inputCount: submittedChunks.length,
+            submittedAt: new Date().toISOString(),
+          },
+        })
+
+        totalInputs += submittedChunks.length
+        batchIndex++
+      }
     }
   }
 
@@ -560,86 +666,141 @@ async function streamAndBatchMissingEmbeddings(args: {
 }
 
 /**
- * Complete all batches - download all outputs and write successful embeddings.
- *
- * Note: This function writes partial results. If some chunks fail during completion,
- * successful embeddings are still written. Only failed chunks are skipped.
- * The operation is atomic in that if an exception is thrown, nothing is written.
+ * Check if a source document exists
  */
-async function completeBatches(args: {
+async function documentExists(args: {
+  payload: Payload
+  collection: string
+  docId: string
+}): Promise<boolean> {
+  const { payload, collection, docId } = args
+  try {
+    await payload.findByID({
+      collection: collection as any,
+      id: docId,
+    })
+    return true
+  } catch (error) {
+    // Document not found or other error
+    return false
+  }
+}
+
+/**
+ * Poll a single batch and complete if succeeded - stream outputs and write embeddings incrementally.
+ * Checks document existence before writing each embedding (skips deleted docs).
+ * Returns both the batch status and completion counts.
+ */
+async function pollAndCompleteSingleBatch(args: {
   payload: Payload
   runId: string
   poolName: KnowledgePoolName
-  batches: any[]
+  batch: any
   callbacks: {
-    completeBatch: (args: { providerBatchId: string }) => Promise<BulkEmbeddingOutput[]>
+    pollOrCompleteBatch: (args: {
+      providerBatchId: string
+      onChunk: (chunk: BulkEmbeddingOutput) => Promise<void>
+    }) => Promise<{ status: string; error?: string }>
   }
 }): Promise<{
-  success: boolean
+  status: string
+  error?: string
   succeededCount: number
   failedCount: number
   failedChunkData: FailedChunkData[]
-  error?: string
 }> {
-  const { payload, runId, poolName, batches, callbacks } = args
+  const { payload, runId, poolName, batch, callbacks } = args
 
-  try {
-    // Load all metadata for this run
-    const metadataById = await loadInputMetadataByRun({ payload, runId })
+  let succeededCount = 0
+  let failedCount = 0
+  const failedChunkData: FailedChunkData[] = []
+  const processedDocs = new Set<string>() // Track which docs we've processed (for deletion)
 
-    // Collect all outputs from all batches
-    const allOutputs: BulkEmbeddingOutput[] = []
-    for (const batch of batches) {
-      const outputs = await callbacks.completeBatch({
-        providerBatchId: batch.providerBatchId,
+  // Poll batch and stream chunks when complete
+  const pollResult = await callbacks.pollOrCompleteBatch({
+    providerBatchId: batch.providerBatchId,
+    onChunk: async (output: BulkEmbeddingOutput) => {
+      // Lookup metadata on-demand (O(1) with index) instead of loading all into memory
+      const meta = await getMetadataByInputId({
+        payload,
+        runId,
+        inputId: output.id,
       })
-      allOutputs.push(...outputs)
-    }
+      if (!meta) {
+        // Metadata not found - log and skip this chunk (may have been deleted or cleanup ran)
+        payload.logger.warn(
+          `[payloadcms-vectorize] Metadata not found for chunk ${output.id} in run ${runId}. Skipping chunk.`,
+        )
+        failedCount++
+        return
+      }
 
-    // Filter successful outputs and collect failed chunk data
-    const successfulOutputs = allOutputs.filter((o) => !o.error && o.embedding)
-    const failedChunkData: FailedChunkData[] = []
-    for (const output of allOutputs) {
-      if (output.error) {
-        const meta = metadataById.get(output.id)
-        if (meta) {
-          failedChunkData.push({
-            collection: meta.sourceCollection,
-            documentId: meta.docId,
-            chunkIndex: meta.chunkIndex,
+      // Check if document still exists (may have been deleted during bulk embedding)
+      const docExists = await documentExists({
+        payload,
+        collection: meta.sourceCollection,
+        docId: meta.docId,
+      })
+
+      if (!docExists) {
+        // Document was deleted - skip this chunk and clean up metadata
+        await payload.delete({
+          collection: BULK_EMBEDDINGS_INPUT_METADATA_SLUG,
+          where: {
+            and: [{ run: { equals: parseInt(runId, 10) } }, { inputId: { equals: output.id } }],
+          },
+        })
+        failedCount++
+        failedChunkData.push({
+          collection: meta.sourceCollection,
+          documentId: meta.docId,
+          chunkIndex: meta.chunkIndex,
+        })
+        return
+      }
+
+      // Handle errors from provider
+      if (output.error || !output.embedding) {
+        failedCount++
+        failedChunkData.push({
+          collection: meta.sourceCollection,
+          documentId: meta.docId,
+          chunkIndex: meta.chunkIndex,
+        })
+        return
+      }
+
+      // Track this doc for potential deletion of old embeddings
+      const docKey = `${meta.sourceCollection}:${meta.docId}`
+      const isFirstChunkForDoc = !processedDocs.has(docKey)
+
+      if (isFirstChunkForDoc) {
+        processedDocs.add(docKey)
+        // Check if embeddings already exist for this document+version (from a previous batch)
+        const hasCurrentEmbedding = await docHasEmbeddingVersion({
+          payload,
+          poolName,
+          sourceCollection: meta.sourceCollection,
+          docId: meta.docId,
+          embeddingVersion: meta.embeddingVersion,
+        })
+
+        // Only delete if no embeddings exist for this version (they're from an old version)
+        if (!hasCurrentEmbedding) {
+          // Delete existing embeddings for this document (from old version)
+          await payload.delete({
+            collection: poolName,
+            where: {
+              and: [
+                { sourceCollection: { equals: meta.sourceCollection } },
+                { docId: { equals: String(meta.docId) } },
+              ],
+            },
           })
         }
       }
-    }
-    const failedCount = failedChunkData.length
 
-    // Collect unique doc keys for deletion
-    const docKeys = new Set<string>()
-    for (const output of successfulOutputs) {
-      const meta = metadataById.get(output.id)
-      if (!meta) continue
-      docKeys.add(`${meta.sourceCollection}:${meta.docId}`)
-    }
-
-    // Delete existing embeddings for docs we're about to update
-    for (const key of docKeys) {
-      const [sourceCollection, docId] = key.split(':')
-      await payload.delete({
-        collection: poolName,
-        where: {
-          and: [
-            { sourceCollection: { equals: sourceCollection } },
-            { docId: { equals: String(docId) } },
-          ],
-        },
-      })
-    }
-
-    // Write all new embeddings
-    for (const output of successfulOutputs) {
-      const meta = metadataById.get(output.id)
-      if (!meta || !output.embedding) continue
-
+      // Write the embedding
       const embeddingArray = Array.isArray(output.embedding)
         ? output.embedding
         : Array.from(output.embedding)
@@ -663,23 +824,17 @@ async function completeBatches(args: {
         vector: embeddingArray,
         id: String((created as any)?.id ?? ''),
       })
-    }
 
-    return {
-      success: true,
-      succeededCount: successfulOutputs.length,
-      failedCount,
-      failedChunkData,
-    }
-  } catch (error) {
-    const errorMessage = (error as Error).message || String(error)
-    return {
-      success: false,
-      succeededCount: 0,
-      failedCount: 0,
-      failedChunkData: [],
-      error: `Completion failed: ${errorMessage}`,
-    }
+      succeededCount++
+    },
+  })
+
+  return {
+    status: pollResult.status,
+    error: pollResult.error,
+    succeededCount,
+    failedCount,
+    failedChunkData,
   }
 }
 
@@ -733,63 +888,43 @@ async function docHasEmbeddingVersion(args: {
   return (existing as any)?.totalDocs > 0
 }
 
-async function loadInputMetadataByRun(args: { payload: Payload; runId: string }): Promise<
-  Map<
-    string,
-    {
-      text: string
-      sourceCollection: string
-      docId: string
-      chunkIndex: number
-      embeddingVersion: string
-      extensionFields?: Record<string, any>
-    }
-  >
-> {
-  const { payload, runId } = args
-  const map = new Map<
-    string,
-    {
-      text: string
-      sourceCollection: string
-      docId: string
-      chunkIndex: number
-      embeddingVersion: string
-      extensionFields?: Record<string, any>
-    }
-  >()
-
-  // Convert runId to number for postgres relationship queries
+/**
+ * Lookup metadata for a single input by runId + inputId.
+ * Uses the composite index ['run', 'inputId'] for O(1) lookup.
+ * This approach uses constant memory instead of loading all metadata into memory.
+ */
+async function getMetadataByInputId(args: {
+  payload: Payload
+  runId: string
+  inputId: string
+}): Promise<{
+  text: string
+  sourceCollection: string
+  docId: string
+  chunkIndex: number
+  embeddingVersion: string
+  extensionFields?: Record<string, any>
+} | null> {
+  const { payload, runId, inputId } = args
   const runIdNum = parseInt(runId, 10)
 
-  let page = 1
-  const limit = 100
-  while (true) {
-    const res = await payload.find({
-      collection: BULK_EMBEDDINGS_INPUT_METADATA_SLUG,
-      page,
-      limit,
-      where: { run: { equals: runIdNum } },
-      sort: 'inputId',
-    })
-    const docs = (res as any)?.docs || []
-    if (!docs.length) break
+  const result = await payload.find({
+    collection: BULK_EMBEDDINGS_INPUT_METADATA_SLUG,
+    where: {
+      and: [{ run: { equals: runIdNum } }, { inputId: { equals: inputId } }],
+    },
+    limit: 1,
+  })
 
-    for (const doc of docs) {
-      map.set(String(doc.inputId), {
-        text: doc.text,
-        sourceCollection: doc.sourceCollection,
-        docId: String(doc.docId),
-        chunkIndex: doc.chunkIndex,
-        embeddingVersion: doc.embeddingVersion,
-        extensionFields: doc.extensionFields || undefined,
-      })
-    }
+  const doc = (result as any)?.docs?.[0]
+  if (!doc) return null
 
-    const totalPages = (res as any)?.totalPages ?? page
-    page++
-    if (page > totalPages) break
+  return {
+    text: doc.text,
+    sourceCollection: doc.sourceCollection,
+    docId: String(doc.docId),
+    chunkIndex: doc.chunkIndex,
+    embeddingVersion: doc.embeddingVersion,
+    extensionFields: doc.extensionFields || undefined,
   }
-
-  return map
 }

@@ -71,5 +71,8 @@ export const createBulkEmbeddingInputMetadataCollection = (): CollectionConfig =
     {
       fields: ['run'],
     },
+    {
+      fields: ['sourceCollection', 'docId'],
+    },
   ],
 })

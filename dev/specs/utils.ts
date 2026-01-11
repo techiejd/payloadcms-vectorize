@@ -129,31 +129,31 @@ export function createMockBulkEmbeddings(
       return null
     },
 
-    pollBatch: async ({ providerBatchId }) => {
+    pollOrCompleteBatch: async ({ providerBatchId, onChunk }) => {
       const callCount = batchPollCount.get(providerBatchId) ?? 0
       batchPollCount.set(providerBatchId, callCount + 1)
       const status = statusSequence[Math.min(callCount, statusSequence.length - 1)]
-      return {
-        status,
-      }
-    },
 
-    completeBatch: async ({ providerBatchId }) => {
-      const inputs = batchInputs.get(providerBatchId) ?? []
-      if (!inputs.length) {
-        return []
+      // If succeeded, stream the outputs via onChunk
+      if (status === 'succeeded') {
+        const inputs = batchInputs.get(providerBatchId) ?? []
+        if (inputs.length) {
+          const vectors = await embeddings(inputs.map((i) => i.text))
+          for (let idx = 0; idx < inputs.length; idx++) {
+            const input = inputs[idx]
+            const shouldFail = partialFailure?.failIds?.includes(input.id)
+            const output = shouldFail
+              ? { id: input.id, error: 'fail' }
+              : { id: input.id, embedding: vectors[idx] }
+            await onChunk(output)
+          }
+        }
+        // Clean up state
+        batchInputs.delete(providerBatchId)
+        batchPollCount.delete(providerBatchId)
       }
-      const vectors = await embeddings(inputs.map((i) => i.text))
-      const outputs = inputs.map((input, idx) => {
-        const shouldFail = partialFailure?.failIds?.includes(input.id)
-        return shouldFail
-          ? { id: input.id, error: 'fail' }
-          : { id: input.id, embedding: vectors[idx] }
-      })
-      // Clean up state
-      batchInputs.delete(providerBatchId)
-      batchPollCount.delete(providerBatchId)
-      return outputs
+
+      return { status }
     },
 
     onError: async ({ providerBatchIds, error }) => {

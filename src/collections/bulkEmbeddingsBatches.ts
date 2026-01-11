@@ -22,6 +22,19 @@ export const createBulkEmbeddingsBatchesCollection = (): CollectionConfig => ({
     description:
       'Individual batches within a bulk embedding run. Created when input count exceeds file limits.',
     defaultColumns: ['run', 'batchIndex', 'status', 'inputCount', 'succeededCount', 'failedCount'],
+    components: {
+      edit: {
+        beforeDocumentControls: [
+          {
+            path: 'payloadcms-vectorize/client#RetryFailedBatchButton',
+            serverProps: {
+              batchId: ({ data }: { data: any }) => data?.id,
+              status: ({ data }: { data: any }) => data?.status,
+            },
+          },
+        ],
+      },
+    },
   },
   access: {
     // Anyone can read; only internal (local API) can mutate.

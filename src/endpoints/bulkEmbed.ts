@@ -1,6 +1,70 @@
-import type { PayloadHandler } from 'payload'
+import type { Payload, PayloadHandler } from 'payload'
 import { BULK_EMBEDDINGS_RUNS_SLUG } from '../collections/bulkEmbeddingsRuns.js'
-import type { KnowledgePoolDynamicConfig, KnowledgePoolName } from '../types.js'
+import type { BulkEmbedResult, KnowledgePoolDynamicConfig, KnowledgePoolName } from '../types.js'
+
+/**
+ * Core logic for starting a bulk embed run.
+ * Used by both the HTTP handler and VectorizedPayload.bulkEmbed method.
+ */
+export async function startBulkEmbed<
+  TPoolNames extends KnowledgePoolName = KnowledgePoolName,
+>(args: {
+  payload: Payload
+  knowledgePool: TPoolNames
+  knowledgePools: Record<TPoolNames, KnowledgePoolDynamicConfig>
+  queueName?: string
+}): Promise<BulkEmbedResult> {
+  const { payload, knowledgePool, knowledgePools, queueName } = args
+
+  const poolConfig = knowledgePools[knowledgePool]
+  if (!poolConfig) {
+    throw new Error(`[payloadcms-vectorize] Knowledge pool "${knowledgePool}" not found`)
+  }
+  if (!poolConfig.embeddingConfig.bulkEmbeddingsFns) {
+    throw new Error(
+      `[payloadcms-vectorize] Knowledge pool "${knowledgePool}" does not have bulk embedding configured`,
+    )
+  }
+
+  // Check for existing non-terminal run for this pool
+  const existingActiveRun = await payload.find({
+    collection: BULK_EMBEDDINGS_RUNS_SLUG,
+    where: {
+      and: [{ pool: { equals: knowledgePool } }, { status: { in: ['queued', 'running'] } }],
+    },
+    limit: 1,
+  })
+
+  if (existingActiveRun.totalDocs > 0) {
+    const existing = existingActiveRun.docs[0] as any
+    return {
+      runId: String(existing.id),
+      status: existing.status,
+      message: `A bulk embedding run is already ${existing.status} for this knowledge pool. Wait for it to complete or cancel it first.`,
+      conflict: true,
+    }
+  }
+
+  const run = await payload.create({
+    collection: BULK_EMBEDDINGS_RUNS_SLUG,
+    data: {
+      pool: knowledgePool,
+      embeddingVersion: poolConfig.embeddingConfig.version,
+      status: 'queued',
+    },
+  })
+
+  await payload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
+    task: 'payloadcms-vectorize:prepare-bulk-embedding',
+    input: { runId: String(run.id) },
+    ...(queueName ? { queue: queueName } : {}),
+  })
+
+  return {
+    runId: String(run.id),
+    status: 'queued',
+  }
+}
 
 export const createBulkEmbedHandler = (
   knowledgePools: Record<KnowledgePoolName, KnowledgePoolDynamicConfig>,
@@ -19,64 +83,31 @@ export const createBulkEmbedHandler = (
           { status: 400 },
         )
       }
-      const poolConfig = knowledgePools[knowledgePool]
-      if (!poolConfig) {
-        return Response.json(
-          { error: `Knowledge pool "${knowledgePool}" not found` },
-          { status: 400 },
-        )
+
+      const result = await startBulkEmbed({
+        payload: req.payload,
+        knowledgePool,
+        knowledgePools,
+        queueName,
+      })
+
+      if ('conflict' in result && result.conflict) {
+        return Response.json(result, { status: 409 })
       }
 
-      const payload = req.payload
-
-      // Check for existing queued run for this pool - return it instead of creating a new one
-      const existingQueuedRun = await payload.find({
-        collection: BULK_EMBEDDINGS_RUNS_SLUG,
-        where: {
-          and: [{ pool: { equals: knowledgePool } }, { status: { equals: 'queued' } }],
-        },
-        limit: 1,
-      })
-
-      if (existingQueuedRun.totalDocs > 0) {
-        const existing = existingQueuedRun.docs[0] as any
-        return Response.json(
-          {
-            runId: String(existing.id),
-            status: existing.status,
-            message: `A bulk embedding run is already queued for this knowledge pool`,
-          },
-          { status: 200 },
-        )
-      }
-
-      const run = await payload.create({
-        collection: BULK_EMBEDDINGS_RUNS_SLUG,
-        data: {
-          pool: knowledgePool,
-          embeddingVersion: poolConfig.embeddingConfig.version,
-          status: 'queued',
-        },
-      })
-
-      await payload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
-        task: 'payloadcms-vectorize:prepare-bulk-embedding',
-        input: {
-          runId: String(run.id),
-        },
-        req,
-        ...(queueName ? { queue: queueName } : {}),
-      })
-
+      return Response.json(result, { status: 202 })
+    } catch (error) {
+      const errorMessage = (error as Error).message || String(error)
+      req.payload.logger.error(
+        `[payloadcms-vectorize] Failed to queue bulk embed run: ${errorMessage}`,
+      )
       return Response.json(
         {
-          runId: String(run.id),
-          status: 'queued',
+          error: 'Failed to queue bulk embed run',
+          details: errorMessage,
         },
-        { status: 202 },
+        { status: 500 },
       )
-    } catch (error) {
-      return Response.json({ error: 'Failed to queue bulk embed run' }, { status: 500 })
     }
   }
   return handler

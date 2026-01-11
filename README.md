@@ -224,7 +224,7 @@ if (isVectorizedPayload(payload)) {
 | `realtimeQueueName` | `string`                                                               | ❌       | Custom queue name for realtime vectorization jobs                           |
 | `bulkQueueNames`    | `{prepareBulkEmbedQueueName: string, pollOrCompleteQueueName: string}` | ❌       | Queue names for bulk embedding jobs (required if any pool uses bulk ingest) |
 | `endpointOverrides` | `object`                                                               | ❌       | Customize the search endpoint                                               |
-| `disabled`          | `boolean`                                                              | ❌       | Disable plugin while keeping schema                                         |
+| `disabled`          | `boolean`                                                              | ❌       | Disable plugin, except embeddings deletions, while keeping schema           |
 
 ### Knowledge Pool Config
 
@@ -251,6 +251,8 @@ If `realTimeIngestionFn` is provided, documents are embedded immediately on crea
 If only `bulkEmbeddingsFns` is provided (no `realTimeIngestionFn`), embedding only happens via manual bulk runs.
 If neither is provided, embedding is disabled for that pool.
 
+**Note:** Embedding deletion cannot be disabled. When a source document is deleted, all its embeddings are automatically deleted from all knowledge pools that contain that collection, regardless of how the embeddings were created (bulk or real-time). This behavior ensures data consistency and cannot be configured.
+
 ### Bulk Embeddings API
 
 The bulk embedding API is designed for large-scale embedding using provider batch APIs (like Voyage AI). **Bulk runs are never auto-queued** - they must be triggered manually via the admin UI or API.
@@ -262,8 +264,7 @@ The plugin streams chunks to your callbacks one at a time, giving you full contr
 ```typescript
 type BulkEmbeddingsFns = {
   addChunk: (args: AddChunkArgs) => Promise<BatchSubmission | null>
-  pollBatch: (args: PollBatchArgs) => Promise<PollBulkEmbeddingsResult>
-  completeBatch: (args: CompleteBatchArgs) => Promise<BulkEmbeddingOutput[]>
+  pollOrCompleteBatch: (args: PollOrCompleteBatchArgs) => Promise<PollBulkEmbeddingsResult>
   onError?: (args: OnBulkErrorArgs) => Promise<void>
 }
 ```
@@ -334,26 +335,21 @@ addChunk: async ({ chunk, isLastChunk }) => {
 
 **Note:** If a single chunk exceeds your provider's file size limit, you'll need to handle that edge case in your implementation (e.g., skip it, split it, or fail gracefully).
 
-#### `pollBatch` - Check Status
+#### `pollOrCompleteBatch` - Poll and Stream Results
 
-Called repeatedly until the batch reaches a terminal status.
+Called repeatedly until the batch reaches a terminal status. When the batch completes, stream the outputs via the `onChunk` callback.
 
 ```typescript
-type PollBatchArgs = { providerBatchId: string }
+type PollOrCompleteBatchArgs = {
+  providerBatchId: string
+  onChunk: (chunk: BulkEmbeddingOutput) => Promise<void>
+}
 
 type PollBulkEmbeddingsResult = {
   status: 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled'
   counts?: { inputs?: number; succeeded?: number; failed?: number }
   error?: string
 }
-```
-
-#### `completeBatch` - Download Results
-
-Called after all batches succeed. Download the embeddings from your provider.
-
-```typescript
-type CompleteBatchArgs = { providerBatchId: string }
 
 type BulkEmbeddingOutput = {
   id: string // Must match the chunk.id from addChunk
@@ -362,11 +358,18 @@ type BulkEmbeddingOutput = {
 }
 ```
 
+**How it works:**
+
+1. The plugin calls `pollOrCompleteBatch` repeatedly for each batch
+2. While the batch is in progress, return the status (`queued` or `running`) without calling `onChunk`
+3. When the batch completes, stream each embedding result by calling `onChunk` for each output, then return `{ status: 'succeeded' }`
+4. If the batch fails, return `{ status: 'failed', error: '...' }` without calling `onChunk`
+
 **About the `id` field in outputs:**
 
 - **Correlation**: The `id` in each `BulkEmbeddingOutput` must match the `chunk.id` that was passed to `addChunk`. This is how the plugin correlates outputs back to their original inputs.
 - **Extraction**: When processing your provider's response, extract the `id` that you originally sent (e.g., from Voyage's `custom_id` field) and include it in the returned `BulkEmbeddingOutput`.
-- **Example**: If you sent `{ custom_id: "posts:123:0", input: [...] }` to your provider, extract `result.custom_id` from the response and return `{ id: result.custom_id, embedding: [...] }`.
+- **Example**: If you sent `{ custom_id: "posts:123:0", input: [...] }` to your provider, extract `result.custom_id` from the response and call `await onChunk({ id: result.custom_id, embedding: [...] })`.
 
 #### `onError` - Cleanup on Failure (Optional)
 

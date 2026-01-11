@@ -1,7 +1,9 @@
 import type { Payload } from 'payload'
 import { beforeAll, describe, expect, test } from 'vitest'
 import { BULK_EMBEDDINGS_RUNS_SLUG } from '../../../src/collections/bulkEmbeddingsRuns.js'
+import { BULK_EMBEDDINGS_BATCHES_SLUG } from '../../../src/collections/bulkEmbeddingsBatches.js'
 import { BULK_EMBEDDINGS_INPUT_METADATA_SLUG } from '../../../src/collections/bulkEmbeddingInputMetadata.js'
+import type { VectorizedPayload } from '../../../src/types.js'
 import {
   BULK_QUEUE_NAMES,
   DEFAULT_DIMS,
@@ -16,7 +18,7 @@ const DIMS = DEFAULT_DIMS
 const dbName = `bulk_failed_${Date.now()}`
 
 describe('Bulk embed - failed batch', () => {
-  let payload: Payload
+  let payload: VectorizedPayload<'default'>
 
   beforeAll(async () => {
     await createTestDb({ dbName })
@@ -43,7 +45,7 @@ describe('Bulk embed - failed batch', () => {
       dims: DIMS,
       key: `failed-${Date.now()}`,
     })
-    payload = built.payload
+    payload = built.payload as VectorizedPayload<'default'>
   })
 
   test('failed batch marks entire run as failed', async () => {
@@ -105,6 +107,48 @@ describe('Bulk embed - failed batch', () => {
     })
     expect(metadata.totalDocs).toBe(0)
   })
+
+  test('cannot retry batch while run is still running', async () => {
+    // Create a run in 'running' status
+    const run = await (payload as any).create({
+      collection: BULK_EMBEDDINGS_RUNS_SLUG,
+      data: {
+        pool: 'default',
+        embeddingVersion: testEmbeddingVersion,
+        status: 'running',
+      },
+    })
+
+    // Create a failed batch for this running run
+    const batch = await (payload as any).create({
+      collection: BULK_EMBEDDINGS_BATCHES_SLUG,
+      data: {
+        run: run.id,
+        batchIndex: 0,
+        providerBatchId: `mock-failed-lock-test-${Date.now()}`,
+        status: 'failed',
+        inputCount: 1,
+        error: 'Test error for lock test',
+      },
+    })
+
+    // Try to retry the batch while run is running - should be rejected
+    const result = await payload.retryFailedBatch({ batchId: String(batch.id) })
+
+    expect('error' in result).toBe(true)
+    expect('conflict' in result && result.conflict).toBe(true)
+    if ('error' in result) {
+      expect(result.error).toContain('Cannot retry batch while run is running')
+    }
+
+    // Cleanup: mark the run as failed so the batch can be retried in the future
+    await (payload as any).update({
+      collection: BULK_EMBEDDINGS_RUNS_SLUG,
+      id: run.id,
+      data: {
+        status: 'failed',
+        completedAt: new Date().toISOString(),
+      },
+    })
+  })
 })
-
-

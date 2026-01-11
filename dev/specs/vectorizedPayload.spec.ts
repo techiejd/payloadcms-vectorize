@@ -79,9 +79,11 @@ describe('VectorizedPayload', () => {
                   },
                 },
               },
-              embedDocs: makeDummyEmbedDocs(DIMS),
-              embedQuery: makeDummyEmbedQuery(DIMS),
-              embeddingVersion: testEmbeddingVersion,
+              embeddingConfig: {
+                version: testEmbeddingVersion,
+                queryFn: makeDummyEmbedQuery(DIMS),
+                realTimeIngestionFn: makeDummyEmbedDocs(DIMS),
+              },
             },
           },
         }),
@@ -97,12 +99,42 @@ describe('VectorizedPayload', () => {
     })
 
     test('returns false for a plain object without search method', () => {
-      const plainObj = { queueEmbed: () => Promise.resolve() } as unknown as Payload
+      const plainObj = {
+        _isBulkEmbedEnabled: () => false,
+        queueEmbed: () => Promise.resolve(),
+        bulkEmbed: () => Promise.resolve({}),
+        retryFailedBatch: () => Promise.resolve({}),
+      } as unknown as Payload
       expect(isVectorizedPayload(plainObj)).toBe(false)
     })
 
     test('returns false for a plain object without queueEmbed method', () => {
-      const plainObj = { search: () => Promise.resolve([]) } as unknown as Payload
+      const plainObj = {
+        _isBulkEmbedEnabled: () => false,
+        search: () => Promise.resolve([]),
+        bulkEmbed: () => Promise.resolve({}),
+        retryFailedBatch: () => Promise.resolve({}),
+      } as unknown as Payload
+      expect(isVectorizedPayload(plainObj)).toBe(false)
+    })
+
+    test('returns false for a plain object without bulkEmbed method', () => {
+      const plainObj = {
+        _isBulkEmbedEnabled: () => false,
+        search: () => Promise.resolve([]),
+        queueEmbed: () => Promise.resolve(),
+        retryFailedBatch: () => Promise.resolve({}),
+      } as unknown as Payload
+      expect(isVectorizedPayload(plainObj)).toBe(false)
+    })
+
+    test('returns false for a plain object without retryFailedBatch method', () => {
+      const plainObj = {
+        _isBulkEmbedEnabled: () => false,
+        search: () => Promise.resolve([]),
+        queueEmbed: () => Promise.resolve(),
+        bulkEmbed: () => Promise.resolve({}),
+      } as unknown as Payload
       expect(isVectorizedPayload(plainObj)).toBe(false)
     })
 
@@ -234,6 +266,38 @@ describe('VectorizedPayload', () => {
       })
 
       expect(pendingJobs.totalDocs).toBeGreaterThan(0)
+    })
+  })
+
+  describe('bulkEmbed method', () => {
+    test('payload has bulkEmbed method', () => {
+      expect(typeof (payload as VectorizedPayload).bulkEmbed).toBe('function')
+    })
+
+    test('bulkEmbed throws error when bulk embedding not configured', async () => {
+      const vectorizedPayload = payload as VectorizedPayload<'default'>
+
+      // This pool doesn't have bulkEmbeddingsFns configured
+      await expect(vectorizedPayload.bulkEmbed({ knowledgePool: 'default' })).rejects.toThrow(
+        'does not have bulk embedding configured',
+      )
+    })
+  })
+
+  describe('retryFailedBatch method', () => {
+    test('payload has retryFailedBatch method', () => {
+      expect(typeof (payload as VectorizedPayload).retryFailedBatch).toBe('function')
+    })
+
+    test('retryFailedBatch returns error for non-existent batch', async () => {
+      const vectorizedPayload = payload as VectorizedPayload
+
+      const result = await vectorizedPayload.retryFailedBatch({ batchId: '999999' })
+
+      expect('error' in result).toBe(true)
+      if ('error' in result) {
+        expect(result.error).toContain('not found')
+      }
     })
   })
 })

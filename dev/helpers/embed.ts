@@ -183,7 +183,7 @@ export function makeVoyageBulkEmbeddingsConfig(): BulkEmbeddingsFns {
       return null
     },
 
-    pollBatch: async ({ providerBatchId }) => {
+    pollOrCompleteBatch: async ({ providerBatchId, onChunk }) => {
       try {
         const response = await fetch(`https://api.voyageai.com/v1/batches/${providerBatchId}`, {
           headers: {
@@ -221,71 +221,56 @@ export function makeVoyageBulkEmbeddingsConfig(): BulkEmbeddingsFns {
             status = 'running'
         }
 
-        // Store output file ID if available for later completion
-        if (batchData.output_file_id) {
-          batchOutputFiles.set(providerBatchId, batchData.output_file_id)
-        }
+        // If succeeded, download and stream outputs
+        if (status === 'succeeded') {
+          const outputFileId = batchData.output_file_id
+          if (!outputFileId) {
+            return { status: 'failed', error: 'No output file available for completed batch' }
+          }
 
-        return {
-          status,
-        }
-      } catch (error) {
-        console.error('Voyage pollBatch error:', error)
-        return { status: 'failed', error: 'Failed to poll batch status' }
-      }
-    },
+          // Download output file
+          const downloadResponse = await fetch(
+            `https://api.voyageai.com/v1/files/${outputFileId}/content`,
+            {
+              headers: {
+                Authorization: `Bearer ${process.env.VOYAGE_API_KEY}`,
+              },
+            },
+          )
 
-    completeBatch: async ({ providerBatchId }) => {
-      try {
-        const outputFileId = batchOutputFiles.get(providerBatchId)
-        if (!outputFileId) {
-          throw new Error('No output file available for batch')
-        }
+          if (!downloadResponse.ok) {
+            const error = await downloadResponse.text()
+            return { status: 'failed', error: `Failed to download output file: ${error}` }
+          }
 
-        // Download output file
-        const response = await fetch(`https://api.voyageai.com/v1/files/${outputFileId}/content`, {
-          headers: {
-            Authorization: `Bearer ${process.env.VOYAGE_API_KEY}`,
-          },
-        })
+          const jsonlContent = await downloadResponse.text()
+          const lines = jsonlContent.trim().split('\n')
 
-        if (!response.ok) {
-          const error = await response.text()
-          throw new Error(`Failed to download output file: ${error}`)
-        }
-
-        const jsonlContent = await response.text()
-        const lines = jsonlContent.trim().split('\n')
-
-        const outputs: BulkEmbeddingOutput[] = []
-
-        for (const line of lines) {
-          if (!line.trim()) continue
-          try {
-            const result = JSON.parse(line)
-            if (result.error) {
-              outputs.push({
-                id: result.custom_id,
-                error: result.error.message || 'Unknown error',
-              })
-            } else {
-              outputs.push({
-                id: result.custom_id,
-                embedding: result.response.body.data[0].embedding,
-              })
+          for (const line of lines) {
+            if (!line.trim()) continue
+            try {
+              const result = JSON.parse(line)
+              if (result.error) {
+                await onChunk({
+                  id: result.custom_id,
+                  error: result.error.message || 'Unknown error',
+                })
+              } else {
+                await onChunk({
+                  id: result.custom_id,
+                  embedding: result.response.body.data[0].embedding,
+                })
+              }
+            } catch (parseError) {
+              console.error('Failed to parse output line:', line, parseError)
             }
-          } catch (parseError) {
-            console.error('Failed to parse output line:', line, parseError)
           }
         }
 
-        // Clean up state
-        batchOutputFiles.delete(providerBatchId)
-
-        return outputs
+        return { status }
       } catch (error) {
-        console.error('Voyage completeBatch error:', error)
-        throw error
+        console.error('Voyage pollOrCompleteBatch error:', error)
+        return { status: 'failed', error: 'Failed to poll batch status' }
       }
     },
 

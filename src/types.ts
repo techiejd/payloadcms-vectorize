@@ -1,5 +1,43 @@
 import type { CollectionSlug, Payload, Field, Where } from 'payload'
 
+/** Result from bulkEmbed method */
+export type BulkEmbedResult =
+  | {
+      /** ID of the created run */
+      runId: string
+      /** Status of the run */
+      status: 'queued'
+    }
+  | {
+      /** ID of existing active run */
+      runId: string
+      /** Status of existing run */
+      status: 'queued' | 'running'
+      /** Message explaining why a new run wasn't started */
+      message: string
+      /** Indicates a conflict occurred */
+      conflict: true
+    }
+
+/** Result from retryFailedBatch method */
+export type RetryFailedBatchResult =
+  | {
+      /** ID of the batch being retried */
+      batchId: string
+      /** ID of the parent run */
+      runId: string
+      /** New status of the batch */
+      status: 'queued'
+      /** Confirmation message */
+      message: string
+    }
+  | {
+      /** Error message */
+      error: string
+      /** Indicates a conflict occurred (e.g., run still active) */
+      conflict?: true
+    }
+
 /**
  * Extended Payload type with vectorize plugin methods
  */
@@ -19,6 +57,10 @@ export type VectorizedPayload<TPoolNames extends KnowledgePoolName = KnowledgePo
             doc: Record<string, any>
           },
     ) => Promise<void>
+    /** Start a bulk embedding run for a knowledge pool */
+    bulkEmbed: (params: { knowledgePool: TPoolNames }) => Promise<BulkEmbedResult>
+    /** Retry a failed batch */
+    retryFailedBatch: (params: { batchId: string }) => Promise<RetryFailedBatchResult>
   }
 
 /**
@@ -31,7 +73,11 @@ export function isVectorizedPayload(payload: Payload): payload is VectorizedPayl
     'search' in payload &&
     typeof (payload as any).search === 'function' &&
     'queueEmbed' in payload &&
-    typeof (payload as any).queueEmbed === 'function'
+    typeof (payload as any).queueEmbed === 'function' &&
+    'bulkEmbed' in payload &&
+    typeof (payload as any).bulkEmbed === 'function' &&
+    'retryFailedBatch' in payload &&
+    typeof (payload as any).retryFailedBatch === 'function'
   )
 }
 
@@ -135,16 +181,12 @@ export type BatchSubmission = {
   providerBatchId: string
 }
 
-/** Arguments for polling a single batch */
-export type PollBatchArgs = {
+/** Arguments for polling or completing a single batch */
+export type PollOrCompleteBatchArgs = {
   /** Provider-specific batch identifier */
   providerBatchId: string
-}
-
-/** Arguments for completing/downloading a single batch */
-export type CompleteBatchArgs = {
-  /** Provider-specific batch identifier */
-  providerBatchId: string
+  /** Callback function to stream completed chunks as they become available */
+  onChunk: (chunk: BulkEmbeddingOutput) => Promise<void>
 }
 
 /** Data about a failed chunk during bulk embedding completion */
@@ -190,11 +232,12 @@ export type BulkEmbeddingsFns = {
    */
   addChunk: (args: AddChunkArgs) => Promise<BatchSubmission | null>
 
-  /** Poll a specific batch by providerBatchId */
-  pollBatch: (args: PollBatchArgs) => Promise<PollBulkEmbeddingsResult>
-
-  /** Download outputs for a completed batch */
-  completeBatch: (args: CompleteBatchArgs) => Promise<BulkEmbeddingOutput[]>
+  /**
+   * Poll a specific batch by providerBatchId, and stream outputs when complete.
+   * Call onChunk for each output as it becomes available once the batch completes.
+   * The function completes when all chunks have been streamed.
+   */
+  pollOrCompleteBatch: (args: PollOrCompleteBatchArgs) => Promise<PollBulkEmbeddingsResult>
 
   /**
    * Called when the bulk run fails. Use this to clean up provider-side resources

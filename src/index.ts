@@ -11,6 +11,8 @@ import type {
   KnowledgePoolDynamicConfig,
   VectorizedPayload,
   VectorSearchQuery,
+  BulkEmbedResult,
+  RetryFailedBatchResult,
 } from './types.js'
 import { isPostgresPayload } from './types.js'
 import type { PostgresAdapterArgs } from '@payloadcms/db-postgres'
@@ -33,7 +35,8 @@ import {
   createPrepareBulkEmbeddingTask,
   createPollOrCompleteBulkEmbeddingTask,
 } from './tasks/bulkEmbedAll.js'
-import { createBulkEmbedHandler } from './endpoints/bulkEmbed.js'
+import { createBulkEmbedHandler, startBulkEmbed } from './endpoints/bulkEmbed.js'
+import { createRetryFailedBatchHandler, retryBatch } from './endpoints/retryFailedBatch.js'
 
 export type {
   KnowledgePoolStaticConfig,
@@ -58,9 +61,8 @@ export type {
   // BulkEmbeddingsFns
   AddChunkArgs,
   BatchSubmission,
-  PollBatchArgs,
+  PollOrCompleteBatchArgs,
   PollBulkEmbeddingsResult,
-  CompleteBatchArgs,
   BulkEmbeddingOutput,
   OnBulkErrorArgs,
 
@@ -69,6 +71,8 @@ export type {
 
   // PollBulkEmbeddingsResult
   BulkEmbeddingRunStatus,
+  isVectorizedPayload,
+  VectorizedPayload,
 } from './types.js'
 
 async function ensurePgvectorArtifacts(args: {
@@ -359,6 +363,25 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
                   )
                 }
               }
+
+              // Also clean up any pending bulk embedding metadata for this document
+              // This prevents embedding a document that was deleted during a bulk run
+              try {
+                await payload.delete({
+                  collection: BULK_EMBEDDINGS_INPUT_METADATA_SLUG,
+                  where: {
+                    and: [
+                      { sourceCollection: { equals: collectionSlug } },
+                      { docId: { equals: String(id) } },
+                    ],
+                  },
+                })
+              } catch (e) {
+                payload?.logger?.warn?.(
+                  `[payloadcms-vectorize] Failed to delete bulk embedding metadata for ${collectionSlug}:${id}`,
+                  e as Error,
+                )
+              }
             },
           ],
         }
@@ -367,11 +390,7 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
       const incomingOnInit = config.onInit
       const vectorSearchHandlers = createVectorSearchHandlers(pluginOptions.knowledgePools)
       config.onInit = async (payload) => {
-        if (incomingOnInit)
-          await incomingOnInit(payload)
-
-          // Add _isBulkEmbedEnabled method to payload object
-          // This allows checking if bulk embedding is enabled for a knowledge pool
+        if (incomingOnInit) await incomingOnInit(payload)
         ;(payload as VectorizedPayload<TPoolNames>) = {
           ...(payload as any),
           _isBulkEmbedEnabled: (knowledgePool: TPoolNames): boolean => {
@@ -419,6 +438,20 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
             }
             return embedQueue(doc, payload)
           },
+          bulkEmbed: (params: { knowledgePool: TPoolNames }): Promise<BulkEmbedResult> =>
+            startBulkEmbed({
+              payload,
+              knowledgePool: params.knowledgePool,
+              knowledgePools: pluginOptions.knowledgePools,
+              queueName: pluginOptions.bulkQueueNames?.prepareBulkEmbedQueueName,
+            }),
+          retryFailedBatch: (params: { batchId: string }): Promise<RetryFailedBatchResult> =>
+            retryBatch({
+              payload,
+              batchId: params.batchId,
+              knowledgePools: pluginOptions.knowledgePools,
+              queueName: pluginOptions.bulkQueueNames?.pollOrCompleteQueueName,
+            }),
         }
         // Ensure pgvector artifacts for each knowledge pool
         for (const poolName in staticConfigs) {
@@ -450,6 +483,14 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
             handler: createBulkEmbedHandler(
               pluginOptions.knowledgePools,
               pluginOptions.bulkQueueNames?.prepareBulkEmbedQueueName,
+            ),
+          },
+          {
+            path: '/vector-retry-failed-batch',
+            method: 'post' as const,
+            handler: createRetryFailedBatchHandler(
+              pluginOptions.knowledgePools,
+              pluginOptions.bulkQueueNames?.pollOrCompleteQueueName,
             ),
           },
         ]
