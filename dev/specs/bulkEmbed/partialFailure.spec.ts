@@ -152,8 +152,22 @@ describe('Bulk embed - partial chunk failures', () => {
     expect(updatedRun.failed).toBe(1) // Second chunk failed
     expect(updatedRun.failedChunkData).toBeDefined()
     expect(Array.isArray(updatedRun.failedChunkData)).toBe(true)
-    expect((updatedRun.failedChunkData as Array<{ collection: string; documentId: string; chunkIndex: number }>).length).toBe(1)
-    const failedChunk = (updatedRun.failedChunkData as Array<{ collection: string; documentId: string; chunkIndex: number }>)[0]
+    expect(
+      (
+        updatedRun.failedChunkData as Array<{
+          collection: string
+          documentId: string
+          chunkIndex: number
+        }>
+      ).length,
+    ).toBe(1)
+    const failedChunk = (
+      updatedRun.failedChunkData as Array<{
+        collection: string
+        documentId: string
+        chunkIndex: number
+      }>
+    )[0]
     expect(failedChunk.collection).toBe('posts')
     expect(failedChunk.documentId).toBe(String(post.id))
     expect(failedChunk.chunkIndex).toBe(1) // Second chunk (index 1)
@@ -236,7 +250,7 @@ describe('Bulk embed - partial chunk failures', () => {
 
     expect(updatedRun.status).toBe('succeeded')
     expect(updatedRun.failed).toBe(0)
-    expect(updatedRun.failedChunkData).toBeUndefined()
+    expect(updatedRun.failedChunkData).toBeNull()
 
     // onError should NOT be called when everything succeeds
     expect(onErrorCalled).toBe(false)

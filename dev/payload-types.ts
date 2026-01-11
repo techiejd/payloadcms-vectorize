@@ -70,8 +70,10 @@ export interface Config {
     posts: Post;
     'vector-bulk-embeddings-runs': VectorBulkEmbeddingsRun;
     'vector-bulk-embedding-input-metadata': VectorBulkEmbeddingInputMetadatum;
+    'vector-bulk-embeddings-batches': VectorBulkEmbeddingsBatch;
     default: Default;
     bulkDefault: BulkDefault;
+    failingBulkDefault: FailingBulkDefault;
     'payload-kv': PayloadKv;
     users: User;
     'payload-jobs': PayloadJob;
@@ -84,8 +86,10 @@ export interface Config {
     posts: PostsSelect<false> | PostsSelect<true>;
     'vector-bulk-embeddings-runs': VectorBulkEmbeddingsRunsSelect<false> | VectorBulkEmbeddingsRunsSelect<true>;
     'vector-bulk-embedding-input-metadata': VectorBulkEmbeddingInputMetadataSelect<false> | VectorBulkEmbeddingInputMetadataSelect<true>;
+    'vector-bulk-embeddings-batches': VectorBulkEmbeddingsBatchesSelect<false> | VectorBulkEmbeddingsBatchesSelect<true>;
     default: DefaultSelect<false> | DefaultSelect<true>;
     bulkDefault: BulkDefaultSelect<false> | BulkDefaultSelect<true>;
+    failingBulkDefault: FailingBulkDefaultSelect<false> | FailingBulkDefaultSelect<true>;
     'payload-kv': PayloadKvSelect<false> | PayloadKvSelect<true>;
     users: UsersSelect<false> | UsersSelect<true>;
     'payload-jobs': PayloadJobsSelect<false> | PayloadJobsSelect<true>;
@@ -175,15 +179,11 @@ export interface VectorBulkEmbeddingsRun {
    * Embedding version at submission time
    */
   embeddingVersion: string;
-  /**
-   * Provider file or input reference used for the batch
-   */
-  inputFileRef?: string | null;
-  /**
-   * Provider batch identifier
-   */
-  providerBatchId?: string | null;
   status: 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled';
+  /**
+   * Total number of batches in this run
+   */
+  totalBatches?: number | null;
   inputs?: number | null;
   succeeded?: number | null;
   failed?: number | null;
@@ -199,6 +199,18 @@ export interface VectorBulkEmbeddingsRun {
    * Failure reason if the run ended in error
    */
   error?: string | null;
+  /**
+   * Data about chunks that failed during completion (collection, documentId, chunkIndex)
+   */
+  failedChunkData?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
   updatedAt: string;
   createdAt: string;
 }
@@ -235,6 +247,54 @@ export interface VectorBulkEmbeddingInputMetadatum {
     | number
     | boolean
     | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * Individual batches within a bulk embedding run. Created when input count exceeds file limits.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "vector-bulk-embeddings-batches".
+ */
+export interface VectorBulkEmbeddingsBatch {
+  id: number;
+  /**
+   * Parent bulk embedding run
+   */
+  run: number | VectorBulkEmbeddingsRun;
+  /**
+   * Zero-based index of this batch within the run
+   */
+  batchIndex: number;
+  /**
+   * Provider-specific batch identifier
+   */
+  providerBatchId: string;
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled';
+  /**
+   * Number of inputs in this batch
+   */
+  inputCount: number;
+  /**
+   * Number of successful embeddings
+   */
+  succeededCount?: number | null;
+  /**
+   * Number of failed embeddings
+   */
+  failedCount?: number | null;
+  /**
+   * Timestamp when the batch was submitted to provider
+   */
+  submittedAt?: string | null;
+  /**
+   * Timestamp when the batch finished
+   */
+  completedAt?: string | null;
+  /**
+   * Error message if the batch failed
+   */
+  error?: string | null;
   updatedAt: string;
   createdAt: string;
 }
@@ -276,6 +336,37 @@ export interface Default {
  * via the `definition` "bulkDefault".
  */
 export interface BulkDefault {
+  id: number;
+  /**
+   * The collection that this embedding belongs to
+   */
+  sourceCollection: string;
+  /**
+   * The ID of the source document
+   */
+  docId: string;
+  /**
+   * The index of this chunk
+   */
+  chunkIndex: number;
+  /**
+   * The original text that was vectorized
+   */
+  chunkText?: string | null;
+  /**
+   * The version of the embedding model used
+   */
+  embeddingVersion?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * Vector embeddings for search and similarity queries. Created by the payloadcms-vectorize plugin. Embeddings cannot be added or modified, only deleted, through the admin panel. No other restrictions enforced.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "failingBulkDefault".
+ */
+export interface FailingBulkDefault {
   id: number;
   /**
    * The collection that this embedding belongs to
@@ -464,12 +555,20 @@ export interface PayloadLockedDocument {
         value: number | VectorBulkEmbeddingInputMetadatum;
       } | null)
     | ({
+        relationTo: 'vector-bulk-embeddings-batches';
+        value: number | VectorBulkEmbeddingsBatch;
+      } | null)
+    | ({
         relationTo: 'default';
         value: number | Default;
       } | null)
     | ({
         relationTo: 'bulkDefault';
         value: number | BulkDefault;
+      } | null)
+    | ({
+        relationTo: 'failingBulkDefault';
+        value: number | FailingBulkDefault;
       } | null)
     | ({
         relationTo: 'users';
@@ -534,15 +633,15 @@ export interface PostsSelect<T extends boolean = true> {
 export interface VectorBulkEmbeddingsRunsSelect<T extends boolean = true> {
   pool?: T;
   embeddingVersion?: T;
-  inputFileRef?: T;
-  providerBatchId?: T;
   status?: T;
+  totalBatches?: T;
   inputs?: T;
   succeeded?: T;
   failed?: T;
   submittedAt?: T;
   completedAt?: T;
   error?: T;
+  failedChunkData?: T;
   updatedAt?: T;
   createdAt?: T;
 }
@@ -564,6 +663,24 @@ export interface VectorBulkEmbeddingInputMetadataSelect<T extends boolean = true
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "vector-bulk-embeddings-batches_select".
+ */
+export interface VectorBulkEmbeddingsBatchesSelect<T extends boolean = true> {
+  run?: T;
+  batchIndex?: T;
+  providerBatchId?: T;
+  status?: T;
+  inputCount?: T;
+  succeededCount?: T;
+  failedCount?: T;
+  submittedAt?: T;
+  completedAt?: T;
+  error?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "default_select".
  */
 export interface DefaultSelect<T extends boolean = true> {
@@ -580,6 +697,19 @@ export interface DefaultSelect<T extends boolean = true> {
  * via the `definition` "bulkDefault_select".
  */
 export interface BulkDefaultSelect<T extends boolean = true> {
+  sourceCollection?: T;
+  docId?: T;
+  chunkIndex?: T;
+  chunkText?: T;
+  embeddingVersion?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "failingBulkDefault_select".
+ */
+export interface FailingBulkDefaultSelect<T extends boolean = true> {
   sourceCollection?: T;
   docId?: T;
   chunkIndex?: T;
