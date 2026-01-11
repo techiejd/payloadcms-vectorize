@@ -391,8 +391,7 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
       const vectorSearchHandlers = createVectorSearchHandlers(pluginOptions.knowledgePools)
       config.onInit = async (payload) => {
         if (incomingOnInit) await incomingOnInit(payload)
-        ;(payload as VectorizedPayload<TPoolNames>) = {
-          ...(payload as any),
+        Object.assign(payload, {
           _isBulkEmbedEnabled: (knowledgePool: TPoolNames): boolean => {
             const poolConfig = pluginOptions.knowledgePools[knowledgePool]
             return !!poolConfig?.embeddingConfig?.bulkEmbeddingsFns
@@ -452,7 +451,7 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
               knowledgePools: pluginOptions.knowledgePools,
               queueName: pluginOptions.bulkQueueNames?.pollOrCompleteQueueName,
             }),
-        }
+        } as Partial<VectorizedPayload<TPoolNames>>)
         // Ensure pgvector artifacts for each knowledge pool
         for (const poolName in staticConfigs) {
           const staticConfig = staticConfigs[poolName]
