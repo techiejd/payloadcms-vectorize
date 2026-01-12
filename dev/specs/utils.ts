@@ -76,7 +76,8 @@ export const BULK_QUEUE_NAMES = {
 
 type MockOptions = {
   statusSequence: BulkEmbeddingRunStatus[]
-  partialFailure?: { failIds: string[] }
+  /** Static list of IDs to fail, OR a function to decide at runtime */
+  partialFailure?: { failIds: string[] } | { shouldFail: (id: string) => boolean }
   /** Optional: flush after this many chunks (for testing multi-batch scenarios) */
   flushAfterChunks?: number
   /** Optional: callback to track onError calls for testing */
@@ -141,7 +142,12 @@ export function createMockBulkEmbeddings(
           const vectors = await embeddings(inputs.map((i) => i.text))
           for (let idx = 0; idx < inputs.length; idx++) {
             const input = inputs[idx]
-            const shouldFail = partialFailure?.failIds?.includes(input.id)
+            // Support both static array and function-based failure check
+            const shouldFail = partialFailure
+              ? 'shouldFail' in partialFailure
+                ? partialFailure.shouldFail(input.id)
+                : partialFailure.failIds?.includes(input.id)
+              : false
             const output = shouldFail
               ? { id: input.id, error: 'fail' }
               : { id: input.id, embedding: vectors[idx] }
@@ -156,7 +162,7 @@ export function createMockBulkEmbeddings(
       return { status }
     },
 
-    onError: async ({ providerBatchIds, error }) => {
+    onError: async ({ providerBatchIds, error, failedChunkData, failedChunkCount }) => {
       // Clean up state
       for (const batchId of providerBatchIds) {
         batchInputs.delete(batchId)
@@ -167,7 +173,7 @@ export function createMockBulkEmbeddings(
 
       // Call the test callback if provided
       if (onErrorCallback) {
-        onErrorCallback({ providerBatchIds, error })
+        onErrorCallback({ providerBatchIds, error, failedChunkData, failedChunkCount })
       }
     },
   }

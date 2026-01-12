@@ -624,13 +624,29 @@ async function streamAndBatchMissingEmbeddings(args: {
         // Convert runId to number for postgres relationships
         const runIdNum = parseInt(runId, 10)
 
-        // Store metadata for submitted chunks
+        // Create batch record first so we have the batch ID for metadata
+        const batchRecord = await payload.create({
+          collection: BULK_EMBEDDINGS_BATCHES_SLUG,
+          data: {
+            run: runIdNum,
+            batchIndex,
+            providerBatchId: submission.providerBatchId,
+            status: 'queued',
+            inputCount: submittedChunks.length,
+            submittedAt: new Date().toISOString(),
+          },
+        })
+
+        const batchId = (batchRecord as any).id
+
+        // Store metadata for submitted chunks with batch reference
         await Promise.all(
           submittedChunks.map((c) =>
             payload.create({
               collection: BULK_EMBEDDINGS_INPUT_METADATA_SLUG,
               data: {
                 run: runIdNum,
+                batch: batchId,
                 inputId: c.id,
                 text: c.text,
                 sourceCollection: c.metadata.sourceCollection,
@@ -642,19 +658,6 @@ async function streamAndBatchMissingEmbeddings(args: {
             }),
           ),
         )
-
-        // Create batch record
-        await payload.create({
-          collection: BULK_EMBEDDINGS_BATCHES_SLUG,
-          data: {
-            run: runIdNum,
-            batchIndex,
-            providerBatchId: submission.providerBatchId,
-            status: 'queued',
-            inputCount: submittedChunks.length,
-            submittedAt: new Date().toISOString(),
-          },
-        })
 
         totalInputs += submittedChunks.length
         batchIndex++

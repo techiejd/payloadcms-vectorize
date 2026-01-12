@@ -1,5 +1,6 @@
 import type { CollectionConfig } from 'payload'
 import { BULK_EMBEDDINGS_RUNS_SLUG } from './bulkEmbeddingsRuns.js'
+import { BULK_EMBEDDINGS_BATCHES_SLUG } from './bulkEmbeddingsBatches.js'
 
 export const BULK_EMBEDDINGS_INPUT_METADATA_SLUG = 'vector-bulk-embedding-input-metadata'
 
@@ -8,7 +9,7 @@ export const createBulkEmbeddingInputMetadataCollection = (): CollectionConfig =
   admin: {
     useAsTitle: 'inputId',
     description: 'Stores per-input metadata for bulk embedding runs.',
-    defaultColumns: ['run', 'inputId', 'sourceCollection', 'docId', 'chunkIndex'],
+    defaultColumns: ['run', 'batch', 'inputId', 'sourceCollection', 'docId', 'chunkIndex'],
   },
   access: {
     // Anyone can read; only internal (local API) can mutate.
@@ -24,6 +25,13 @@ export const createBulkEmbeddingInputMetadataCollection = (): CollectionConfig =
       relationTo: BULK_EMBEDDINGS_RUNS_SLUG,
       required: true,
       admin: { description: 'Bulk run this input belongs to' },
+    },
+    {
+      name: 'batch',
+      type: 'relationship',
+      relationTo: BULK_EMBEDDINGS_BATCHES_SLUG,
+      required: true,
+      admin: { description: 'Batch this input belongs to' },
     },
     {
       name: 'inputId',
@@ -70,6 +78,9 @@ export const createBulkEmbeddingInputMetadataCollection = (): CollectionConfig =
     },
     {
       fields: ['run'],
+    },
+    {
+      fields: ['batch'],
     },
     {
       fields: ['sourceCollection', 'docId'],

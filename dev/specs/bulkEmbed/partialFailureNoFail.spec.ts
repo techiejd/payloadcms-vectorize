@@ -12,9 +12,9 @@ import {
 import { makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
 
 const DIMS = DEFAULT_DIMS
-const dbName = `bulk_partial_failure_${Date.now()}`
+const dbName = `bulk_partial_failure_nofail_${Date.now()}`
 
-describe('Bulk embed - partial chunk failures', () => {
+describe('Bulk embed - no partial failures', () => {
   let payload: Payload
   let onErrorCalled = false
   let onErrorArgs: {
@@ -28,16 +28,14 @@ describe('Bulk embed - partial chunk failures', () => {
     await createTestDb({ dbName })
   })
 
-  test('partial chunk failures are tracked and passed to onError', async () => {
+  test('run with no partial failures does not call onError', async () => {
     // Reset state
     onErrorCalled = false
     onErrorArgs = null
 
     // Use unique version to ensure this test only processes its own data
-    const testVersion = `${testEmbeddingVersion}-partial-${Date.now()}`
+    const testVersion = `${testEmbeddingVersion}-nofail-${Date.now()}`
 
-    // Use a function-based failure check to avoid needing to know docId ahead of time
-    // Fail any chunk with index 1 (second chunk of any doc)
     const built = await buildPayloadWithIntegration({
       dbName,
       pluginOpts: {
@@ -45,10 +43,7 @@ describe('Bulk embed - partial chunk failures', () => {
           default: {
             collections: {
               posts: {
-                toKnowledgePool: async (doc: any) => [
-                  { chunk: doc.title },
-                  { chunk: doc.title + ' chunk2' },
-                ],
+                toKnowledgePool: async (doc: any) => [{ chunk: doc.title }],
               },
             },
             embeddingConfig: {
@@ -57,8 +52,7 @@ describe('Bulk embed - partial chunk failures', () => {
               bulkEmbeddingsFns: createMockBulkEmbeddings(
                 {
                   statusSequence: ['succeeded'],
-                  // Fail any chunk with index 1 (second chunk) - ID format is collection:docId:chunkIndex
-                  partialFailure: { shouldFail: (id: string) => id.endsWith(':1') },
+                  // No partial failures
                   onErrorCallback: (args) => {
                     onErrorCalled = true
                     onErrorArgs = args
@@ -73,15 +67,11 @@ describe('Bulk embed - partial chunk failures', () => {
       },
       secret: 'test-secret',
       dims: DIMS,
-      key: `partial-failure-${Date.now()}-${Math.random()}`,
+      key: `no-partial-failure-${Date.now()}-${Math.random()}`,
     })
     payload = built.payload
 
-    // Create a post with 2 chunks
-    const post = await payload.create({
-      collection: 'posts',
-      data: { title: 'Partial Failure Test' } as any,
-    })
+    await payload.create({ collection: 'posts', data: { title: 'No Failure Test' } as any })
 
     const run = await payload.create({
       collection: BULK_EMBEDDINGS_RUNS_SLUG,
@@ -99,46 +89,17 @@ describe('Bulk embed - partial chunk failures', () => {
 
     await waitForBulkJobs(payload)
 
-    // Check run status - should still succeed but with failed count
+    // Check run status
     const updatedRun = await payload.findByID({
       collection: BULK_EMBEDDINGS_RUNS_SLUG,
       id: run.id,
     })
 
     expect(updatedRun.status).toBe('succeeded')
-    expect(updatedRun.succeeded).toBe(1) // First chunk succeeded
-    expect(updatedRun.failed).toBe(1) // Second chunk failed
-    expect(updatedRun.failedChunkData).toBeDefined()
-    expect(Array.isArray(updatedRun.failedChunkData)).toBe(true)
-    expect(
-      (
-        updatedRun.failedChunkData as Array<{
-          collection: string
-          documentId: string
-          chunkIndex: number
-        }>
-      ).length,
-    ).toBe(1)
-    const failedChunk = (
-      updatedRun.failedChunkData as Array<{
-        collection: string
-        documentId: string
-        chunkIndex: number
-      }>
-    )[0]
-    expect(failedChunk.collection).toBe('posts')
-    expect(failedChunk.documentId).toBe(String(post.id))
-    expect(failedChunk.chunkIndex).toBe(1) // Second chunk (index 1)
+    expect(updatedRun.failed).toBe(0)
+    expect(updatedRun.failedChunkData).toBeNull()
 
-    // Check onError callback was called with failed chunk info
-    expect(onErrorCalled).toBe(true)
-    expect(onErrorArgs).not.toBeNull()
-    expect(onErrorArgs!.failedChunkData).toBeDefined()
-    expect(onErrorArgs!.failedChunkData!.length).toBe(1)
-    expect(onErrorArgs!.failedChunkData![0].collection).toBe('posts')
-    expect(onErrorArgs!.failedChunkData![0].documentId).toBe(String(post.id))
-    expect(onErrorArgs!.failedChunkData![0].chunkIndex).toBe(1)
-    expect(onErrorArgs!.failedChunkCount).toBe(1)
-    expect(onErrorArgs!.error.message).toContain('1 chunk(s) failed')
+    // onError should NOT be called when everything succeeds
+    expect(onErrorCalled).toBe(false)
   })
 })
