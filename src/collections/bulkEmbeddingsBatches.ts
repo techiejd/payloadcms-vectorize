@@ -9,6 +9,7 @@ const statusOptions: BulkEmbeddingRunStatus[] = [
   'succeeded',
   'failed',
   'canceled',
+  'retried',
 ]
 
 /**
@@ -27,10 +28,6 @@ export const createBulkEmbeddingsBatchesCollection = (): CollectionConfig => ({
         beforeDocumentControls: [
           {
             path: 'payloadcms-vectorize/client#RetryFailedBatchButton',
-            serverProps: {
-              batchId: ({ data }: { data: any }) => data?.id,
-              status: ({ data }: { data: any }) => data?.status,
-            },
           },
         ],
       },
@@ -117,6 +114,15 @@ export const createBulkEmbeddingsBatchesCollection = (): CollectionConfig => ({
       admin: {
         description: 'Error message if the batch failed',
       },
+    },
+    {
+      name: 'retriedBatch',
+      type: 'relationship',
+      relationTo: BULK_EMBEDDINGS_BATCHES_SLUG,
+      admin: {
+        description: 'The new batch created when this batch was retried',
+      },
+      hasMany: false,
     },
   ],
   timestamps: true,

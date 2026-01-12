@@ -24,6 +24,8 @@ export type RetryFailedBatchResult =
   | {
       /** ID of the batch being retried */
       batchId: string
+      /** ID of the new batch created from retry (if batch was already retried, returns existing retry batch) */
+      newBatchId?: string
       /** ID of the parent run */
       runId: string
       /** New status of the batch */
@@ -135,7 +137,13 @@ export type EmbeddingConfig = {
   /** If both realTimeIngestionFn and bulkEmbeddingsConfig are not provided, then embedding for this knowledge pool is essentially disabled */
 }
 
-export type BulkEmbeddingRunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled'
+export type BulkEmbeddingRunStatus =
+  | 'queued'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'canceled'
+  | 'retried'
 
 export type BulkEmbeddingInput = {
   /** Stable identifier for correlating outputs (is unique per chunk) */

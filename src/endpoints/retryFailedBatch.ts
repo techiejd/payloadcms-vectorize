@@ -1,10 +1,12 @@
 import type { Payload, PayloadHandler } from 'payload'
 import { BULK_EMBEDDINGS_BATCHES_SLUG } from '../collections/bulkEmbeddingsBatches.js'
 import { BULK_EMBEDDINGS_RUNS_SLUG } from '../collections/bulkEmbeddingsRuns.js'
+import { BULK_EMBEDDINGS_INPUT_METADATA_SLUG } from '../collections/bulkEmbeddingInputMetadata.js'
 import type {
   KnowledgePoolDynamicConfig,
   KnowledgePoolName,
   RetryFailedBatchResult,
+  BulkEmbeddingInput,
 } from '../types.js'
 
 /**
@@ -34,10 +36,25 @@ export async function retryBatch<TPoolNames extends KnowledgePoolName = Knowledg
     return { error: `Batch "${batchId}" not found` }
   }
 
-  // Verify batch has failed status
-  if (batch.status !== 'failed') {
+  // Check if batch is already retried - if so, return the retried batch
+  if (batch.status === 'retried' && batch.retriedBatch) {
+    const retriedBatchId =
+      typeof batch.retriedBatch === 'object'
+        ? String(batch.retriedBatch.id)
+        : String(batch.retriedBatch)
     return {
-      error: `Batch "${batchId}" is not in failed status. Current status: ${batch.status}`,
+      batchId,
+      newBatchId: retriedBatchId,
+      runId: String(batch.run && typeof batch.run === 'object' ? batch.run.id : batch.run),
+      status: 'queued',
+      message: 'Batch was already retried. Returning the retry batch.',
+    }
+  }
+
+  // Verify batch has failed or retried status (retried batches can be retried again)
+  if (batch.status !== 'failed' && batch.status !== 'retried') {
+    return {
+      error: `Batch "${batchId}" is not in failed or retried status. Current status: ${batch.status}`,
     }
   }
 
@@ -74,16 +91,109 @@ export async function retryBatch<TPoolNames extends KnowledgePoolName = Knowledg
     }
   }
 
-  // Reset the batch status to queued
+  const callbacks = poolConfig.embeddingConfig.bulkEmbeddingsFns
+  const batchIdNum = parseInt(batchId, 10)
+  const runIdNum = parseInt(String(runId), 10)
+
+  // Load all metadata for this batch to reconstruct chunks (with pagination)
+  const metadataDocs: any[] = []
+  let metadataPage = 1
+  const metadataLimit = 1000 // Process in pages to avoid memory issues
+
+  while (true) {
+    const metadataResult = await payload.find({
+      collection: BULK_EMBEDDINGS_INPUT_METADATA_SLUG,
+      where: { batch: { equals: batchIdNum } },
+      limit: metadataLimit,
+      page: metadataPage,
+    })
+
+    const pageDocs = (metadataResult as any)?.docs || []
+    metadataDocs.push(...pageDocs)
+
+    const totalPages = (metadataResult as any)?.totalPages ?? metadataPage
+    if (metadataPage >= totalPages || pageDocs.length === 0) break
+    metadataPage++
+  }
+
+  if (metadataDocs.length === 0) {
+    return {
+      error: `No metadata found for batch "${batchId}". Cannot retry without chunk data.`,
+    }
+  }
+
+  // Reconstruct chunks from metadata (only id and text for addChunk)
+  const chunks: BulkEmbeddingInput[] = metadataDocs.map((meta: any) => ({
+    id: meta.inputId,
+    text: meta.text,
+  }))
+
+  // Find the highest batchIndex for this run to determine the new batch index
+  const existingBatchesResult = await payload.find({
+    collection: BULK_EMBEDDINGS_BATCHES_SLUG,
+    where: { run: { equals: runIdNum } },
+    limit: 1000,
+    sort: '-batchIndex',
+  })
+  const existingBatches = (existingBatchesResult as any)?.docs || []
+  const maxBatchIndex = existingBatches.length > 0 ? (existingBatches[0].batchIndex as number) : -1
+  const newBatchIndex = maxBatchIndex + 1
+
+  // Resubmit chunks via addChunk to get a new providerBatchId
+  // Submit all chunks - addChunk will accumulate and return a BatchSubmission when ready
+  let submission: { providerBatchId: string } | null = null
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i]
+    const isLastChunk = i === chunks.length - 1
+
+    const result = await callbacks.addChunk({
+      chunk,
+      isLastChunk,
+    })
+
+    if (result) {
+      submission = result
+      break // Batch was submitted
+    }
+  }
+
+  if (!submission) {
+    return {
+      error: 'Failed to resubmit batch - no providerBatchId was returned from addChunk',
+    }
+  }
+
+  // Create the new batch
+  const newBatch = await payload.create({
+    collection: BULK_EMBEDDINGS_BATCHES_SLUG,
+    data: {
+      run: runIdNum,
+      batchIndex: newBatchIndex,
+      providerBatchId: submission.providerBatchId,
+      status: 'queued',
+      inputCount: chunks.length,
+      succeededCount: 0,
+      failedCount: 0,
+      submittedAt: new Date().toISOString(),
+    },
+  })
+
+  // Update metadata to point to the new batch
+  await payload.update({
+    collection: BULK_EMBEDDINGS_INPUT_METADATA_SLUG,
+    where: { batch: { equals: batchIdNum } },
+    data: {
+      batch: newBatch.id,
+    },
+  })
+
+  // Update the old batch to point to the new batch and set status to 'retried'
   await payload.update({
     collection: BULK_EMBEDDINGS_BATCHES_SLUG,
     id: batchId,
     data: {
-      status: 'queued',
-      error: null,
-      completedAt: null,
-      succeededCount: 0,
-      failedCount: 0,
+      status: 'retried',
+      retriedBatch: newBatch.id,
     },
   })
 
@@ -108,9 +218,10 @@ export async function retryBatch<TPoolNames extends KnowledgePoolName = Knowledg
 
   return {
     batchId,
+    newBatchId: String(newBatch.id),
     runId: String(runId),
     status: 'queued',
-    message: 'Failed batch has been re-queued for processing',
+    message: 'Failed batch has been resubmitted and re-queued for processing',
   }
 }
 

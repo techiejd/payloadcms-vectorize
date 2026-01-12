@@ -83,7 +83,10 @@ describe('Bulk embed - failed batch', () => {
   })
 
   test('metadata table is kept after failed run (to allow retries)', async () => {
-    const post = await payload.create({ collection: 'posts', data: { title: 'FailCleanup' } as any })
+    const post = await payload.create({
+      collection: 'posts',
+      data: { title: 'FailCleanup' } as any,
+    })
 
     const run = await payload.create({
       collection: BULK_EMBEDDINGS_RUNS_SLUG,
@@ -159,5 +162,120 @@ describe('Bulk embed - failed batch', () => {
         completedAt: new Date().toISOString(),
       },
     })
+  })
+
+  test('retrying a failed batch creates a new batch and marks old batch as retried', async () => {
+    const post = await payload.create({ collection: 'posts', data: { title: 'RetryTest' } as any })
+
+    const run = await payload.create({
+      collection: BULK_EMBEDDINGS_RUNS_SLUG,
+      data: { pool: 'default', embeddingVersion: testEmbeddingVersion, status: 'queued' },
+    })
+
+    await payload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
+      task: 'payloadcms-vectorize:prepare-bulk-embedding',
+      input: { runId: String(run.id) },
+      req: { payload } as any,
+      ...(BULK_QUEUE_NAMES.prepareBulkEmbedQueueName
+        ? { queue: BULK_QUEUE_NAMES.prepareBulkEmbedQueueName }
+        : {}),
+    })
+
+    await waitForBulkJobs(payload)
+
+    // Find the failed batch
+    const batchesResult = await payload.find({
+      collection: BULK_EMBEDDINGS_BATCHES_SLUG,
+      where: { run: { equals: run.id } },
+    })
+    const failedBatch = (batchesResult as any).docs[0]
+    expect(failedBatch.status).toBe('failed')
+
+    // Retry the batch
+    const retryResult = await payload.retryFailedBatch({ batchId: String(failedBatch.id) })
+
+    expect('error' in retryResult).toBe(false)
+    if (!('error' in retryResult)) {
+      expect(retryResult.newBatchId).toBeDefined()
+      expect(retryResult.status).toBe('queued')
+      expect(retryResult.message).toContain('resubmitted')
+
+      // Check that the old batch is marked as retried
+      const oldBatch = await payload.findByID({
+        collection: BULK_EMBEDDINGS_BATCHES_SLUG,
+        id: String(failedBatch.id),
+      })
+      expect((oldBatch as any).status).toBe('retried')
+      expect((oldBatch as any).retriedBatch).toBeDefined()
+
+      // Check that the new batch exists and is queued
+      const newBatch = await payload.findByID({
+        collection: BULK_EMBEDDINGS_BATCHES_SLUG,
+        id: retryResult.newBatchId!,
+      })
+      expect((newBatch as any).status).toBe('queued')
+      expect((newBatch as any).providerBatchId).toBeDefined()
+      expect((newBatch as any).providerBatchId).not.toBe(failedBatch.providerBatchId)
+
+      // Check that metadata points to the new batch
+      const runIdNum = typeof run.id === 'number' ? run.id : parseInt(String(run.id), 10)
+      const metadata = await payload.find({
+        collection: BULK_EMBEDDINGS_INPUT_METADATA_SLUG,
+        where: { run: { equals: runIdNum } },
+      })
+      expect(metadata.totalDocs).toBeGreaterThan(0)
+      // All metadata should point to the new batch
+      for (const meta of (metadata as any).docs) {
+        const metaBatchId =
+          typeof meta.batch === 'object' ? meta.batch.id : parseInt(String(meta.batch), 10)
+        expect(metaBatchId).toBe(parseInt(retryResult.newBatchId!, 10))
+      }
+    }
+  })
+
+  test('retrying a retried batch returns the existing retry batch', async () => {
+    const post = await payload.create({
+      collection: 'posts',
+      data: { title: 'RetryRetryTest' } as any,
+    })
+
+    const run = await payload.create({
+      collection: BULK_EMBEDDINGS_RUNS_SLUG,
+      data: { pool: 'default', embeddingVersion: testEmbeddingVersion, status: 'queued' },
+    })
+
+    await payload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
+      task: 'payloadcms-vectorize:prepare-bulk-embedding',
+      input: { runId: String(run.id) },
+      req: { payload } as any,
+      ...(BULK_QUEUE_NAMES.prepareBulkEmbedQueueName
+        ? { queue: BULK_QUEUE_NAMES.prepareBulkEmbedQueueName }
+        : {}),
+    })
+
+    await waitForBulkJobs(payload)
+
+    // Find the failed batch
+    const batchesResult = await payload.find({
+      collection: BULK_EMBEDDINGS_BATCHES_SLUG,
+      where: { run: { equals: run.id } },
+    })
+    const failedBatch = (batchesResult as any).docs[0]
+
+    // Retry the batch first time
+    const firstRetryResult = await payload.retryFailedBatch({ batchId: String(failedBatch.id) })
+    expect('error' in firstRetryResult).toBe(false)
+    if ('error' in firstRetryResult) return
+
+    const firstRetryBatchId = firstRetryResult.newBatchId!
+
+    // Retry the retried batch - should return the existing retry batch
+    const secondRetryResult = await payload.retryFailedBatch({ batchId: String(failedBatch.id) })
+
+    expect('error' in secondRetryResult).toBe(false)
+    if (!('error' in secondRetryResult)) {
+      expect(secondRetryResult.newBatchId).toBe(firstRetryBatchId)
+      expect(secondRetryResult.message).toContain('already retried')
+    }
   })
 })

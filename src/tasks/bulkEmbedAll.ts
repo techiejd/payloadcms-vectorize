@@ -46,7 +46,7 @@ type PollOrCompleteBulkEmbeddingTaskInputOutput = {
   output: PollOrCompleteBulkEmbeddingTaskOutput
 }
 
-const TERMINAL_STATUSES = new Set(['succeeded', 'failed', 'canceled'])
+const TERMINAL_STATUSES = new Set(['succeeded', 'failed', 'canceled', 'retried'])
 
 // Helper to load and validate run + config
 async function loadRunAndConfig({
