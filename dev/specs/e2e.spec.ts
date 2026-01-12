@@ -249,7 +249,7 @@ test.describe('Vector embedding e2e tests', () => {
     })
     expect(succeededRetryResponse.status()).toBe(400)
     const succeededRetryJson = await succeededRetryResponse.json()
-    expect(succeededRetryJson.error).toContain('not in failed status')
+    expect(succeededRetryJson.error).toContain('not in failed or retried status')
     console.log('[test] Retry endpoint correctly rejected succeeded batch')
 
     // Navigate to the succeeded batch page and verify retry button is disabled
@@ -265,7 +265,8 @@ test.describe('Vector embedding e2e tests', () => {
 
     // Verify the button is disabled (opacity check)
     const buttonStyle = await retryButton.getAttribute('style')
-    expect(buttonStyle).toContain('opacity: 0.5')
+    console.log('[test] Button style:', buttonStyle)
+    expect(buttonStyle).toContain('opacity:0.5')
 
     // Verify the "Retry Not Available" message is shown
     const notAvailableMessage = page.locator('text=/Retry Not Available/i')
@@ -361,14 +362,64 @@ test.describe('Vector embedding e2e tests', () => {
     await waitForBulkJobs(payload, 30000)
     console.log('[test] Bulk jobs completed')
 
-    // Find the failed batch that was created
-    const batches = await (payload as any).find({
-      collection: BULK_EMBEDDINGS_BATCHES_SLUG,
-      where: {
-        and: [{ run: { equals: runId } }, { status: { equals: 'failed' } }],
-      },
-    })
-    expect(batches.totalDocs).toBeGreaterThan(0)
+    // Wait for the batch to actually fail (poll-or-complete job needs to finish)
+    const runIdNum = parseInt(runId, 10)
+    let batches: any
+    let attempts = 0
+    const maxAttempts = 30 // Wait up to 30 seconds
+
+    while (attempts < maxAttempts) {
+      batches = await (payload as any).find({
+        collection: BULK_EMBEDDINGS_BATCHES_SLUG,
+        where: {
+          and: [{ run: { equals: runIdNum } }, { status: { equals: 'failed' } }],
+        },
+      })
+
+      if (batches.totalDocs > 0) {
+        break
+      }
+
+      // Check current batch status
+      const allBatches = await (payload as any).find({
+        collection: BULK_EMBEDDINGS_BATCHES_SLUG,
+        where: { run: { equals: runIdNum } },
+      })
+      if (allBatches.totalDocs > 0) {
+        const currentStatus = allBatches.docs[0].status
+        if (currentStatus === 'failed') {
+          batches = allBatches
+          break
+        }
+      }
+
+      // Wait a bit before retrying
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+      attempts++
+    }
+
+    if (!batches || batches.totalDocs === 0) {
+      // Final check for debugging
+      const allBatchesFinal = await (payload as any).find({
+        collection: BULK_EMBEDDINGS_BATCHES_SLUG,
+        where: { run: { equals: runIdNum } },
+      })
+      const runFinal = await (payload as any).findByID({
+        collection: BULK_EMBEDDINGS_RUNS_SLUG,
+        id: runId,
+      })
+      console.log('[test] Failed to find failed batch after', attempts, 'attempts')
+      console.log('[test] Run status:', runFinal.status)
+      console.log('[test] Batches found:', allBatchesFinal.totalDocs)
+      if (allBatchesFinal.totalDocs > 0) {
+        console.log(
+          '[test] Batch statuses:',
+          allBatchesFinal.docs.map((b: any) => b.status),
+        )
+      }
+    }
+
+    expect(batches?.totalDocs).toBeGreaterThan(0)
     const batch = batches.docs[0]
     console.log('[test] Found failed batch:', batch.id)
 
@@ -378,17 +429,27 @@ test.describe('Vector embedding e2e tests', () => {
     })
     expect(retryResponse.status()).toBe(202)
     const retryJson = await retryResponse.json()
-    expect(retryJson.message).toBe('Failed batch has been re-queued for processing')
+    expect(retryJson.message).toBe('Failed batch has been resubmitted and re-queued for processing')
     expect(retryJson.batchId).toBe(String(batch.id))
+    expect(retryJson.newBatchId).toBeDefined()
     expect(retryJson.status).toBe('queued')
 
-    // Verify the batch status was updated
+    // Verify the old batch status was updated to 'retried'
     const updatedBatch = await (payload as any).findByID({
       collection: BULK_EMBEDDINGS_BATCHES_SLUG,
       id: String(batch.id),
     })
-    expect(updatedBatch.status).toBe('queued')
-    expect(updatedBatch.error).toBeNull()
+    expect(updatedBatch.status).toBe('retried')
+    expect(updatedBatch.retriedBatch).toBeDefined()
+
+    // Verify the new batch exists and is queued
+    const newBatch = await (payload as any).findByID({
+      collection: BULK_EMBEDDINGS_BATCHES_SLUG,
+      id: retryJson.newBatchId,
+    })
+    expect(newBatch.status).toBe('queued')
+    expect(newBatch.providerBatchId).toBeDefined()
+    expect(newBatch.providerBatchId).not.toBe(batch.providerBatchId)
 
     // Verify the run status was reset to running
     const updatedRun = await (payload as any).findByID({
