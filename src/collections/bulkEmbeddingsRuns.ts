@@ -18,13 +18,22 @@ export const createBulkEmbeddingsRunsCollection = (): CollectionConfig => ({
     description:
       'Bulk embedding run records. Created automatically when the Embed all action is triggered.',
     defaultColumns: ['pool', 'status', 'inputs', 'succeeded', 'failed', 'submittedAt'],
+    components: {
+      edit: {
+        beforeDocumentControls: [
+          {
+            path: 'payloadcms-vectorize/client#FailedBatchesList',
+          },
+        ],
+      },
+    },
   },
   access: {
     // Anyone can read; only internal (local API) can mutate.
     read: () => true,
-    create: ({ req }) => req?.payloadAPI === 'local',
-    update: ({ req }) => req?.payloadAPI === 'local',
-    delete: ({ req }) => req?.payloadAPI === 'local',
+    create: ({ req }) => false,
+    update: ({ req }) => false,
+    delete: ({ req }) => false,
   },
   fields: [
     {

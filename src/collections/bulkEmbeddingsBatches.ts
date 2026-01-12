@@ -36,9 +36,9 @@ export const createBulkEmbeddingsBatchesCollection = (): CollectionConfig => ({
   access: {
     // Anyone can read; only internal (local API) can mutate.
     read: () => true,
-    create: ({ req }) => req?.payloadAPI === 'local',
-    update: ({ req }) => req?.payloadAPI === 'local',
-    delete: ({ req }) => req?.payloadAPI === 'local',
+    create: ({ req }) => false,
+    update: ({ req }) => false,
+    delete: ({ req }) => false,
   },
   fields: [
     {

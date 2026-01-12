@@ -7,6 +7,7 @@ export const BULK_EMBEDDINGS_INPUT_METADATA_SLUG = 'vector-bulk-embedding-input-
 export const createBulkEmbeddingInputMetadataCollection = (): CollectionConfig => ({
   slug: BULK_EMBEDDINGS_INPUT_METADATA_SLUG,
   admin: {
+    hidden: true,
     useAsTitle: 'inputId',
     description: 'Stores per-input metadata for bulk embedding runs.',
     defaultColumns: ['run', 'batch', 'inputId', 'sourceCollection', 'docId', 'chunkIndex'],
