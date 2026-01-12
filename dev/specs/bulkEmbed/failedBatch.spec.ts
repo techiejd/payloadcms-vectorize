@@ -82,8 +82,8 @@ describe('Bulk embed - failed batch', () => {
     expect(embeds.totalDocs).toBe(0)
   })
 
-  test('metadata table is cleaned after failed run (no partial writes)', async () => {
-    await payload.create({ collection: 'posts', data: { title: 'FailCleanup' } as any })
+  test('metadata table is kept after failed run (to allow retries)', async () => {
+    const post = await payload.create({ collection: 'posts', data: { title: 'FailCleanup' } as any })
 
     const run = await payload.create({
       collection: BULK_EMBEDDINGS_RUNS_SLUG,
@@ -101,11 +101,20 @@ describe('Bulk embed - failed batch', () => {
 
     await waitForBulkJobs(payload)
 
+    // Metadata should be kept for failed batches to allow retries
+    const runIdNum = typeof run.id === 'number' ? run.id : parseInt(String(run.id), 10)
     const metadata = await payload.find({
       collection: BULK_EMBEDDINGS_INPUT_METADATA_SLUG,
-      where: { run: { exists: true } },
+      where: { run: { equals: runIdNum } },
     })
-    expect(metadata.totalDocs).toBe(0)
+    expect(metadata.totalDocs).toBeGreaterThan(0)
+
+    // Verify no partial embeddings were written (no partial writes)
+    const embeds = await payload.find({
+      collection: 'default',
+      where: { docId: { equals: String(post.id) } },
+    })
+    expect(embeds.totalDocs).toBe(0)
   })
 
   test('cannot retry batch while run is still running', async () => {
