@@ -15,12 +15,15 @@ export const EmbedAllButton: React.FC<EmbedAllButtonProps & { payload?: any; par
   // The function receives { payload, params } context
   let hasBulkEmbeddings: boolean = false
 
+  console.log('hasBulkEmbeddings', props.hasBulkEmbeddings)
+
   if (typeof props.hasBulkEmbeddings === 'function') {
     // Call the serverProps function with the payload/params context
     try {
       hasBulkEmbeddings = Boolean(
         (props.hasBulkEmbeddings as any)({ payload: props.payload, params: props.params }),
       )
+      console.log('hasBulkEmbeddings from function', hasBulkEmbeddings)
     } catch (error) {
       console.error('[EmbedAllButton Server] Error calling hasBulkEmbeddings:', error)
       hasBulkEmbeddings = false

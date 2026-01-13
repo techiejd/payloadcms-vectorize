@@ -43,44 +43,40 @@ export type RetryFailedBatchResult =
 /**
  * Extended Payload type with vectorize plugin methods
  */
-export type VectorizedPayload<TPoolNames extends KnowledgePoolName = KnowledgePoolName> =
-  Payload & {
-    /** Check if bulk embedding is enabled for a knowledge pool */
-    _isBulkEmbedEnabled: (knowledgePool: TPoolNames) => boolean
-    search: (params: VectorSearchQuery<TPoolNames>) => Promise<Array<VectorSearchResult>>
-    queueEmbed: (
-      params:
-        | {
-            collection: string
-            docId: string
-          }
-        | {
-            collection: string
-            doc: Record<string, any>
-          },
-    ) => Promise<void>
-    /** Start a bulk embedding run for a knowledge pool */
-    bulkEmbed: (params: { knowledgePool: TPoolNames }) => Promise<BulkEmbedResult>
-    /** Retry a failed batch */
-    retryFailedBatch: (params: { batchId: string }) => Promise<RetryFailedBatchResult>
-  }
+export type VectorizedPayload<TPoolNames extends KnowledgePoolName = KnowledgePoolName> = {
+  /** Check if bulk embedding is enabled for a knowledge pool */
+  _isBulkEmbedEnabled: (knowledgePool: TPoolNames) => boolean
+  search: (params: VectorSearchQuery<TPoolNames>) => Promise<Array<VectorSearchResult>>
+  queueEmbed: (
+    params:
+      | {
+          collection: string
+          docId: string
+        }
+      | {
+          collection: string
+          doc: Record<string, any>
+        },
+  ) => Promise<void>
+  /** Start a bulk embedding run for a knowledge pool */
+  bulkEmbed: (params: { knowledgePool: TPoolNames }) => Promise<BulkEmbedResult>
+  /** Retry a failed batch */
+  retryFailedBatch: (params: { batchId: string }) => Promise<RetryFailedBatchResult>
+}
 
 /**
- * Type guard to check if a Payload instance has vectorize extensions
+ * Get the vectorized payload object from config.custom
+ * Returns null if the payload instance doesn't have vectorize extensions
  */
-export function isVectorizedPayload(payload: Payload): payload is VectorizedPayload {
-  return (
-    '_isBulkEmbedEnabled' in payload &&
-    typeof (payload as any)._isBulkEmbedEnabled === 'function' &&
-    'search' in payload &&
-    typeof (payload as any).search === 'function' &&
-    'queueEmbed' in payload &&
-    typeof (payload as any).queueEmbed === 'function' &&
-    'bulkEmbed' in payload &&
-    typeof (payload as any).bulkEmbed === 'function' &&
-    'retryFailedBatch' in payload &&
-    typeof (payload as any).retryFailedBatch === 'function'
-  )
+export function getVectorizedPayload<TPoolNames extends KnowledgePoolName = KnowledgePoolName>(
+  payload: Payload,
+): VectorizedPayload<TPoolNames> | null {
+  const custom = (payload.config as any)?.custom
+  const vectorizedPayloadFactory = custom?.createVectorizedPayloadObject
+  if (vectorizedPayloadFactory && typeof vectorizedPayloadFactory === 'function') {
+    return vectorizedPayloadFactory(payload) as VectorizedPayload<TPoolNames>
+  }
+  return null
 }
 
 export type EmbedDocsFn = (texts: string[]) => Promise<number[][] | Float32Array[]>

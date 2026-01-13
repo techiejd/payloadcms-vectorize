@@ -71,7 +71,7 @@ export type {
 
   // PollBulkEmbeddingsResult
   BulkEmbeddingRunStatus,
-  isVectorizedPayload,
+  getVectorizedPayload,
   VectorizedPayload,
 } from './types.js'
 
@@ -387,11 +387,12 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
         }
       }
 
-      const incomingOnInit = config.onInit
       const vectorSearchHandlers = createVectorSearchHandlers(pluginOptions.knowledgePools)
-      config.onInit = async (payload) => {
-        if (incomingOnInit) await incomingOnInit(payload)
-        Object.assign(payload, {
+
+      // Create vectorized payload object factory that creates methods bound to a payload instance
+      const createVectorizedPayloadObject = (payload: Payload): VectorizedPayload<TPoolNames> => {
+        console.log('createVectorizedPayloadObject', payload)
+        return {
           _isBulkEmbedEnabled: (knowledgePool: TPoolNames): boolean => {
             const poolConfig = pluginOptions.knowledgePools[knowledgePool]
             return !!poolConfig?.embeddingConfig?.bulkEmbeddingsFns
@@ -451,7 +452,18 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
               knowledgePools: pluginOptions.knowledgePools,
               queueName: pluginOptions.bulkQueueNames?.pollOrCompleteQueueName,
             }),
-        } as Partial<VectorizedPayload<TPoolNames>>)
+        } as VectorizedPayload<TPoolNames>
+      }
+
+      // Store factory in config.custom
+      config.custom = {
+        ...(config.custom || {}),
+        createVectorizedPayloadObject,
+      }
+
+      const incomingOnInit = config.onInit
+      config.onInit = async (payload) => {
+        if (incomingOnInit) await incomingOnInit(payload)
         // Ensure pgvector artifacts for each knowledge pool
         for (const poolName in staticConfigs) {
           const staticConfig = staticConfigs[poolName]

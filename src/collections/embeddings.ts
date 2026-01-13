@@ -1,6 +1,6 @@
 import type { CollectionConfig, Field } from 'payload'
-import type { KnowledgePoolName, VectorizedPayload } from '../types.js'
-import { isVectorizedPayload } from '../types.js'
+import type { KnowledgePoolName } from '../types.js'
+import { getVectorizedPayload } from '../types.js'
 
 const RESERVED_FIELDS = ['sourceCollection', 'docId', 'chunkIndex', 'chunkText', 'embeddingVersion']
 
@@ -37,9 +37,12 @@ export const createEmbeddingsCollection = (
                 // params structure: { segments: [ 'collections', 'bulkDefault' ] }
                 const poolName = params?.segments?.[1]
 
-                // Use the _isBulkEmbedEnabled method added by the plugin
-                if (poolName && typeof poolName === 'string' && isVectorizedPayload(payload)) {
-                  return payload._isBulkEmbedEnabled(poolName)
+                // Use getVectorizedPayload to get the vectorized payload object
+                const vectorizedPayload = getVectorizedPayload(payload)
+                console.log('vectorizedPayload', vectorizedPayload)
+                console.log('payload.config.custom', payload.config.custom)
+                if (poolName && typeof poolName === 'string' && vectorizedPayload) {
+                  return vectorizedPayload._isBulkEmbedEnabled(poolName)
                 }
 
                 return false

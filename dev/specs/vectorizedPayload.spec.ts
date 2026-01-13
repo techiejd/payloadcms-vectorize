@@ -2,7 +2,7 @@ import type { Payload } from 'payload'
 
 import { getPayload } from 'payload'
 import { beforeAll, describe, expect, test } from 'vitest'
-import { isVectorizedPayload, VectorizedPayload } from '../../src/types.js'
+import { getVectorizedPayload, VectorizedPayload } from '../../src/types.js'
 import { buildDummyConfig, DIMS, getInitialMarkdownContent } from './constants.js'
 import { createTestDb, waitForVectorizationJobs } from './utils.js'
 import { postgresAdapter } from '@payloadcms/db-postgres'
@@ -93,54 +93,16 @@ describe('VectorizedPayload', () => {
     markdownContent = await getInitialMarkdownContent(config)
   })
 
-  describe('isVectorizedPayload type guard', () => {
-    test('returns true for a payload instance with vectorize extensions', () => {
-      expect(isVectorizedPayload(payload)).toBe(true)
+  describe('getVectorizedPayload', () => {
+    test('returns vectorized payload object for a payload instance with vectorize extensions', () => {
+      const vectorizedPayload = getVectorizedPayload(payload)
+      expect(vectorizedPayload).not.toBeNull()
+      expect(vectorizedPayload).toBeDefined()
     })
 
-    test('returns false for a plain object without search method', () => {
-      const plainObj = {
-        _isBulkEmbedEnabled: () => false,
-        queueEmbed: () => Promise.resolve(),
-        bulkEmbed: () => Promise.resolve({}),
-        retryFailedBatch: () => Promise.resolve({}),
-      } as unknown as Payload
-      expect(isVectorizedPayload(plainObj)).toBe(false)
-    })
-
-    test('returns false for a plain object without queueEmbed method', () => {
-      const plainObj = {
-        _isBulkEmbedEnabled: () => false,
-        search: () => Promise.resolve([]),
-        bulkEmbed: () => Promise.resolve({}),
-        retryFailedBatch: () => Promise.resolve({}),
-      } as unknown as Payload
-      expect(isVectorizedPayload(plainObj)).toBe(false)
-    })
-
-    test('returns false for a plain object without bulkEmbed method', () => {
-      const plainObj = {
-        _isBulkEmbedEnabled: () => false,
-        search: () => Promise.resolve([]),
-        queueEmbed: () => Promise.resolve(),
-        retryFailedBatch: () => Promise.resolve({}),
-      } as unknown as Payload
-      expect(isVectorizedPayload(plainObj)).toBe(false)
-    })
-
-    test('returns false for a plain object without retryFailedBatch method', () => {
-      const plainObj = {
-        _isBulkEmbedEnabled: () => false,
-        search: () => Promise.resolve([]),
-        queueEmbed: () => Promise.resolve(),
-        bulkEmbed: () => Promise.resolve({}),
-      } as unknown as Payload
-      expect(isVectorizedPayload(plainObj)).toBe(false)
-    })
-
-    test('returns false for an empty object', () => {
-      const emptyObj = {} as unknown as Payload
-      expect(isVectorizedPayload(emptyObj)).toBe(false)
+    test('returns null for a payload instance without vectorize extensions', () => {
+      const plainPayload = {} as unknown as Payload
+      expect(getVectorizedPayload(plainPayload)).toBeNull()
     })
   })
 
@@ -161,11 +123,13 @@ describe('VectorizedPayload', () => {
     })
 
     test('payload has search method', () => {
-      expect(typeof (payload as VectorizedPayload).search).toBe('function')
+      const vectorizedPayload = getVectorizedPayload<'default'>(payload)
+      expect(vectorizedPayload).not.toBeNull()
+      expect(typeof vectorizedPayload!.search).toBe('function')
     })
 
     test('search returns an array of VectorSearchResult', async () => {
-      const vectorizedPayload = payload as VectorizedPayload<'default'>
+      const vectorizedPayload = getVectorizedPayload<'default'>(payload)!
 
       const results = await vectorizedPayload.search({
         query: titleAndQuery,
@@ -177,7 +141,7 @@ describe('VectorizedPayload', () => {
     })
 
     test('search results are ordered by similarity (highest first)', async () => {
-      const vectorizedPayload = payload as VectorizedPayload<'default'>
+      const vectorizedPayload = getVectorizedPayload<'default'>(payload)!
 
       const results = await vectorizedPayload.search({
         query: titleAndQuery,
@@ -189,7 +153,7 @@ describe('VectorizedPayload', () => {
     })
 
     test('search respects limit parameter', async () => {
-      const vectorizedPayload = payload as VectorizedPayload<'default'>
+      const vectorizedPayload = getVectorizedPayload<'default'>(payload)!
 
       const results = await vectorizedPayload.search({
         query: titleAndQuery,
@@ -201,7 +165,7 @@ describe('VectorizedPayload', () => {
     })
 
     test('search respects where clause', async () => {
-      const vectorizedPayload = payload as VectorizedPayload<'default'>
+      const vectorizedPayload = getVectorizedPayload<'default'>(payload)!
 
       const results = await vectorizedPayload.search({
         query: titleAndQuery,
@@ -216,7 +180,7 @@ describe('VectorizedPayload', () => {
     })
 
     test('querying a title should return the title as top result', async () => {
-      const vectorizedPayload = payload as VectorizedPayload<'default'>
+      const vectorizedPayload = getVectorizedPayload<'default'>(payload)!
 
       const results = await vectorizedPayload.search({
         query: titleAndQuery,
@@ -230,11 +194,13 @@ describe('VectorizedPayload', () => {
 
   describe('queueEmbed method', () => {
     test('payload has queueEmbed method', () => {
-      expect(typeof (payload as VectorizedPayload).queueEmbed).toBe('function')
+      const vectorizedPayload = getVectorizedPayload(payload)
+      expect(vectorizedPayload).not.toBeNull()
+      expect(typeof vectorizedPayload!.queueEmbed).toBe('function')
     })
 
     test('queueEmbed queues a vectorization job', async () => {
-      const vectorizedPayload = payload as VectorizedPayload
+      const vectorizedPayload = getVectorizedPayload(payload)!
 
       // Create a post (triggers automatic embedding)
       const post = await payload.create({
@@ -271,11 +237,13 @@ describe('VectorizedPayload', () => {
 
   describe('bulkEmbed method', () => {
     test('payload has bulkEmbed method', () => {
-      expect(typeof (payload as VectorizedPayload).bulkEmbed).toBe('function')
+      const vectorizedPayload = getVectorizedPayload(payload)
+      expect(vectorizedPayload).not.toBeNull()
+      expect(typeof vectorizedPayload!.bulkEmbed).toBe('function')
     })
 
     test('bulkEmbed throws error when bulk embedding not configured', async () => {
-      const vectorizedPayload = payload as VectorizedPayload<'default'>
+      const vectorizedPayload = getVectorizedPayload<'default'>(payload)!
 
       // This pool doesn't have bulkEmbeddingsFns configured
       await expect(vectorizedPayload.bulkEmbed({ knowledgePool: 'default' })).rejects.toThrow(
@@ -286,11 +254,13 @@ describe('VectorizedPayload', () => {
 
   describe('retryFailedBatch method', () => {
     test('payload has retryFailedBatch method', () => {
-      expect(typeof (payload as VectorizedPayload).retryFailedBatch).toBe('function')
+      const vectorizedPayload = getVectorizedPayload(payload)
+      expect(vectorizedPayload).not.toBeNull()
+      expect(typeof vectorizedPayload!.retryFailedBatch).toBe('function')
     })
 
     test('retryFailedBatch returns error for non-existent batch', async () => {
-      const vectorizedPayload = payload as VectorizedPayload
+      const vectorizedPayload = getVectorizedPayload(payload)!
 
       const result = await vectorizedPayload.retryFailedBatch({ batchId: '999999' })
 

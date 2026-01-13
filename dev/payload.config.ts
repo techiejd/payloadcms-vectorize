@@ -42,6 +42,7 @@ const bulkEmbeddingsFns =
     : createMockBulkEmbeddings({
         statusSequence: ['queued', 'running', 'running', 'succeeded'],
       })
+console.log('bulkEmbeddingsFns', bulkEmbeddingsFns)
 const ssl =
   process.env.DATABASE_URI !== undefined
     ? {
@@ -106,7 +107,7 @@ const buildConfigWithPostgres = async () => {
           queue: 'vectorize-bulk-prepare',
         },
         {
-          cron: '*/10 * * * * *', // Run every 10 seconds for bulk jobs
+          cron: '0 * * * *', // Run every hour
           limit: 5,
           queue: 'vectorize-bulk-poll',
         },

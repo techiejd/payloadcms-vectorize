@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, test } from 'vitest'
 import { BULK_EMBEDDINGS_RUNS_SLUG } from '../../../src/collections/bulkEmbeddingsRuns.js'
 import { BULK_EMBEDDINGS_BATCHES_SLUG } from '../../../src/collections/bulkEmbeddingsBatches.js'
 import { BULK_EMBEDDINGS_INPUT_METADATA_SLUG } from '../../../src/collections/bulkEmbeddingInputMetadata.js'
-import type { VectorizedPayload } from '../../../src/types.js'
+import { getVectorizedPayload } from '../../../src/types.js'
 import {
   BULK_QUEUE_NAMES,
   DEFAULT_DIMS,
@@ -18,7 +18,7 @@ const DIMS = DEFAULT_DIMS
 const dbName = `bulk_failed_${Date.now()}`
 
 describe('Bulk embed - failed batch', () => {
-  let payload: VectorizedPayload<'default'>
+  let payload: Payload
 
   beforeAll(async () => {
     await createTestDb({ dbName })
@@ -45,7 +45,7 @@ describe('Bulk embed - failed batch', () => {
       dims: DIMS,
       key: `failed-${Date.now()}`,
     })
-    payload = built.payload as VectorizedPayload<'default'>
+    payload = built.payload
   })
 
   test('failed batch marks entire run as failed', async () => {
@@ -121,6 +121,7 @@ describe('Bulk embed - failed batch', () => {
   })
 
   test('cannot retry batch while run is still running', async () => {
+    const vectorizedPayload = getVectorizedPayload<'default'>(payload)!
     // Create a run in 'running' status
     const run = await (payload as any).create({
       collection: BULK_EMBEDDINGS_RUNS_SLUG,
@@ -145,7 +146,7 @@ describe('Bulk embed - failed batch', () => {
     })
 
     // Try to retry the batch while run is running - should be rejected
-    const result = await payload.retryFailedBatch({ batchId: String(batch.id) })
+    const result = await vectorizedPayload.retryFailedBatch({ batchId: String(batch.id) })
 
     expect('error' in result).toBe(true)
     expect('conflict' in result && result.conflict).toBe(true)
@@ -165,6 +166,7 @@ describe('Bulk embed - failed batch', () => {
   })
 
   test('retrying a failed batch creates a new batch and marks old batch as retried', async () => {
+    const vectorizedPayload = getVectorizedPayload<'default'>(payload)!
     const post = await payload.create({ collection: 'posts', data: { title: 'RetryTest' } as any })
 
     const run = await payload.create({
@@ -192,7 +194,9 @@ describe('Bulk embed - failed batch', () => {
     expect(failedBatch.status).toBe('failed')
 
     // Retry the batch
-    const retryResult = await payload.retryFailedBatch({ batchId: String(failedBatch.id) })
+    const retryResult = await vectorizedPayload.retryFailedBatch({
+      batchId: String(failedBatch.id),
+    })
 
     expect('error' in retryResult).toBe(false)
     if (!('error' in retryResult)) {
@@ -234,6 +238,7 @@ describe('Bulk embed - failed batch', () => {
   })
 
   test('retrying a retried batch returns the existing retry batch', async () => {
+    const vectorizedPayload = getVectorizedPayload<'default'>(payload)!
     const post = await payload.create({
       collection: 'posts',
       data: { title: 'RetryRetryTest' } as any,
@@ -263,14 +268,18 @@ describe('Bulk embed - failed batch', () => {
     const failedBatch = (batchesResult as any).docs[0]
 
     // Retry the batch first time
-    const firstRetryResult = await payload.retryFailedBatch({ batchId: String(failedBatch.id) })
+    const firstRetryResult = await vectorizedPayload.retryFailedBatch({
+      batchId: String(failedBatch.id),
+    })
     expect('error' in firstRetryResult).toBe(false)
     if ('error' in firstRetryResult) return
 
     const firstRetryBatchId = firstRetryResult.newBatchId!
 
     // Retry the retried batch - should return the existing retry batch
-    const secondRetryResult = await payload.retryFailedBatch({ batchId: String(failedBatch.id) })
+    const secondRetryResult = await vectorizedPayload.retryFailedBatch({
+      batchId: String(failedBatch.id),
+    })
 
     expect('error' in secondRetryResult).toBe(false)
     if (!('error' in secondRetryResult)) {

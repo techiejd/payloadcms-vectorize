@@ -1,7 +1,7 @@
 import type { Payload } from 'payload'
 import { beforeAll, describe, expect, test } from 'vitest'
 import { BULK_EMBEDDINGS_RUNS_SLUG } from '../../../src/collections/bulkEmbeddingsRuns.js'
-import type { VectorizedPayload } from '../../../src/types.js'
+import { getVectorizedPayload } from '../../../src/types.js'
 import {
   BULK_QUEUE_NAMES,
   DEFAULT_DIMS,
@@ -15,7 +15,7 @@ const DIMS = DEFAULT_DIMS
 const dbName = `bulk_concurrent_${Date.now()}`
 
 describe('Bulk embed - concurrent runs prevention', () => {
-  let payload: VectorizedPayload<'default'>
+  let payload: Payload
 
   beforeAll(async () => {
     await createTestDb({ dbName })
@@ -44,10 +44,11 @@ describe('Bulk embed - concurrent runs prevention', () => {
       dims: DIMS,
       key: `concurrent-${Date.now()}`,
     })
-    payload = built.payload as VectorizedPayload<'default'>
+    payload = built.payload
   })
 
   test('cannot start concurrent bulk embed runs for the same pool', async () => {
+    const vectorizedPayload = getVectorizedPayload<'default'>(payload)!
     // Create a test post first
     await payload.create({
       collection: 'posts',
@@ -65,7 +66,7 @@ describe('Bulk embed - concurrent runs prevention', () => {
     })
 
     // Try to start another bulk embed for the same pool
-    const result = await payload.bulkEmbed({ knowledgePool: 'default' })
+    const result = await vectorizedPayload.bulkEmbed({ knowledgePool: 'default' })
 
     expect('conflict' in result && result.conflict).toBe(true)
     expect(result.status).toBe('running')
@@ -84,6 +85,7 @@ describe('Bulk embed - concurrent runs prevention', () => {
   })
 
   test('can start bulk embed run after previous run completes', async () => {
+    const vectorizedPayload = getVectorizedPayload<'default'>(payload)!
     // Create a test post
     await payload.create({
       collection: 'posts',
@@ -102,7 +104,7 @@ describe('Bulk embed - concurrent runs prevention', () => {
     })
 
     // Should be able to start a new run for the same pool
-    const result = await payload.bulkEmbed({ knowledgePool: 'default' })
+    const result = await vectorizedPayload.bulkEmbed({ knowledgePool: 'default' })
 
     expect('conflict' in result).toBe(false)
     expect(result.status).toBe('queued')
