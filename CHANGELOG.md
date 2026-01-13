@@ -2,6 +2,37 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Changed
+
+- **`isVectorizedPayload` replaced with `getVectorizedPayload`**: The type guard `isVectorizedPayload(payload)` has been replaced with `getVectorizedPayload(payload)` which returns the vectorized payload object directly (or `null` if not available). This provides a cleaner API that doesn't require type assertions.
+
+### Migration
+
+**Before:**
+
+```typescript
+import { isVectorizedPayload, type VectorizedPayload } from 'payloadcms-vectorize'
+
+if (isVectorizedPayload(payload)) {
+  const results = await payload.search({ ... })
+  await payload.queueEmbed({ ... })
+}
+```
+
+**After:**
+
+```typescript
+import { getVectorizedPayload } from 'payloadcms-vectorize'
+
+const vectorizedPayload = getVectorizedPayload(payload)
+if (vectorizedPayload) {
+  const results = await vectorizedPayload.search({ ... })
+  await vectorizedPayload.queueEmbed({ ... })
+}
+```
+
 ## 0.5.0 - 2026-01-10
 
 ### Breaking Changes
@@ -26,6 +57,8 @@ All notable changes to this project will be documented in this file.
 - Improved test coverage for edge cases in bulk embedding workflow
 
 ## 0.4.5 - 2025-01-09
+
+**Note:** This version is deprecated due to a critical bug with `isVectorizedPayload`. Use `getVectorizedPayload(payload)` instead (see 0.5.0 section above). No 0.4 line fix (0.4.6) exists yet.
 
 ### Added
 

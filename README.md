@@ -189,14 +189,14 @@ const { results } = await response.json()
 Alternatively, you can use the local API directly on the Payload instance:
 
 ```typescript
-import { isVectorizedPayload, type VectorizedPayload } from 'payloadcms-vectorize'
+import { getVectorizedPayload } from 'payloadcms-vectorize'
 
-// After initializing Payload, it will have the search and queueEmbed methods
+// After initializing Payload, get the vectorized payload object
 const payload = await getPayload({ config, cron: true })
+const vectorizedPayload = getVectorizedPayload(payload)
 
-// Type guard to ensure payload has vectorize extensions
-if (isVectorizedPayload(payload)) {
-  const results = await payload.search({
+if (vectorizedPayload) {
+  const results = await vectorizedPayload.search({
     query: 'What is machine learning?',
     knowledgePool: 'main',
     where: {
@@ -207,7 +207,7 @@ if (isVectorizedPayload(payload)) {
   // results is an array of VectorSearchResult
 
   // Manually queue an embedding job
-  await payload.queueEmbed({
+  await vectorizedPayload.queueEmbed({
     collection: 'posts',
     docId: 'some-post-id',
   })
@@ -591,18 +591,21 @@ Perform vector search programmatically without making an HTTP request.
 **Example:**
 
 ```typescript
-import type { VectorizedPayload } from 'payloadcms-vectorize'
+import { getVectorizedPayload } from 'payloadcms-vectorize'
 
 const payload = await getPayload({ config, cron: true })
+const vectorizedPayload = getVectorizedPayload<'main'>(payload)
 
-const results = await (payload as VectorizedPayload<'main'>).search({
-  query: 'What is machine learning?',
-  knowledgePool: 'main',
-  where: {
-    category: { equals: 'guides' },
-  },
-  limit: 5,
-})
+if (vectorizedPayload) {
+  const results = await vectorizedPayload.search({
+    query: 'What is machine learning?',
+    knowledgePool: 'main',
+    where: {
+      category: { equals: 'guides' },
+    },
+    limit: 5,
+  })
+}
 ```
 
 #### `payload.queueEmbed(params)`
@@ -626,38 +629,55 @@ Or:
 **Example:**
 
 ```typescript
-// Queue by document ID (fetches document first)
-await (payload as VectorizedPayload).queueEmbed({
-  collection: 'posts',
-  docId: 'some-post-id',
-})
-
-// Queue with document object directly
-await (payload as VectorizedPayload).queueEmbed({
-  collection: 'posts',
-  doc: {
-    id: 'some-post-id',
-    title: 'Post Title',
-    content: {
-      /* ... */
-    },
-  },
-})
-```
-
-#### Type Guard
-
-Use the `isVectorizedPayload` type guard to check if a Payload instance has vectorize extensions:
-
-```typescript
-import { isVectorizedPayload } from 'payloadcms-vectorize'
+import { getVectorizedPayload } from 'payloadcms-vectorize'
 
 const payload = await getPayload({ config, cron: true })
+const vectorizedPayload = getVectorizedPayload(payload)
 
-if (isVectorizedPayload(payload)) {
-  // TypeScript now knows payload has search and queueEmbed methods
-  const results = await payload.search({
+if (vectorizedPayload) {
+  // Queue by document ID (fetches document first)
+  await vectorizedPayload.queueEmbed({
+    collection: 'posts',
+    docId: 'some-post-id',
+  })
+
+  // Queue with document object directly
+  await vectorizedPayload.queueEmbed({
+    collection: 'posts',
+    doc: {
+      id: 'some-post-id',
+      title: 'Post Title',
+      content: {
+        /* ... */
+      },
+    },
+  })
+}
+```
+
+#### Getting the Vectorized Payload Object
+
+Use the `getVectorizedPayload` function to get the vectorized payload object with all vectorize methods:
+
+```typescript
+import { getVectorizedPayload } from 'payloadcms-vectorize'
+
+const payload = await getPayload({ config, cron: true })
+const vectorizedPayload = getVectorizedPayload(payload)
+
+if (vectorizedPayload) {
+  // Use all vectorize methods
+  const results = await vectorizedPayload.search({
     query: 'search query',
+    knowledgePool: 'main',
+  })
+  
+  await vectorizedPayload.queueEmbed({
+    collection: 'posts',
+    docId: 'some-id',
+  })
+  
+  await vectorizedPayload.bulkEmbed({
     knowledgePool: 'main',
   })
 }
