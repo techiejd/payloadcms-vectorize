@@ -353,6 +353,7 @@ test.describe('Vector embedding e2e tests', () => {
         knowledgePool: 'failingBulkDefault',
       },
     })
+    console.log('[test] Bulk embed response:', await bulkEmbedResponse.json())
     expect(bulkEmbedResponse.ok()).toBe(true)
     const bulkEmbedJson = await bulkEmbedResponse.json()
     const runId = bulkEmbedJson.runId
@@ -477,12 +478,17 @@ test.describe('Vector embedding e2e tests', () => {
     })
     console.log('[test] Created test post:', post.id)
 
+    // Wait for any existing bulk embedding jobs to complete before starting a new run
+    await waitForBulkJobs(payload, 30000)
+    console.log('[test] Existing bulk jobs completed, proceeding...')
+
     // Use the bulk embed endpoint to create a run for failingBulkDefault pool
     const bulkEmbedResponse = await request.post('/api/vector-bulk-embed', {
       data: {
         knowledgePool: 'failingBulkDefault',
       },
     })
+    console.log('[test] Bulk embed response:', await bulkEmbedResponse.json())
     expect(bulkEmbedResponse.ok()).toBe(true)
     const bulkEmbedJson = await bulkEmbedResponse.json()
     const runId = bulkEmbedJson.runId
