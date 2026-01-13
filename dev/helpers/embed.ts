@@ -62,34 +62,17 @@ export function makeDummyEmbedDocs(dims: number) {
 }
 export const testEmbeddingVersion = 'test-v1'
 
-// Voyage file size limit (approximately 100MB, we use a safer threshold)
-const VOYAGE_FILE_SIZE_LIMIT = 50 * 1024 * 1024 // 50MB to be safe
+// Voyage line limit (100,000 lines per batch)
+// https://docs.voyageai.com/docs/batch-inference
+const VOYAGE_LINE_LIMIT = 100_000
 
 /**
  * Real Voyage Batch API implementation using the new streaming API.
- * User controls batching based on file size.
  */
 export function makeVoyageBulkEmbeddingsConfig(): BulkEmbeddingsFns {
   // Accumulated chunks for current batch
   let accumulatedChunks: BulkEmbeddingInput[] = []
-  let accumulatedSize = 0
   let batchIndex = 0
-
-  // Store batch state in memory for dev purposes (output file IDs for completion)
-  const batchOutputFiles = new Map<string, string>()
-
-  // Helper to estimate JSONL line size for a chunk
-  const estimateChunkSize = (chunk: BulkEmbeddingInput): number => {
-    const jsonLine = JSON.stringify({
-      custom_id: chunk.id,
-      body: {
-        input: [chunk.text],
-        model: 'voyage-3.5-lite',
-        input_type: 'document',
-      },
-    })
-    return jsonLine.length + 1 // +1 for newline
-  }
 
   // Helper to submit accumulated chunks to Voyage
   const submitBatch = async (chunks: BulkEmbeddingInput[]): Promise<BatchSubmission> => {
@@ -98,9 +81,7 @@ export function makeVoyageBulkEmbeddingsConfig(): BulkEmbeddingsFns {
       return JSON.stringify({
         custom_id: input.id,
         body: {
-          input: [input.text],
-          model: 'voyage-3.5-lite',
-          input_type: 'document',
+          input: input.text,
         },
       })
     })
@@ -138,7 +119,11 @@ export function makeVoyageBulkEmbeddingsConfig(): BulkEmbeddingsFns {
       body: JSON.stringify({
         input_file_id: fileId,
         endpoint: '/v1/embeddings',
-        completion_window: '24h',
+        completion_window: '12h',
+        request_params: {
+          model: 'voyage-3.5-lite',
+          input_type: 'document',
+        },
       }),
     })
 
@@ -157,26 +142,20 @@ export function makeVoyageBulkEmbeddingsConfig(): BulkEmbeddingsFns {
 
   return {
     addChunk: async ({ chunk, isLastChunk }) => {
-      const chunkSize = estimateChunkSize(chunk)
-
-      // Check if adding this chunk would exceed the file size limit
-      if (accumulatedSize + chunkSize > VOYAGE_FILE_SIZE_LIMIT && accumulatedChunks.length > 0) {
-        // Submit what we have (without this chunk)
-        const toSubmit = [...accumulatedChunks]
-        accumulatedChunks = [chunk]
-        accumulatedSize = chunkSize
-        return await submitBatch(toSubmit)
-      }
-
       // Add chunk to accumulator
       accumulatedChunks.push(chunk)
-      accumulatedSize += chunkSize
+
+      // If we hit the 100,000 limit, submit and start a new batch
+      if (accumulatedChunks.length === VOYAGE_LINE_LIMIT) {
+        const toSubmit = [...accumulatedChunks]
+        accumulatedChunks = []
+        return await submitBatch(toSubmit)
+      }
 
       // If this is the last chunk, flush everything
       if (isLastChunk && accumulatedChunks.length > 0) {
         const toSubmit = [...accumulatedChunks]
         accumulatedChunks = []
-        accumulatedSize = 0
         return await submitBatch(toSubmit)
       }
 
@@ -275,33 +254,13 @@ export function makeVoyageBulkEmbeddingsConfig(): BulkEmbeddingsFns {
     },
 
     onError: async ({ providerBatchIds, error }) => {
+      // TODO: Could implement error recovery here, e.g.:
+      // - Cancel running batches via API
+      // - Retry failed embeddings one by one using the regular embed API
+      // - Clean up uploaded files
       console.log(
-        `Voyage bulk run failed: ${error.message}. Cleaning up ${providerBatchIds.length} batches...`,
+        `Voyage bulk run failed: ${error.message}. ${providerBatchIds.length} batches affected.`,
       )
-
-      // Cancel any running batches
-      for (const batchId of providerBatchIds) {
-        try {
-          await fetch(`https://api.voyageai.com/v1/batches/${batchId}/cancel`, {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${process.env.VOYAGE_API_KEY}`,
-            },
-          })
-        } catch (cancelError) {
-          console.error(`Failed to cancel batch ${batchId}:`, cancelError)
-        }
-      }
-
-      // Clean up local state
-      for (const batchId of providerBatchIds) {
-        batchOutputFiles.delete(batchId)
-      }
-
-      // Reset accumulator state for potential retry
-      accumulatedChunks = []
-      accumulatedSize = 0
-      batchIndex = 0
     },
   }
 }
