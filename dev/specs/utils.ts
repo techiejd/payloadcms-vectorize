@@ -182,27 +182,23 @@ export function createMockBulkEmbeddings(
 export type BuildPayloadArgs = {
   dbName: string
   pluginOpts: any
-  secret?: string
-  dims?: number
   key?: string
 }
 
 export async function buildPayloadWithIntegration({
   dbName,
   pluginOpts,
-  secret = 'test-secret',
-  dims = DEFAULT_DIMS,
   key,
 }: BuildPayloadArgs): Promise<{ payload: Payload; config: SanitizedConfig }> {
   const integration = createVectorizeIntegration({
     default: {
-      dims,
+      dims: DEFAULT_DIMS,
       ivfflatLists: 1,
     },
   })
 
   const config = await buildConfig({
-    secret,
+    secret: 'test-secret',
     editor: lexicalEditor(),
     collections: [
       {

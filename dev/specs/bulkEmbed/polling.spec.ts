@@ -42,8 +42,6 @@ describe('Bulk embed - polling requeue', () => {
         },
         bulkQueueNames: BULK_QUEUE_NAMES,
       },
-      secret: 'test-secret',
-      dims: DIMS,
       key: `polling-${Date.now()}`,
     })
     payload = built.payload

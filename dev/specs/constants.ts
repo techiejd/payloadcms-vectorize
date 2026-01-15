@@ -73,7 +73,7 @@ export const dummyPluginOptions = {
 
 export async function buildDummyConfig(cfg: Partial<Config>) {
   const built = await buildConfig({
-    secret: 'test-secret',
+    secret: process.env.PAYLOAD_SECRET || 'test-secret',
     collections: [],
     editor: lexicalEditor(),
     // Provide a dummy db adapter to satisfy types; not used by these tests

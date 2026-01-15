@@ -47,8 +47,6 @@ describe('Bulk embed - basic tests', () => {
     const built = await buildPayloadWithIntegration({
       dbName,
       pluginOpts: basePluginOptions,
-      secret: 'test-secret',
-      dims: DIMS,
       key: `basic-${Date.now()}`,
     })
     payload = built.payload

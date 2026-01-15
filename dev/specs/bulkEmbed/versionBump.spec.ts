@@ -50,8 +50,6 @@ describe('Bulk embed - version bump', () => {
           },
           bulkQueueNames: BULK_QUEUE_NAMES_0,
         },
-        secret: 'test-secret',
-        dims: DIMS,
         key: `payload0`,
       })
     ).payload
@@ -92,8 +90,6 @@ describe('Bulk embed - version bump', () => {
           },
           bulkQueueNames: BULK_QUEUE_NAMES_1,
         },
-        secret: 'test-secret',
-        dims: DIMS,
         key: `payload1`,
       })
     ).payload

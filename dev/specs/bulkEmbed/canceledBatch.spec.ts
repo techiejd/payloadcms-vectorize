@@ -43,8 +43,6 @@ describe('Bulk embed - canceled batch', () => {
         },
         bulkQueueNames: BULK_QUEUE_NAMES,
       },
-      secret: 'test-secret',
-      dims: DIMS,
       key: `canceled-${Date.now()}`,
     })
     payload = built.payload

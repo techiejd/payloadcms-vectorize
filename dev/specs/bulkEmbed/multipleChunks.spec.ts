@@ -46,8 +46,6 @@ describe('Bulk embed - multiple chunks with extension fields', () => {
         },
         bulkQueueNames: BULK_QUEUE_NAMES,
       },
-      secret: 'test-secret',
-      dims: DIMS,
       key: `multichunk-${Date.now()}`,
     })
     payload = built.payload

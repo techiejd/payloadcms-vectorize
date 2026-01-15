@@ -54,7 +54,7 @@ describe('Multiple knowledge pools', () => {
     }
 
     config = await buildConfig({
-      secret: 'test-secret',
+      secret: process.env.PAYLOAD_SECRET || 'test-secret',
       collections: [],
       editor: lexicalEditor(),
       db: postgresAdapter({

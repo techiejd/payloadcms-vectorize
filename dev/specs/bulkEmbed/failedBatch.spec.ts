@@ -43,8 +43,6 @@ describe('Bulk embed - failed batch', () => {
         },
         bulkQueueNames: BULK_QUEUE_NAMES,
       },
-      secret: 'test-secret',
-      dims: DIMS,
       key: `failed-${Date.now()}`,
     })
     payload = built.payload

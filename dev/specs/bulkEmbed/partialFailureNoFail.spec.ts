@@ -67,8 +67,6 @@ describe('Bulk embed - partial failures', () => {
         },
         bulkQueueNames: BULK_QUEUE_NAMES,
       },
-      secret: 'test-secret',
-      dims: DIMS,
       key: `no-partial-failure-${Date.now()}-${Math.random()}`,
     })
     payload = built.payload

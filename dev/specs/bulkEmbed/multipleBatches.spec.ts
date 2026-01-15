@@ -45,8 +45,6 @@ describe('Bulk embed - multiple batches', () => {
         },
         bulkQueueNames: BULK_QUEUE_NAMES,
       },
-      secret: 'test-secret',
-      dims: DIMS,
       key: `multibatch-${Date.now()}`,
     })
     payload = built.payload

@@ -51,8 +51,6 @@ describe('Bulk embed - onError callback', () => {
         },
         bulkQueueNames: BULK_QUEUE_NAMES,
       },
-      secret: 'test-secret',
-      dims: DIMS,
       key: `onerror-${Date.now()}`,
     })
     payload = built.payload

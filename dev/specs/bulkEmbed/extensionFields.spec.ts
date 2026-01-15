@@ -47,8 +47,6 @@ describe('Bulk embed - extension fields', () => {
         },
         bulkQueueNames: BULK_QUEUE_NAMES,
       },
-      secret: 'test-secret',
-      dims: DIMS,
       key: `extfields-${Date.now()}`,
     })
     payload = built.payload

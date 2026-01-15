@@ -41,7 +41,7 @@ describe('Plugin integration tests', () => {
     })
 
     config = await buildConfig({
-      secret: 'test-secret',
+      secret: process.env.PAYLOAD_SECRET || 'test-secret',
       editor: lexicalEditor(),
       collections: [
         {

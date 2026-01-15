@@ -40,8 +40,6 @@ describe('Bulk embed - concurrent runs prevention', () => {
         },
         bulkQueueNames: BULK_QUEUE_NAMES,
       },
-      secret: 'test-secret',
-      dims: DIMS,
       key: `concurrent-${Date.now()}`,
     })
     payload = built.payload

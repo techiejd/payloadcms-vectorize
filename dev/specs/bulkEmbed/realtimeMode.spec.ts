@@ -41,8 +41,6 @@ describe('Bulk embed - realtime mode', () => {
     const built = await buildPayloadWithIntegration({
       dbName,
       pluginOpts: realtimeOptions,
-      secret: 'test-secret',
-      dims: DIMS,
       key: `realtime-${Date.now()}`,
     })
     payload = built.payload
