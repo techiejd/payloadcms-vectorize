@@ -14,7 +14,6 @@ export const RetryFailedBatchButtonClient: React.FC<RetryFailedBatchButtonClient
   status,
   retriedBatchId,
 }) => {
-  console.log('RetryFailedBatchButtonClient', batchId, status, retriedBatchId)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null)
 

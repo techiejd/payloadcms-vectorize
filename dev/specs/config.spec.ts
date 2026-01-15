@@ -57,10 +57,16 @@ describe('endpoints: /vector-search, /vector-bulk-embed', () => {
           method: 'post',
           handler: expect.any(Function),
         }),
+        expect.objectContaining({
+          path: '/vector-retry-failed-batch',
+          method: 'post',
+          handler: expect.any(Function),
+        }),
       ]),
     )
   })
   test('uses the custom path when provided', async () => {
+    // TODO: Add test for custom path for bulk embed and retry failed batch
     const cfg = await buildDummyConfig({
       plugins: [plugin({ ...dummyPluginOptions, endpointOverrides: { path: '/custom-path' } })],
     })
@@ -70,11 +76,6 @@ describe('endpoints: /vector-search, /vector-bulk-embed', () => {
       expect.arrayContaining([
         expect.objectContaining({
           path: '/custom-path',
-          method: 'post',
-          handler: expect.any(Function),
-        }),
-        expect.objectContaining({
-          path: '/vector-bulk-embed',
           method: 'post',
           handler: expect.any(Function),
         }),

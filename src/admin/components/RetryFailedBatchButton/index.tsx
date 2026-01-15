@@ -15,8 +15,6 @@ export const RetryFailedBatchButton: React.FC<
     id: props.id,
   })
 
-  console.log('RetryFailedBatchButtonBatch', batch)
-
   return (
     <RetryFailedBatchButtonClient
       batchId={props.id!}

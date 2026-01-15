@@ -29,7 +29,6 @@ export const createVectorizeTask = ({
   /**
    * Vectorize Task Configuration
    * @description Scheduled task that vectorizes on data change.
-   * Runs every 5 seconds to call the embedding function.
    */
   const processVectorizationTask: TaskConfig<VectorizeTaskInputOutput> = {
     slug: 'payloadcms-vectorize:vectorize',

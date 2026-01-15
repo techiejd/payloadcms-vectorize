@@ -1,12 +1,12 @@
 import type { Payload } from 'payload'
-import { beforeAll, describe, expect, test, vi } from 'vitest'
-import { createVectorizeTask } from '../../../src/tasks/vectorize.js'
+import { beforeAll, describe, expect, test } from 'vitest'
 import {
   BULK_QUEUE_NAMES,
   DEFAULT_DIMS,
   buildPayloadWithIntegration,
   createMockBulkEmbeddings,
   createTestDb,
+  waitForVectorizationJobs,
 } from '../utils.js'
 import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
 
@@ -54,18 +54,7 @@ describe('Bulk embed - realtime mode', () => {
       data: { title: 'Realtime Test' } as any,
     })
 
-    const vectorizeTask = createVectorizeTask({
-      knowledgePools: realtimeOptions.knowledgePools,
-    })
-    const vectorizeHandler = vectorizeTask.handler as any
-
-    await vectorizeHandler({
-      input: { doc: post, collection: 'posts', knowledgePool: 'default' } as any,
-      req: { payload } as any,
-      inlineTask: vi.fn(),
-      tasks: {} as any,
-      job: {} as any,
-    })
+    await waitForVectorizationJobs(payload)
 
     const embeds = await payload.find({
       collection: 'default',
@@ -74,4 +63,3 @@ describe('Bulk embed - realtime mode', () => {
     expect(embeds.totalDocs).toBeGreaterThan(0)
   })
 })
-

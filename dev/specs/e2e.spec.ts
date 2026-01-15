@@ -11,27 +11,19 @@ import { BULK_EMBEDDINGS_BATCHES_SLUG } from '../../src/collections/bulkEmbeddin
 
 // Helper function to log in to the admin panel
 const loginToAdmin = async (page: any) => {
-  console.log('[loginToAdmin] Starting login process...')
   await page.goto('/admin/login')
-  console.log('[loginToAdmin] Navigated to login page')
 
   await page.waitForLoadState('domcontentloaded')
-  console.log('[loginToAdmin] Page loaded')
 
   // Fill in the login form
-  console.log('[loginToAdmin] Filling in email...')
   await page.fill('input[name="email"]', devUser.email)
-  console.log('[loginToAdmin] Filling in password...')
   await page.fill('input[name="password"]', devUser.password)
 
   // Click the login button
-  console.log('[loginToAdmin] Clicking submit button...')
   await page.click('button[type="submit"]')
 
   // Wait for redirect to admin dashboard
-  console.log('[loginToAdmin] Waiting for redirect...')
   await page.waitForURL(/\/admin(?!\/login)/, { timeout: 15000 })
-  console.log('[loginToAdmin] Login complete!')
 }
 
 const expectVectorSearchResponse = async (response: any, post: any, title: string) => {
@@ -69,11 +61,9 @@ test.describe('Vector embedding e2e tests', () => {
   let post: any
 
   test.beforeAll(async () => {
-    console.log('[beforeAll] Setting up Payload instance...')
     // Setup: Create a post and wait for realtime embedding
     _config = await config
     payload = await getPayload({ config: _config, key: `e2e-test-${Date.now()}` })
-    console.log('[beforeAll] Payload instance created')
   })
 
   test('querying the endpoint should return the title with testEmbeddingVersion', async ({
@@ -110,15 +100,12 @@ test.describe('Vector embedding e2e tests', () => {
     page,
     request,
   }) => {
-    console.log('[test] Starting bulk embedding test...')
     test.setTimeout(120000)
 
     // Login to admin first
-    console.log('[test] Logging in...')
     await loginToAdmin(page)
 
     // Verify bulkDefault pool is EMPTY (no realTimeIngestionFn configured)
-    console.log('[test] Checking bulkDefault pool is empty...')
     const emptyResponse = await request.post('/api/vector-search', {
       data: {
         query: title,
@@ -128,22 +115,16 @@ test.describe('Vector embedding e2e tests', () => {
     await expectEmptyVectorSearchResponse(emptyResponse)
 
     // Navigate to the bulkDefault embeddings collection page in admin
-    console.log('[test] Navigating to bulkDefault collection page...')
     await page.goto('/admin/collections/bulkDefault', { waitUntil: 'networkidle' })
-    console.log('[test] Page loaded')
 
     // Wait for the page to fully load and render
-    console.log('[test] Waiting for page to fully load...')
     await page.waitForLoadState('domcontentloaded')
     await page.waitForLoadState('networkidle')
-    console.log('[test] Page fully loaded')
 
     // Wait for the collapsible header to appear - use getByText for more flexible matching
     // Note: If this fails, ensure `pnpm run generate:importmap` has been run
-    console.log('[test] Looking for "Bulk Embed All" text...')
     const bulkEmbedAllText = page.getByText('Bulk Embed All', { exact: false })
     await expect(bulkEmbedAllText).toBeVisible({ timeout: 15000 })
-    console.log('[test] Found "Bulk Embed All" text!')
 
     // Click the button that contains the h3 with "Bulk Embed All" text
     // The button wraps the h3, so we click the button that contains the h3
@@ -191,7 +172,6 @@ test.describe('Vector embedding e2e tests', () => {
     let finalStatus = ''
 
     while (attempts < maxAttempts) {
-      console.log('[test] Polling for status...')
       // Refresh the page to see updated status
       await page.reload()
       await page.waitForLoadState('domcontentloaded')
@@ -201,10 +181,8 @@ test.describe('Vector embedding e2e tests', () => {
         .locator('.rs__single-value')
         .textContent()
         .catch(() => null)
-      console.log('[test] Status value:', statusValue)
       if (statusValue) {
         finalStatus = statusValue
-        console.log('[test] Status value:', statusValue)
         if (statusValue === 'succeeded') {
           break
         }
@@ -230,7 +208,6 @@ test.describe('Vector embedding e2e tests', () => {
     const runIdMatch = runUrl.match(/\/(\d+)$/)
     const bulkRunId = runIdMatch ? runIdMatch[1] : null
     expect(bulkRunId).not.toBeNull()
-    console.log('[test] Bulk run ID:', bulkRunId)
 
     // Find the succeeded batch that was created
     const succeededBatches = await (payload as any).find({
@@ -241,7 +218,6 @@ test.describe('Vector embedding e2e tests', () => {
     })
     expect(succeededBatches.totalDocs).toBeGreaterThan(0)
     const succeededBatch = succeededBatches.docs[0]
-    console.log('[test] Found succeeded batch:', succeededBatch.id)
 
     // Test: Retry endpoint returns 400 for succeeded batch
     const succeededRetryResponse = await request.post('/api/vector-retry-failed-batch', {
@@ -250,10 +226,8 @@ test.describe('Vector embedding e2e tests', () => {
     expect(succeededRetryResponse.status()).toBe(400)
     const succeededRetryJson = await succeededRetryResponse.json()
     expect(succeededRetryJson.error).toContain('not in failed or retried status')
-    console.log('[test] Retry endpoint correctly rejected succeeded batch')
 
     // Navigate to the succeeded batch page and verify retry button is disabled
-    console.log('[test] Navigating to succeeded batch page...')
     await page.goto(`/admin/collections/${BULK_EMBEDDINGS_BATCHES_SLUG}/${succeededBatch.id}`, {
       waitUntil: 'networkidle',
     })
@@ -265,42 +239,30 @@ test.describe('Vector embedding e2e tests', () => {
 
     // Verify the button is disabled (opacity check)
     const buttonStyle = await retryButton.getAttribute('style')
-    console.log('[test] Button style:', buttonStyle)
     expect(buttonStyle).toContain('opacity:0.5')
 
     // Verify the "Retry Not Available" message is shown
     const notAvailableMessage = page.locator('text=/Retry Not Available/i')
     await expect(notAvailableMessage).toBeVisible({ timeout: 5000 })
-
-    console.log('[test] Retry button correctly disabled for succeeded batch!')
   })
 
   test('clicking expand section on default collection shows not enabled message', async ({
     page,
   }) => {
-    console.log('[test] Starting default collection test...')
-
     // Login to admin first
-    console.log('[test] Logging in...')
     await loginToAdmin(page)
 
     // Navigate to the default embeddings collection page in admin
-    console.log('[test] Navigating to default collection page...')
     await page.goto('/admin/collections/default', { waitUntil: 'networkidle' })
-    console.log('[test] Page loaded')
 
     // Wait for the page to fully load and render
-    console.log('[test] Waiting for page to fully load...')
     await page.waitForLoadState('domcontentloaded')
     await page.waitForLoadState('networkidle')
-    console.log('[test] Page fully loaded')
 
     // Wait for the collapsible header to appear - use getByText for more flexible matching
     // Note: If this fails, ensure `pnpm run generate:importmap` has been run
-    console.log('[test] Looking for "Bulk Embed All" text...')
     const bulkEmbedAllText = page.getByText('Bulk Embed All', { exact: false })
     await expect(bulkEmbedAllText).toBeVisible({ timeout: 15000 })
-    console.log('[test] Found "Bulk Embed All" text!')
 
     // Click the button that contains the h3 with "Bulk Embed All" text
     const expandButton = page.locator('button:has(h3:has-text("Bulk Embed All"))')
@@ -325,19 +287,13 @@ test.describe('Vector embedding e2e tests', () => {
   })
 
   test('retry failed batch endpoint returns 404 for non-existent batch', async ({ request }) => {
-    console.log('[test] Testing non-existent batch retry...')
-
     const nonExistentResponse = await request.post('/api/vector-retry-failed-batch', {
       data: { batchId: '999999' },
     })
     expect(nonExistentResponse.status()).toBe(404)
-
-    console.log('[test] Non-existent batch test completed!')
   })
 
   test('retry failed batch endpoint works correctly', async ({ request }) => {
-    console.log('[test] Starting retry failed batch endpoint test...')
-
     // Create a test post first (needed for bulk embedding to have something to embed)
     const post = await payload.create({
       collection: 'posts',
@@ -345,7 +301,6 @@ test.describe('Vector embedding e2e tests', () => {
         title: 'Failed batch test post',
       },
     })
-    console.log('[test] Created test post:', post.id)
 
     // Use the bulk embed endpoint to create a run for failingBulkDefault pool
     const bulkEmbedResponse = await request.post('/api/vector-bulk-embed', {
@@ -353,15 +308,12 @@ test.describe('Vector embedding e2e tests', () => {
         knowledgePool: 'failingBulkDefault',
       },
     })
-    console.log('[test] Bulk embed response:', await bulkEmbedResponse.json())
     expect(bulkEmbedResponse.ok()).toBe(true)
     const bulkEmbedJson = await bulkEmbedResponse.json()
     const runId = bulkEmbedJson.runId
-    console.log('[test] Created bulk run via endpoint:', runId)
 
     // Wait for the bulk jobs to process and fail (failingBulkDefault has a mock that fails)
     await waitForBulkJobs(payload, 30000)
-    console.log('[test] Bulk jobs completed')
 
     // Wait for the batch to actually fail (poll-or-complete job needs to finish)
     const runIdNum = parseInt(runId, 10)
@@ -399,30 +351,8 @@ test.describe('Vector embedding e2e tests', () => {
       attempts++
     }
 
-    if (!batches || batches.totalDocs === 0) {
-      // Final check for debugging
-      const allBatchesFinal = await (payload as any).find({
-        collection: BULK_EMBEDDINGS_BATCHES_SLUG,
-        where: { run: { equals: runIdNum } },
-      })
-      const runFinal = await (payload as any).findByID({
-        collection: BULK_EMBEDDINGS_RUNS_SLUG,
-        id: runId,
-      })
-      console.log('[test] Failed to find failed batch after', attempts, 'attempts')
-      console.log('[test] Run status:', runFinal.status)
-      console.log('[test] Batches found:', allBatchesFinal.totalDocs)
-      if (allBatchesFinal.totalDocs > 0) {
-        console.log(
-          '[test] Batch statuses:',
-          allBatchesFinal.docs.map((b: any) => b.status),
-        )
-      }
-    }
-
     expect(batches?.totalDocs).toBeGreaterThan(0)
     const batch = batches.docs[0]
-    console.log('[test] Found failed batch:', batch.id)
 
     // Retry the failed batch (should succeed)
     const retryResponse = await request.post('/api/vector-retry-failed-batch', {
@@ -458,12 +388,9 @@ test.describe('Vector embedding e2e tests', () => {
       id: runId,
     })
     expect((updatedRun as any).status).toBe('running')
-
-    console.log('[test] Retry failed batch endpoint test completed successfully!')
   })
 
   test('retry failed batch button works for failed batches', async ({ page, request }) => {
-    console.log('[test] Starting retry button click test...')
     test.setTimeout(120000)
 
     // Login first
@@ -476,11 +403,9 @@ test.describe('Vector embedding e2e tests', () => {
         title: 'Failed batch UI test post',
       },
     })
-    console.log('[test] Created test post:', post.id)
 
     // Wait for any existing bulk embedding jobs to complete before starting a new run
     await waitForBulkJobs(payload, 30000)
-    console.log('[test] Existing bulk jobs completed, proceeding...')
 
     // Use the bulk embed endpoint to create a run for failingBulkDefault pool
     const bulkEmbedResponse = await request.post('/api/vector-bulk-embed', {
@@ -488,15 +413,12 @@ test.describe('Vector embedding e2e tests', () => {
         knowledgePool: 'failingBulkDefault',
       },
     })
-    console.log('[test] Bulk embed response:', await bulkEmbedResponse.json())
     expect(bulkEmbedResponse.ok()).toBe(true)
     const bulkEmbedJson = await bulkEmbedResponse.json()
     const runId = bulkEmbedJson.runId
-    console.log('[test] Created bulk run via endpoint:', runId)
 
     // Wait for the bulk jobs to process and fail (failingBulkDefault has a mock that fails)
     await waitForBulkJobs(payload, 30000)
-    console.log('[test] Bulk jobs completed')
 
     // Wait for the batch to actually fail (poll-or-complete job needs to finish)
     const runIdNum = parseInt(runId, 10)
@@ -536,10 +458,8 @@ test.describe('Vector embedding e2e tests', () => {
 
     expect(batches?.totalDocs).toBeGreaterThan(0)
     const failedBatch = batches.docs[0]
-    console.log('[test] Found failed batch:', failedBatch.id)
 
     // Navigate to the run edit page (where FailedBatchesList component should be visible)
-    console.log('[test] Navigating to run page...')
     await page.goto(`/admin/collections/${BULK_EMBEDDINGS_RUNS_SLUG}/${runId}`, {
       waitUntil: 'networkidle',
     })
@@ -548,10 +468,8 @@ test.describe('Vector embedding e2e tests', () => {
     // Wait for the FailedBatchesList component to appear
     const failedBatchesList = page.locator('[data-testid^="failed-batch-link-"]').first()
     await expect(failedBatchesList).toBeVisible({ timeout: 10000 })
-    console.log('[test] Failed batches list is visible')
 
     // Click on the failed batch link to navigate to the batch page
-    console.log('[test] Clicking failed batch link...')
     await failedBatchesList.click()
 
     // Wait for navigation to batch page
@@ -559,7 +477,6 @@ test.describe('Vector embedding e2e tests', () => {
       timeout: 10000,
     })
     await page.waitForLoadState('domcontentloaded')
-    console.log('[test] Navigated to batch page')
 
     // Look for the retry button
     const retryButton = page.locator('[data-testid="retry-failed-batch-button"]')
@@ -574,27 +491,20 @@ test.describe('Vector embedding e2e tests', () => {
     expect(buttonStyle).not.toContain('opacity: 0.5')
 
     // Click the retry button
-    console.log('[test] Clicking retry button...')
     await retryButton.click()
 
     // Wait for success message
     const successMessage = page.locator('text=/Batch resubmitted successfully/i')
     await expect(successMessage).toBeVisible({ timeout: 10000 })
 
-    console.log('[test] Retry button click test completed!')
-
     // Wait a bit for the page reload
     await page.waitForTimeout(2000)
 
     // Verify we're still on the batch page after reload
     await page.waitForURL(/\/admin\/collections\/vector-bulk-embeddings-batches\/\d+/)
-
-    console.log('[test] Retry failed batch button test completed successfully!')
   })
 
   test('missing batchId returns 400 error', async ({ request }) => {
-    console.log('[test] Testing missing batchId...')
-
     const response = await request.post('/api/vector-retry-failed-batch', {
       data: {},
     })
@@ -602,7 +512,5 @@ test.describe('Vector embedding e2e tests', () => {
     expect(response.status()).toBe(400)
     const json = await response.json()
     expect(json.error).toContain('batchId is required')
-
-    console.log('[test] Missing batchId test completed!')
   })
 })

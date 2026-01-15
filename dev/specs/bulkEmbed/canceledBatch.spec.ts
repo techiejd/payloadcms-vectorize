@@ -1,21 +1,26 @@
 import type { Payload } from 'payload'
 import { beforeAll, describe, expect, test } from 'vitest'
-import { BULK_EMBEDDINGS_RUNS_SLUG } from '../../../src/collections/bulkEmbeddingsRuns.js'
 import {
   BULK_QUEUE_NAMES,
   DEFAULT_DIMS,
   buildPayloadWithIntegration,
   createMockBulkEmbeddings,
   createTestDb,
+  expectGoodResult,
   waitForBulkJobs,
 } from '../utils.js'
 import { makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
+import { getVectorizedPayload, VectorizedPayload } from 'payloadcms-vectorize'
 
 const DIMS = DEFAULT_DIMS
 const dbName = `bulk_canceled_${Date.now()}`
 
+// Right now, we only test if the batch was canceled outside of the bulk embed process.
+// TODO(techiejd): Add a way to cancel a batch and/or a run inside the bulk embed process.
+
 describe('Bulk embed - canceled batch', () => {
   let payload: Payload
+  let vectorizedPayload: VectorizedPayload | null = null
 
   beforeAll(async () => {
     await createTestDb({ dbName })
@@ -43,24 +48,13 @@ describe('Bulk embed - canceled batch', () => {
       key: `canceled-${Date.now()}`,
     })
     payload = built.payload
+    vectorizedPayload = getVectorizedPayload(payload)
   })
 
   test('canceled batch marks entire run as failed', async () => {
     const post = await payload.create({ collection: 'posts', data: { title: 'Cancel' } as any })
-
-    const run = await payload.create({
-      collection: BULK_EMBEDDINGS_RUNS_SLUG,
-      data: { pool: 'default', embeddingVersion: testEmbeddingVersion, status: 'queued' },
-    })
-
-    await payload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
-      task: 'payloadcms-vectorize:prepare-bulk-embedding',
-      input: { runId: String(run.id) },
-      req: { payload } as any,
-      ...(BULK_QUEUE_NAMES.prepareBulkEmbedQueueName
-        ? { queue: BULK_QUEUE_NAMES.prepareBulkEmbedQueueName }
-        : {}),
-    })
+    const result = await vectorizedPayload?.bulkEmbed({ knowledgePool: 'default' })
+    expectGoodResult(result)
 
     await waitForBulkJobs(payload)
 
@@ -71,5 +65,3 @@ describe('Bulk embed - canceled batch', () => {
     expect(embeds.totalDocs).toBe(0)
   })
 })
-
-

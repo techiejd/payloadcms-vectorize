@@ -141,6 +141,10 @@ export default buildConfig({
       // realtimeQueueName: 'custom-queue',
       // endpointOverrides: { path: '/custom-vector-search', enabled: true },
       // disabled: false,
+      // bulkQueueNames: { // Required iff `bulkEmbeddingsFns` included
+      //   prepareBulkEmbedQueueName: ...,
+      //   pollOrCompleteQueueName: ...,
+      // },
     }),
   ],
 })
@@ -148,9 +152,9 @@ export default buildConfig({
 
 **Important:** `knowledgePools` must have **different names than your collections**—reusing a collection name for a knowledge pool **will cause schema conflicts**. (In this example, the knowledge pool is named 'main' and a collection named 'main' will be created.)
 
-### 1.5. Generate Import Map (Required for Admin UI)
+### 1.5. Generate Import Map (If Needed)
 
-After configuring the plugin, you must generate the import map so that Payload can resolve client components (like the "Embed all" button) in the admin UI for bulk embeddings:
+Payload automatically generates the import map on startup and during development (HMR), so you typically don't need to run this manually. However, if client components (like the "Embed all" button) don't appear in the admin UI, you may need to manually generate the import map:
 
 ```bash
 pnpm run generate:importmap
@@ -671,12 +675,12 @@ if (vectorizedPayload) {
     query: 'search query',
     knowledgePool: 'main',
   })
-  
+
   await vectorizedPayload.queueEmbed({
     collection: 'posts',
     docId: 'some-id',
   })
-  
+
   await vectorizedPayload.bulkEmbed({
     knowledgePool: 'main',
   })

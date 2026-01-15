@@ -7,8 +7,10 @@ import {
   buildPayloadWithIntegration,
   createMockBulkEmbeddings,
   createTestDb,
+  expectGoodResult,
   waitForBulkJobs,
 } from '../utils.js'
+import { getVectorizedPayload } from 'payloadcms-vectorize'
 import { makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
 
 const DIMS = DEFAULT_DIMS
@@ -49,26 +51,19 @@ describe('Bulk embed - polling requeue', () => {
 
   test('polling requeues when non-terminal then succeeds', async () => {
     const post = await payload.create({ collection: 'posts', data: { title: 'Loop' } as any })
-
-    const run = await payload.create({
-      collection: BULK_EMBEDDINGS_RUNS_SLUG,
-      data: { pool: 'default', embeddingVersion: testEmbeddingVersion, status: 'queued' },
-    })
-
     const queueSpy = vi.spyOn(payload.jobs, 'queue')
-
-    await payload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
-      task: 'payloadcms-vectorize:prepare-bulk-embedding',
-      input: { runId: String(run.id) },
-      req: { payload } as any,
-      ...(BULK_QUEUE_NAMES.prepareBulkEmbedQueueName
-        ? { queue: BULK_QUEUE_NAMES.prepareBulkEmbedQueueName }
-        : {}),
-    })
+    const vectorizedPayload = getVectorizedPayload(payload)
+    const result = await vectorizedPayload?.bulkEmbed({ knowledgePool: 'default' })
+    expectGoodResult(result)
 
     await waitForBulkJobs(payload, 15000)
 
-    expect(queueSpy).toHaveBeenCalledWith(
+    expect(queueSpy).toHaveBeenNthCalledWith(
+      2, // 2nd call
+      expect.objectContaining({ task: 'payloadcms-vectorize:poll-or-complete-bulk-embedding' }),
+    )
+    expect(queueSpy).toHaveBeenNthCalledWith(
+      3, // 3rd call
       expect.objectContaining({ task: 'payloadcms-vectorize:poll-or-complete-bulk-embedding' }),
     )
 
@@ -79,5 +74,3 @@ describe('Bulk embed - polling requeue', () => {
     expect(embeds.totalDocs).toBe(1)
   })
 })
-
-

@@ -71,9 +71,10 @@ export type {
 
   // PollBulkEmbeddingsResult
   BulkEmbeddingRunStatus,
-  getVectorizedPayload,
   VectorizedPayload,
 } from './types.js'
+
+export { getVectorizedPayload } from './types.js'
 
 async function ensurePgvectorArtifacts(args: {
   payload: Payload
@@ -391,7 +392,6 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
 
       // Create vectorized payload object factory that creates methods bound to a payload instance
       const createVectorizedPayloadObject = (payload: Payload): VectorizedPayload<TPoolNames> => {
-        console.log('createVectorizedPayloadObject', payload)
         return {
           _isBulkEmbedEnabled: (knowledgePool: TPoolNames): boolean => {
             const poolConfig = pluginOptions.knowledgePools[knowledgePool]

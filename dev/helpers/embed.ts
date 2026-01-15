@@ -229,15 +229,47 @@ export function makeVoyageBulkEmbeddingsConfig(): BulkEmbeddingsFns {
             if (!line.trim()) continue
             try {
               const result = JSON.parse(line)
+              // Check for error in result.error field
               if (result.error) {
                 await onChunk({
                   id: result.custom_id,
                   error: result.error.message || 'Unknown error',
                 })
-              } else {
+              }
+              // Check for error in result.response.status_code (Voyage AI format)
+              // Error if status_code exists and is >= 400 or not 200
+              else if (result.response?.status_code && result.response.status_code !== 200) {
+                await onChunk({
+                  id: result.custom_id,
+                  error: result.response.message || `HTTP ${result.response.status_code}`,
+                })
+              }
+              // Success case - check for embedding data
+              // Handle body.object === "list" with data array
+              else if (
+                result.response?.body?.object === 'list' &&
+                result.response.body.data?.[0]?.embedding
+              ) {
                 await onChunk({
                   id: result.custom_id,
                   embedding: result.response.body.data[0].embedding,
+                })
+              }
+              // Handle body.object === "embedding" (direct embedding)
+              else if (
+                result.response?.body?.object === 'embedding' &&
+                result.response.body.embedding
+              ) {
+                await onChunk({
+                  id: result.custom_id,
+                  embedding: result.response.body.embedding,
+                })
+              }
+              // Unknown format
+              else {
+                await onChunk({
+                  id: result.custom_id,
+                  error: 'Unexpected response format',
                 })
               }
             } catch (parseError) {

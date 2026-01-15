@@ -45,7 +45,6 @@ const bulkEmbeddingsFns =
 
 // Run every hour for voyage, every 5 seconds for mock
 const bulkPollCronSchedule = process.env.USE_VOYAGE !== undefined ? '0 * * * *' : '*/5 * * * * *'
-console.log('bulkEmbeddingsFns', bulkEmbeddingsFns)
 const ssl =
   process.env.DATABASE_URI !== undefined
     ? {

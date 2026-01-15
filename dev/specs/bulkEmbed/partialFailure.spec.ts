@@ -7,9 +7,11 @@ import {
   buildPayloadWithIntegration,
   createMockBulkEmbeddings,
   createTestDb,
+  expectGoodResult,
   waitForBulkJobs,
 } from '../utils.js'
 import { makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
+import { getVectorizedPayload } from 'payloadcms-vectorize'
 
 const DIMS = DEFAULT_DIMS
 const dbName = `bulk_partial_failure_${Date.now()}`
@@ -83,26 +85,16 @@ describe('Bulk embed - partial chunk failures', () => {
       data: { title: 'Partial Failure Test' } as any,
     })
 
-    const run = await payload.create({
-      collection: BULK_EMBEDDINGS_RUNS_SLUG,
-      data: { pool: 'default', embeddingVersion: testVersion, status: 'queued' },
-    })
-
-    await payload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
-      task: 'payloadcms-vectorize:prepare-bulk-embedding',
-      input: { runId: String(run.id) },
-      req: { payload } as any,
-      ...(BULK_QUEUE_NAMES.prepareBulkEmbedQueueName
-        ? { queue: BULK_QUEUE_NAMES.prepareBulkEmbedQueueName }
-        : {}),
-    })
+    const vectorizedPayload = getVectorizedPayload(payload)
+    const result = await vectorizedPayload?.bulkEmbed({ knowledgePool: 'default' })
+    expectGoodResult(result)
 
     await waitForBulkJobs(payload)
 
     // Check run status - should still succeed but with failed count
     const updatedRun = await payload.findByID({
       collection: BULK_EMBEDDINGS_RUNS_SLUG,
-      id: run.id,
+      id: result!.runId,
     })
 
     expect(updatedRun.status).toBe('succeeded')

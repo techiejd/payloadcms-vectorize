@@ -7,15 +7,18 @@ import {
   buildPayloadWithIntegration,
   createMockBulkEmbeddings,
   createTestDb,
+  expectGoodResult,
   waitForBulkJobs,
 } from '../utils.js'
 import { makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
+import { getVectorizedPayload, VectorizedPayload } from 'payloadcms-vectorize'
 
 const DIMS = DEFAULT_DIMS
 const dbName = `bulk_extfields_${Date.now()}`
 
 describe('Bulk embed - extension fields', () => {
   let payload: Payload
+  let vectorizedPayload: VectorizedPayload | null = null
 
   beforeAll(async () => {
     await createTestDb({ dbName })
@@ -49,6 +52,7 @@ describe('Bulk embed - extension fields', () => {
       key: `extfields-${Date.now()}`,
     })
     payload = built.payload
+    vectorizedPayload = getVectorizedPayload(payload)
   })
 
   test('extension fields are merged when writing embeddings', async () => {
@@ -56,20 +60,8 @@ describe('Bulk embed - extension fields', () => {
       collection: 'posts',
       data: { title: 'Ext merge' } as any,
     })
-
-    const run = await payload.create({
-      collection: BULK_EMBEDDINGS_RUNS_SLUG,
-      data: { pool: 'default', embeddingVersion: testEmbeddingVersion, status: 'queued' },
-    })
-
-    await payload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
-      task: 'payloadcms-vectorize:prepare-bulk-embedding',
-      input: { runId: String(run.id) },
-      req: { payload } as any,
-      ...(BULK_QUEUE_NAMES.prepareBulkEmbedQueueName
-        ? { queue: BULK_QUEUE_NAMES.prepareBulkEmbedQueueName }
-        : {}),
-    })
+    const result = await vectorizedPayload?.bulkEmbed({ knowledgePool: 'default' })
+    expectGoodResult(result)
 
     await waitForBulkJobs(payload)
 
@@ -82,5 +74,3 @@ describe('Bulk embed - extension fields', () => {
     expect(embeds.docs[0]).toHaveProperty('priority', 3)
   })
 })
-
-

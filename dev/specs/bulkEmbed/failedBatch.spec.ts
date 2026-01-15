@@ -3,13 +3,14 @@ import { beforeAll, describe, expect, test } from 'vitest'
 import { BULK_EMBEDDINGS_RUNS_SLUG } from '../../../src/collections/bulkEmbeddingsRuns.js'
 import { BULK_EMBEDDINGS_BATCHES_SLUG } from '../../../src/collections/bulkEmbeddingsBatches.js'
 import { BULK_EMBEDDINGS_INPUT_METADATA_SLUG } from '../../../src/collections/bulkEmbeddingInputMetadata.js'
-import { getVectorizedPayload } from '../../../src/types.js'
+import { getVectorizedPayload, VectorizedPayload } from '../../../src/types.js'
 import {
   BULK_QUEUE_NAMES,
   DEFAULT_DIMS,
   buildPayloadWithIntegration,
   createMockBulkEmbeddings,
   createTestDb,
+  expectGoodResult,
   waitForBulkJobs,
 } from '../utils.js'
 import { makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
@@ -19,6 +20,7 @@ const dbName = `bulk_failed_${Date.now()}`
 
 describe('Bulk embed - failed batch', () => {
   let payload: Payload
+  let vectorizedPayload: VectorizedPayload | null = null
 
   beforeAll(async () => {
     await createTestDb({ dbName })
@@ -46,31 +48,21 @@ describe('Bulk embed - failed batch', () => {
       key: `failed-${Date.now()}`,
     })
     payload = built.payload
+    vectorizedPayload = getVectorizedPayload(payload)
   })
 
   test('failed batch marks entire run as failed', async () => {
     const post = await payload.create({ collection: 'posts', data: { title: 'Fail' } as any })
 
-    const run = await payload.create({
-      collection: BULK_EMBEDDINGS_RUNS_SLUG,
-      data: { pool: 'default', embeddingVersion: testEmbeddingVersion, status: 'queued' },
-    })
-
-    await payload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
-      task: 'payloadcms-vectorize:prepare-bulk-embedding',
-      input: { runId: String(run.id) },
-      req: { payload } as any,
-      ...(BULK_QUEUE_NAMES.prepareBulkEmbedQueueName
-        ? { queue: BULK_QUEUE_NAMES.prepareBulkEmbedQueueName }
-        : {}),
-    })
+    const result = await vectorizedPayload?.bulkEmbed({ knowledgePool: 'default' })
+    expectGoodResult(result)
 
     await waitForBulkJobs(payload)
 
     const runDoc = (
       await (payload as any).find({
         collection: BULK_EMBEDDINGS_RUNS_SLUG,
-        where: { id: { equals: String(run.id) } },
+        where: { id: { equals: String(result!.runId) } },
       })
     ).docs[0]
     expect(runDoc.status).toBe('failed')
@@ -88,27 +80,17 @@ describe('Bulk embed - failed batch', () => {
       data: { title: 'FailCleanup' } as any,
     })
 
-    const run = await payload.create({
-      collection: BULK_EMBEDDINGS_RUNS_SLUG,
-      data: { pool: 'default', embeddingVersion: testEmbeddingVersion, status: 'queued' },
-    })
-
-    await payload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
-      task: 'payloadcms-vectorize:prepare-bulk-embedding',
-      input: { runId: String(run.id) },
-      req: { payload } as any,
-      ...(BULK_QUEUE_NAMES.prepareBulkEmbedQueueName
-        ? { queue: BULK_QUEUE_NAMES.prepareBulkEmbedQueueName }
-        : {}),
-    })
+    const result = await vectorizedPayload?.bulkEmbed({ knowledgePool: 'default' })
+    expectGoodResult(result)
 
     await waitForBulkJobs(payload)
 
+    const runIdNum = parseInt(String(result!.runId), 10)
+
     // Metadata should be kept for failed batches to allow retries
-    const runIdNum = typeof run.id === 'number' ? run.id : parseInt(String(run.id), 10)
     const metadata = await payload.find({
       collection: BULK_EMBEDDINGS_INPUT_METADATA_SLUG,
-      where: { run: { equals: runIdNum } },
+      where: { run: { equals: runIdNum } as any },
     })
     expect(metadata.totalDocs).toBeGreaterThan(0)
 
@@ -167,28 +149,17 @@ describe('Bulk embed - failed batch', () => {
 
   test('retrying a failed batch creates a new batch and marks old batch as retried', async () => {
     const vectorizedPayload = getVectorizedPayload<'default'>(payload)!
-    const post = await payload.create({ collection: 'posts', data: { title: 'RetryTest' } as any })
+    await payload.create({ collection: 'posts', data: { title: 'RetryTest' } as any })
 
-    const run = await payload.create({
-      collection: BULK_EMBEDDINGS_RUNS_SLUG,
-      data: { pool: 'default', embeddingVersion: testEmbeddingVersion, status: 'queued' },
-    })
-
-    await payload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
-      task: 'payloadcms-vectorize:prepare-bulk-embedding',
-      input: { runId: String(run.id) },
-      req: { payload } as any,
-      ...(BULK_QUEUE_NAMES.prepareBulkEmbedQueueName
-        ? { queue: BULK_QUEUE_NAMES.prepareBulkEmbedQueueName }
-        : {}),
-    })
+    const result = await vectorizedPayload?.bulkEmbed({ knowledgePool: 'default' })
+    expectGoodResult(result)
 
     await waitForBulkJobs(payload)
 
     // Find the failed batch
     const batchesResult = await payload.find({
       collection: BULK_EMBEDDINGS_BATCHES_SLUG,
-      where: { run: { equals: run.id } },
+      where: { run: { equals: result.runId } },
     })
     const failedBatch = (batchesResult as any).docs[0]
     expect(failedBatch.status).toBe('failed')
@@ -222,7 +193,7 @@ describe('Bulk embed - failed batch', () => {
       expect((newBatch as any).providerBatchId).not.toBe(failedBatch.providerBatchId)
 
       // Check that metadata points to the new batch
-      const runIdNum = typeof run.id === 'number' ? run.id : parseInt(String(run.id), 10)
+      const runIdNum = parseInt(String(result!.runId), 10)
       const metadata = await payload.find({
         collection: BULK_EMBEDDINGS_INPUT_METADATA_SLUG,
         where: { run: { equals: runIdNum } },
@@ -239,31 +210,19 @@ describe('Bulk embed - failed batch', () => {
 
   test('retrying a retried batch returns the existing retry batch', async () => {
     const vectorizedPayload = getVectorizedPayload<'default'>(payload)!
-    const post = await payload.create({
+    await payload.create({
       collection: 'posts',
       data: { title: 'RetryRetryTest' } as any,
     })
 
-    const run = await payload.create({
-      collection: BULK_EMBEDDINGS_RUNS_SLUG,
-      data: { pool: 'default', embeddingVersion: testEmbeddingVersion, status: 'queued' },
-    })
-
-    await payload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
-      task: 'payloadcms-vectorize:prepare-bulk-embedding',
-      input: { runId: String(run.id) },
-      req: { payload } as any,
-      ...(BULK_QUEUE_NAMES.prepareBulkEmbedQueueName
-        ? { queue: BULK_QUEUE_NAMES.prepareBulkEmbedQueueName }
-        : {}),
-    })
+    const result = await vectorizedPayload?.bulkEmbed({ knowledgePool: 'default' })
 
     await waitForBulkJobs(payload)
 
     // Find the failed batch
     const batchesResult = await payload.find({
       collection: BULK_EMBEDDINGS_BATCHES_SLUG,
-      where: { run: { equals: run.id } },
+      where: { run: { equals: result!.runId } },
     })
     const failedBatch = (batchesResult as any).docs[0]
 

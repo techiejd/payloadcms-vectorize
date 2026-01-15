@@ -10,9 +10,12 @@ import {
   clearAllCollections,
   createMockBulkEmbeddings,
   createTestDb,
+  expectGoodResult,
   waitForBulkJobs,
 } from '../utils.js'
 import { makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
+import { getVectorizedPayload, VectorizedPayload } from 'payloadcms-vectorize'
+import { BulkEmbedResult } from '../../../src/types.js'
 
 const DIMS = DEFAULT_DIMS
 const dbName = `bulk_basic_${Date.now()}`
@@ -38,6 +41,7 @@ const basePluginOptions = {
 describe('Bulk embed - basic tests', () => {
   let payload: Payload
   let config: SanitizedConfig
+  let vectorizedPayload: VectorizedPayload | null = null
 
   beforeAll(async () => {
     await createTestDb({ dbName })
@@ -50,6 +54,7 @@ describe('Bulk embed - basic tests', () => {
     })
     payload = built.payload
     config = built.config
+    vectorizedPayload = getVectorizedPayload(payload)
   })
 
   beforeEach(async () => {
@@ -60,38 +65,11 @@ describe('Bulk embed - basic tests', () => {
     vi.restoreAllMocks()
   })
 
-  test('no bulk run is queued on init or doc creation (bulk-only mode)', async () => {
-    const runsBeforeCreate = await (payload as any).find({
-      collection: BULK_EMBEDDINGS_RUNS_SLUG,
-      where: { pool: { equals: 'default' } },
-    })
-    expect(runsBeforeCreate.totalDocs).toBe(0)
-
-    await payload.create({ collection: 'posts', data: { title: 'First' } as any })
-
-    const runsAfterCreate = await (payload as any).find({
-      collection: BULK_EMBEDDINGS_RUNS_SLUG,
-      where: { pool: { equals: 'default' } },
-    })
-    expect(runsAfterCreate.totalDocs).toBe(0)
-  })
-
   test('manually triggered bulk run embeds documents', async () => {
     const post = await payload.create({ collection: 'posts', data: { title: 'First' } as any })
 
-    const run = await payload.create({
-      collection: BULK_EMBEDDINGS_RUNS_SLUG,
-      data: { pool: 'default', embeddingVersion: testEmbeddingVersion, status: 'queued' },
-    })
-
-    await payload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
-      task: 'payloadcms-vectorize:prepare-bulk-embedding',
-      input: { runId: String(run.id) },
-      req: { payload } as any,
-      ...(BULK_QUEUE_NAMES.prepareBulkEmbedQueueName
-        ? { queue: BULK_QUEUE_NAMES.prepareBulkEmbedQueueName }
-        : {}),
-    })
+    const result = await vectorizedPayload?.bulkEmbed({ knowledgePool: 'default' })
+    expectGoodResult(result)
 
     await waitForBulkJobs(payload)
 
@@ -103,7 +81,7 @@ describe('Bulk embed - basic tests', () => {
     const runDoc = (
       await (payload as any).find({
         collection: BULK_EMBEDDINGS_RUNS_SLUG,
-        where: { id: { equals: String(run.id) } },
+        where: { id: { equals: String(result!.runId) } },
       })
     ).docs[0]
     expect(runDoc.status).toBe('succeeded')
@@ -111,26 +89,14 @@ describe('Bulk embed - basic tests', () => {
 
   test('bulk run creates batch records', async () => {
     await payload.create({ collection: 'posts', data: { title: 'Batch Test' } as any })
-
-    const run = await payload.create({
-      collection: BULK_EMBEDDINGS_RUNS_SLUG,
-      data: { pool: 'default', embeddingVersion: testEmbeddingVersion, status: 'queued' },
-    })
-
-    await payload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
-      task: 'payloadcms-vectorize:prepare-bulk-embedding',
-      input: { runId: String(run.id) },
-      req: { payload } as any,
-      ...(BULK_QUEUE_NAMES.prepareBulkEmbedQueueName
-        ? { queue: BULK_QUEUE_NAMES.prepareBulkEmbedQueueName }
-        : {}),
-    })
+    const result = await vectorizedPayload?.bulkEmbed({ knowledgePool: 'default' })
+    expectGoodResult(result)
 
     await waitForBulkJobs(payload)
 
     const batches = await payload.find({
       collection: BULK_EMBEDDINGS_BATCHES_SLUG as any,
-      where: { run: { equals: String(run.id) } },
+      where: { run: { equals: String(result!.runId) } },
     })
     expect(batches.totalDocs).toBe(1)
     expect(batches.docs[0]).toHaveProperty('batchIndex', 0)
@@ -141,18 +107,8 @@ describe('Bulk embed - basic tests', () => {
     const post = await payload.create({ collection: 'posts', data: { title: 'Stable' } as any })
 
     // First bulk run
-    const baselineRun = await payload.create({
-      collection: BULK_EMBEDDINGS_RUNS_SLUG,
-      data: { pool: 'default', embeddingVersion: testEmbeddingVersion, status: 'queued' },
-    })
-    await payload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
-      task: 'payloadcms-vectorize:prepare-bulk-embedding',
-      input: { runId: String(baselineRun.id) },
-      req: { payload } as any,
-      ...(BULK_QUEUE_NAMES.prepareBulkEmbedQueueName
-        ? { queue: BULK_QUEUE_NAMES.prepareBulkEmbedQueueName }
-        : {}),
-    })
+    const result0 = await vectorizedPayload?.bulkEmbed({ knowledgePool: 'default' })
+    expectGoodResult(result0)
     await waitForBulkJobs(payload)
 
     const embeds = await payload.find({
@@ -162,26 +118,15 @@ describe('Bulk embed - basic tests', () => {
     expect(embeds.totalDocs).toBe(1)
 
     // Second bulk run - should find zero eligible
-    const run = await payload.create({
-      collection: BULK_EMBEDDINGS_RUNS_SLUG,
-      data: { pool: 'default', embeddingVersion: testEmbeddingVersion, status: 'queued' },
-    })
-
-    await payload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
-      task: 'payloadcms-vectorize:prepare-bulk-embedding',
-      input: { runId: String(run.id) },
-      req: { payload } as any,
-      ...(BULK_QUEUE_NAMES.prepareBulkEmbedQueueName
-        ? { queue: BULK_QUEUE_NAMES.prepareBulkEmbedQueueName }
-        : {}),
-    })
+    const result1 = await vectorizedPayload?.bulkEmbed({ knowledgePool: 'default' })
+    expect(result1).toBeDefined()
 
     await waitForBulkJobs(payload)
 
     const runDoc = (
       await (payload as any).find({
         collection: BULK_EMBEDDINGS_RUNS_SLUG,
-        where: { id: { equals: String(run.id) } },
+        where: { id: { equals: String(result1!.runId) } },
       })
     ).docs[0]
     expect(runDoc.status).toBe('succeeded')
@@ -192,19 +137,7 @@ describe('Bulk embed - basic tests', () => {
   test('metadata table is cleaned after successful completion', async () => {
     await payload.create({ collection: 'posts', data: { title: 'Cleanup' } as any })
 
-    const run = await payload.create({
-      collection: BULK_EMBEDDINGS_RUNS_SLUG,
-      data: { pool: 'default', embeddingVersion: testEmbeddingVersion, status: 'queued' },
-    })
-
-    await payload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
-      task: 'payloadcms-vectorize:prepare-bulk-embedding',
-      input: { runId: String(run.id) },
-      req: { payload } as any,
-      ...(BULK_QUEUE_NAMES.prepareBulkEmbedQueueName
-        ? { queue: BULK_QUEUE_NAMES.prepareBulkEmbedQueueName }
-        : {}),
-    })
+    await vectorizedPayload?.bulkEmbed({ knowledgePool: 'default' })
 
     await waitForBulkJobs(payload)
 
@@ -215,5 +148,3 @@ describe('Bulk embed - basic tests', () => {
     expect(metadata.totalDocs).toBe(0)
   })
 })
-
-

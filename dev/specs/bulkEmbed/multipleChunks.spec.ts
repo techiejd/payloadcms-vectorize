@@ -1,15 +1,16 @@
 import type { Payload } from 'payload'
 import { beforeAll, describe, expect, test } from 'vitest'
-import { BULK_EMBEDDINGS_RUNS_SLUG } from '../../../src/collections/bulkEmbeddingsRuns.js'
 import {
   BULK_QUEUE_NAMES,
   DEFAULT_DIMS,
   buildPayloadWithIntegration,
   createMockBulkEmbeddings,
   createTestDb,
+  expectGoodResult,
   waitForBulkJobs,
 } from '../utils.js'
 import { makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
+import { getVectorizedPayload } from 'payloadcms-vectorize'
 
 const DIMS = DEFAULT_DIMS
 const dbName = `bulk_multichunk_${Date.now()}`
@@ -58,19 +59,9 @@ describe('Bulk embed - multiple chunks with extension fields', () => {
       data: { title: 'Two' } as any,
     })
 
-    const run = await payload.create({
-      collection: BULK_EMBEDDINGS_RUNS_SLUG,
-      data: { pool: 'default', embeddingVersion: testEmbeddingVersion, status: 'queued' },
-    })
-
-    await payload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
-      task: 'payloadcms-vectorize:prepare-bulk-embedding',
-      input: { runId: String(run.id) },
-      req: { payload } as any,
-      ...(BULK_QUEUE_NAMES.prepareBulkEmbedQueueName
-        ? { queue: BULK_QUEUE_NAMES.prepareBulkEmbedQueueName }
-        : {}),
-    })
+    const vectorizedPayload = getVectorizedPayload(payload)
+    const result = await vectorizedPayload?.bulkEmbed({ knowledgePool: 'default' })
+    expectGoodResult(result)
 
     await waitForBulkJobs(payload)
 
@@ -84,5 +75,3 @@ describe('Bulk embed - multiple chunks with extension fields', () => {
     expect(embeds.docs[1]).toMatchObject({ category: 'b', priority: 2, chunkIndex: 1 })
   })
 })
-
-

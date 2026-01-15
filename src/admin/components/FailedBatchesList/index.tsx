@@ -10,19 +10,10 @@ type FailedBatchesListProps = {
 }
 
 export const FailedBatchesList: React.FC<FailedBatchesListProps> = async (props) => {
-  // Always render something for debugging
-  console.log('[FailedBatchesList] Component called with props:', {
-    hasPayload: !!props.payload,
-    hasId: !!props.id,
-    allProps: Object.keys(props),
-  })
-
   const run = await props.payload.findByID({
     collection: BULK_EMBEDDINGS_RUNS_SLUG,
     id: props.id,
   })
-
-  console.log('[FailedBatchesList] Fetching failed batches for run:', run.id)
 
   // Fetch failed batches for this run
   const runIdNum = typeof run.id === 'number' ? run.id : parseInt(String(run.id), 10)
@@ -37,8 +28,6 @@ export const FailedBatchesList: React.FC<FailedBatchesListProps> = async (props)
 
   const batches = (failedBatches as any)?.docs || []
   const runId = props.id || String(run.id)
-
-  console.log('[FailedBatchesList] Found batches:', batches.length, 'for run:', runId)
 
   return (
     <FailedBatchesListClient
