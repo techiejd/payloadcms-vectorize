@@ -221,18 +221,24 @@ export type OnBulkErrorArgs = {
  */
 export type BulkEmbeddingsFns = {
   /**
-   * Called for each chunk. User accumulates internally based on file size logic.
+   * Called for each chunk. User accumulates internally based on file size/line limits.
    * - Return null to keep accumulating
    * - Return BatchSubmission when ready to submit a batch
    *
-   * **Important contract about which chunks are included:**
-   * - When `isLastChunk=false` and you return a submission: all pending chunks EXCEPT the current one were submitted
-   * - When `isLastChunk=true` and you return a submission: all pending chunks INCLUDING the current one were submitted
+   * **Important contract:**
+   * When you return a submission, all chunks that you've accumulated (and decided to submit)
+   * are considered submitted. The plugin tracks chunks in `pendingChunks` and assumes all
+   * of them were submitted when you return a BatchSubmission.
    *
-   * Example flow when chunk would exceed file limit:
-   * 1. Check if adding current chunk would exceed your provider's file size limit
-   * 2. If yes: submit currently accumulated chunks (without this chunk), start fresh with this chunk
-   * 3. Return the BatchSubmission
+   * **About `isLastChunk`:**
+   * - `isLastChunk=true` indicates this is the final chunk in the run
+   * - Use this to flush any remaining accumulated chunks before the run completes
+   * - The plugin uses this only to know when to stop iterating, not to determine which chunks were submitted
+   *
+   * **Example flow when chunk would exceed limit:**
+   * 1. Check if adding current chunk == limit or if isLastChunk is true
+   * 2. If yes: submit accumulated chunks and return the BatchSubmission
+   * 3. Start fresh in the next call
    */
   addChunk: (args: AddChunkArgs) => Promise<BatchSubmission | null>
 

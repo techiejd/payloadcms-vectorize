@@ -299,37 +299,37 @@ type BatchSubmission = {
 - `null` - "I'm accumulating this chunk, not ready to submit yet"
 - `{ providerBatchId }` - "I just submitted a batch to my provider"
 
-**⚠️ Important contract about which chunks are included in a submission:**
+**⚠️ Important contract:**
 
-- When `isLastChunk=false` and you return a submission: all pending chunks **EXCEPT** the current one were submitted (current chunk starts fresh accumulation)
-- When `isLastChunk=true` and you return a submission: all pending chunks **INCLUDING** the current one were submitted
+When you return a submission, the plugin assumes **all chunks currently in `pendingChunks` were submitted**. The plugin tracks chunks and creates batch records based on this assumption. You control which chunks get submitted by managing your own accumulation logic.
+
+**About `isLastChunk`:**
+
+- `isLastChunk=true` indicates this is the final chunk in the run
+- Use this to flush any remaining accumulated chunks before the run completes
+- The plugin uses this only to know when to stop iterating, not to determine which chunks were submitted
 
 **Example implementation:**
 
 ```typescript
 let accumulated: BulkEmbeddingInput[] = []
-let accumulatedSize = 0
-const FILE_SIZE_LIMIT = 50 * 1024 * 1024 // 50MB
+const LINE_LIMIT = 100_000 // e.g., Voyage AI's limit
 
 addChunk: async ({ chunk, isLastChunk }) => {
-  const chunkSize = JSON.stringify(chunk).length
+  // Add current chunk to accumulation first
+  accumulated.push(chunk)
 
-  // Would exceed limit? Submit what we have, keep current for next batch
-  if (accumulatedSize + chunkSize > FILE_SIZE_LIMIT && accumulated.length > 0) {
+  // Check if we've hit the line limit (after adding current chunk)
+  if (accumulated.length === LINE_LIMIT) {
     const result = await submitToProvider(accumulated)
-    accumulated = [chunk] // Start fresh WITH current chunk
-    accumulatedSize = chunkSize
+    accumulated = [] // Clear for next batch
     return { providerBatchId: result.id }
   }
-
-  accumulated.push(chunk)
-  accumulatedSize += chunkSize
 
   // Last chunk? Must flush everything
   if (isLastChunk && accumulated.length > 0) {
     const result = await submitToProvider(accumulated)
     accumulated = []
-    accumulatedSize = 0
     return { providerBatchId: result.id }
   }
 
@@ -337,7 +337,7 @@ addChunk: async ({ chunk, isLastChunk }) => {
 }
 ```
 
-**Note:** If a single chunk exceeds your provider's file size limit, you'll need to handle that edge case in your implementation (e.g., skip it, split it, or fail gracefully).
+**Note:** If a single chunk exceeds your provider's file size or line limit, you'll need to handle that edge case in your implementation (e.g., skip it, split it, or fail gracefully).
 
 #### `pollOrCompleteBatch` - Poll and Stream Results
 
