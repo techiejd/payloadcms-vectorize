@@ -7,11 +7,11 @@ import {
   buildPayloadWithIntegration,
   createMockBulkEmbeddings,
   createTestDb,
-  expectGoodResult,
   waitForBulkJobs,
 } from '../utils.js'
 import { makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
 import { getVectorizedPayload, VectorizedPayload } from 'payloadcms-vectorize'
+import { expectGoodResult } from '../utils.vitest.js'
 
 const DIMS = DEFAULT_DIMS
 const dbName = `bulk_extfields_${Date.now()}`

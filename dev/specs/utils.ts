@@ -13,9 +13,7 @@ import type {
   BulkEmbeddingsFns,
   BulkEmbeddingInput,
   BulkEmbeddingRunStatus,
-  BulkEmbedResult,
 } from '../../src/types.js'
-import { expect } from 'vitest'
 
 export const createTestDb = async ({ dbName }: { dbName: string }) => {
   const adminUri =
@@ -287,10 +285,4 @@ export async function createSucceededBaselineRun(
       completedAt,
     },
   })
-}
-
-export const expectGoodResult = (result: BulkEmbedResult | undefined) => {
-  expect(result).toBeDefined()
-  expect(result!.status).toBe('queued')
-  expect((result as any).conflict).toBeUndefined()
 }

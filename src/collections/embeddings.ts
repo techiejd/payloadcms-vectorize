@@ -39,8 +39,6 @@ export const createEmbeddingsCollection = (
 
                 // Use getVectorizedPayload to get the vectorized payload object
                 const vectorizedPayload = getVectorizedPayload(payload)
-                console.log('vectorizedPayload', vectorizedPayload)
-                console.log('payload.config.custom', payload.config.custom)
                 if (poolName && typeof poolName === 'string' && vectorizedPayload) {
                   return vectorizedPayload._isBulkEmbedEnabled(poolName)
                 }

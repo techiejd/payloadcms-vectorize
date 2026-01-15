@@ -7,11 +7,11 @@ import {
   buildPayloadWithIntegration,
   createMockBulkEmbeddings,
   createTestDb,
-  expectGoodResult,
   waitForBulkJobs,
 } from '../utils.js'
 import { getVectorizedPayload } from 'payloadcms-vectorize'
 import { makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
+import { expectGoodResult } from '../utils.vitest.js'
 
 const DIMS = DEFAULT_DIMS
 const dbName = `bulk_polling_${Date.now()}`

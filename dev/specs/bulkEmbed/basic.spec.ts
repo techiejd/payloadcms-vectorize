@@ -10,12 +10,11 @@ import {
   clearAllCollections,
   createMockBulkEmbeddings,
   createTestDb,
-  expectGoodResult,
   waitForBulkJobs,
 } from '../utils.js'
 import { makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
 import { getVectorizedPayload, VectorizedPayload } from 'payloadcms-vectorize'
-import { BulkEmbedResult } from '../../../src/types.js'
+import { expectGoodResult } from '../utils.vitest.js'
 
 const DIMS = DEFAULT_DIMS
 const dbName = `bulk_basic_${Date.now()}`

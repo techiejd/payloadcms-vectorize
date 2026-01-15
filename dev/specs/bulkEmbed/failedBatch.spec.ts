@@ -10,10 +10,10 @@ import {
   buildPayloadWithIntegration,
   createMockBulkEmbeddings,
   createTestDb,
-  expectGoodResult,
   waitForBulkJobs,
 } from '../utils.js'
 import { makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
+import { expectGoodResult } from '../utils.vitest.js'
 
 const DIMS = DEFAULT_DIMS
 const dbName = `bulk_failed_${Date.now()}`
