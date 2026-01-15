@@ -1,5 +1,6 @@
 import type { CollectionConfig, Field } from 'payload'
 import type { KnowledgePoolName } from '../types.js'
+import { getVectorizedPayload } from '../types.js'
 
 const RESERVED_FIELDS = ['sourceCollection', 'docId', 'chunkIndex', 'chunkText', 'embeddingVersion']
 
@@ -25,6 +26,34 @@ export const createEmbeddingsCollection = (
     admin: {
       description:
         'Vector embeddings for search and similarity queries. Created by the payloadcms-vectorize plugin. Embeddings cannot be added or modified, only deleted, through the admin panel. No other restrictions enforced.',
+      components: {
+        beforeList: [
+          {
+            path: 'payloadcms-vectorize/client#EmbedAllButton',
+            exportName: 'EmbedAllButton',
+            serverProps: {
+              hasBulkEmbeddings: ({ payload, params }: { payload: any; params: any }): boolean => {
+                // Get the knowledge pool name from params.segments
+                // params structure: { segments: [ 'collections', 'bulkDefault' ] }
+                const poolName = params?.segments?.[1]
+
+                // Use getVectorizedPayload to get the vectorized payload object
+                const vectorizedPayload = getVectorizedPayload(payload)
+                if (poolName && typeof poolName === 'string' && vectorizedPayload) {
+                  return vectorizedPayload._isBulkEmbedEnabled(poolName)
+                }
+
+                return false
+              },
+              collectionSlug: ({ params }: { payload: any; params: any }): string => {
+                // Get the knowledge pool name from params.segments
+                // params structure: { segments: [ 'collections', 'bulkDefault' ] }
+                return params?.segments?.[1] || ''
+              },
+            },
+          },
+        ],
+      },
     },
     access: {
       create: () => false, // Cannot add new embeddings through admin panel

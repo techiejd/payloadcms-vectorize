@@ -5,7 +5,12 @@ import { beforeAll, describe, expect, test } from 'vitest'
 import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
 import { type SerializedEditorState } from '@payloadcms/richtext-lexical/lexical'
 import { buildDummyConfig, DIMS, getInitialMarkdownContent } from './constants.js'
-import { createTestDb, waitForVectorizationJobs } from './utils.js'
+import {
+  BULK_QUEUE_NAMES,
+  createMockBulkEmbeddings,
+  createTestDb,
+  waitForVectorizationJobs,
+} from './utils.js'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { chunkRichText, chunkText } from 'helpers/chunkers.js'
 import { createVectorSearchHandlers } from '../../src/endpoints/vectorSearch.js'
@@ -29,9 +34,11 @@ async function performVectorSearch(
   const knowledgePools: Record<string, KnowledgePoolDynamicConfig> = {
     default: {
       collections: {},
-      embedDocs: makeDummyEmbedDocs(DIMS),
-      embedQuery: embedFn,
-      embeddingVersion: testEmbeddingVersion,
+      embeddingConfig: {
+        version: testEmbeddingVersion,
+        queryFn: makeDummyEmbedQuery(DIMS),
+        realTimeIngestionFn: makeDummyEmbedDocs(DIMS),
+      },
     },
   }
   const searchHandler = createVectorSearchHandlers(knowledgePools).requestHandler
@@ -121,9 +128,11 @@ describe('Search endpoint integration tests', () => {
                   },
                 },
               },
-              embedDocs: makeDummyEmbedDocs(DIMS),
-              embedQuery: makeDummyEmbedQuery(DIMS),
-              embeddingVersion: testEmbeddingVersion,
+              embeddingConfig: {
+                version: testEmbeddingVersion,
+                queryFn: makeDummyEmbedQuery(DIMS),
+                realTimeIngestionFn: makeDummyEmbedDocs(DIMS),
+              },
             },
             nonSnakeCasePost: {
               collections: {
@@ -144,9 +153,11 @@ describe('Search endpoint integration tests', () => {
                   },
                 },
               },
-              embedDocs: makeDummyEmbedDocs(DIMS),
-              embedQuery: makeDummyEmbedQuery(DIMS),
-              embeddingVersion: testEmbeddingVersion,
+              embeddingConfig: {
+                version: testEmbeddingVersion,
+                queryFn: makeDummyEmbedQuery(DIMS),
+                realTimeIngestionFn: makeDummyEmbedDocs(DIMS),
+              },
             },
             'test-non-snake-case-post': {
               collections: {
@@ -167,11 +178,14 @@ describe('Search endpoint integration tests', () => {
                   },
                 },
               },
-              embedDocs: makeDummyEmbedDocs(DIMS),
-              embedQuery: makeDummyEmbedQuery(DIMS),
-              embeddingVersion: testEmbeddingVersion,
+              embeddingConfig: {
+                version: testEmbeddingVersion,
+                queryFn: makeDummyEmbedQuery(DIMS),
+                bulkEmbeddingsFns: createMockBulkEmbeddings({ statusSequence: ['succeeded'] }),
+              },
             },
           },
+          bulkQueueNames: BULK_QUEUE_NAMES,
         }),
       ],
     })

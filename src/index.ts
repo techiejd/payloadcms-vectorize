@@ -1,5 +1,6 @@
 import type { Config, Payload, PayloadRequest } from 'payload'
 import { customType } from '@payloadcms/db-postgres/drizzle/pg-core'
+import toSnakeCase from 'to-snake-case'
 
 import { createEmbeddingsCollection } from './collections/embeddings.js'
 import type {
@@ -10,15 +11,70 @@ import type {
   KnowledgePoolDynamicConfig,
   VectorizedPayload,
   VectorSearchQuery,
+  BulkEmbedResult,
+  RetryFailedBatchResult,
 } from './types.js'
 import { isPostgresPayload } from './types.js'
 import type { PostgresAdapterArgs } from '@payloadcms/db-postgres'
 import { createVectorizeTask } from './tasks/vectorize.js'
 import { createVectorSearchHandlers } from './endpoints/vectorSearch.js'
 import { clearEmbeddingsTables, registerEmbeddingsTable } from './drizzle/tables.js'
-import toSnakeCase from 'to-snake-case'
+import {
+  createBulkEmbeddingsRunsCollection,
+  BULK_EMBEDDINGS_RUNS_SLUG,
+} from './collections/bulkEmbeddingsRuns.js'
+import {
+  BULK_EMBEDDINGS_INPUT_METADATA_SLUG,
+  createBulkEmbeddingInputMetadataCollection,
+} from './collections/bulkEmbeddingInputMetadata.js'
+import {
+  createBulkEmbeddingsBatchesCollection,
+  BULK_EMBEDDINGS_BATCHES_SLUG,
+} from './collections/bulkEmbeddingsBatches.js'
+import {
+  createPrepareBulkEmbeddingTask,
+  createPollOrCompleteBulkEmbeddingTask,
+} from './tasks/bulkEmbedAll.js'
+import { createBulkEmbedHandler, startBulkEmbed } from './endpoints/bulkEmbed.js'
+import { createRetryFailedBatchHandler, retryBatch } from './endpoints/retryFailedBatch.js'
 
-export type * from './types.js'
+export type {
+  KnowledgePoolStaticConfig,
+  PayloadcmsVectorizeConfig,
+
+  // PayloadcmsVectorizeConfig
+  KnowledgePoolDynamicConfig,
+  KnowledgePoolName,
+
+  // KnowledgePoolDynamicConfig,
+  CollectionVectorizeOption,
+  EmbeddingConfig,
+
+  // CollectionVectorizeOption
+  ToKnowledgePoolFn,
+
+  // EmbeddingConfig
+  EmbedQueryFn,
+  EmbedDocsFn,
+  BulkEmbeddingsFns,
+
+  // BulkEmbeddingsFns
+  AddChunkArgs,
+  BatchSubmission,
+  PollOrCompleteBatchArgs,
+  PollBulkEmbeddingsResult,
+  BulkEmbeddingOutput,
+  OnBulkErrorArgs,
+
+  // AddChunkArgs
+  BulkEmbeddingInput,
+
+  // PollBulkEmbeddingsResult
+  BulkEmbeddingRunStatus,
+  VectorizedPayload,
+} from './types.js'
+
+export { getVectorizedPayload } from './types.js'
 
 async function ensurePgvectorArtifacts(args: {
   payload: Payload
@@ -124,6 +180,22 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
       // Ensure collections array exists
       config.collections = [...(config.collections || [])]
 
+      // Ensure bulk runs collection exists once
+      const bulkRunsCollection = createBulkEmbeddingsRunsCollection()
+      if (!config.collections.find((c) => c.slug === BULK_EMBEDDINGS_RUNS_SLUG)) {
+        config.collections.push(bulkRunsCollection)
+      }
+      // Ensure bulk input metadata collection exists once
+      const bulkInputMetadataCollection = createBulkEmbeddingInputMetadataCollection()
+      if (!config.collections.find((c) => c.slug === BULK_EMBEDDINGS_INPUT_METADATA_SLUG)) {
+        config.collections.push(bulkInputMetadataCollection)
+      }
+      // Ensure bulk batches collection exists once
+      const bulkBatchesCollection = createBulkEmbeddingsBatchesCollection()
+      if (!config.collections.find((c) => c.slug === BULK_EMBEDDINGS_BATCHES_SLUG)) {
+        config.collections.push(bulkBatchesCollection)
+      }
+
       // Validate static/dynamic configs share the same pool names
       for (const poolName in pluginOptions.knowledgePools) {
         if (!staticConfigs[poolName]) {
@@ -176,6 +248,21 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
         }
       }
 
+      // Validate bulk queue requirements
+      let bulkIngestEnabled = false
+      for (const poolName in pluginOptions.knowledgePools) {
+        const dynamicConfig = pluginOptions.knowledgePools[poolName]
+        if (dynamicConfig.embeddingConfig.bulkEmbeddingsFns) {
+          bulkIngestEnabled = true
+          break
+        }
+      }
+      if (bulkIngestEnabled && !pluginOptions.bulkQueueNames) {
+        throw new Error(
+          '[payloadcms-vectorize] bulkQueueNames is required when any knowledge pool has bulk embedding configured (embeddingConfig.bulkEmbeddingsFns).',
+        )
+      }
+
       // Exit early if disabled, but keep embeddings collections present for migrations
       if (pluginOptions.disabled) return config
 
@@ -187,6 +274,16 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
         knowledgePools: pluginOptions.knowledgePools,
       })
       tasks.push(vectorizeTask)
+      const prepareBulkEmbedTask = createPrepareBulkEmbeddingTask({
+        knowledgePools: pluginOptions.knowledgePools,
+        pollOrCompleteQueueName: pluginOptions.bulkQueueNames?.pollOrCompleteQueueName,
+      })
+      tasks.push(prepareBulkEmbedTask)
+      const pollOrCompleteBulkEmbedTask = createPollOrCompleteBulkEmbeddingTask({
+        knowledgePools: pluginOptions.knowledgePools,
+        pollOrCompleteQueueName: pluginOptions.bulkQueueNames?.pollOrCompleteQueueName,
+      })
+      tasks.push(pollOrCompleteBulkEmbedTask)
 
       config.jobs = {
         ...incomingJobs,
@@ -211,6 +308,11 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
             const collectionConfig = dynamic.collections[collectionSlug]
             if (!collectionConfig) continue
 
+            // Only queue real-time vectorization if realTimeIngestionFn is provided
+            if (!dynamic.embeddingConfig.realTimeIngestionFn) continue
+            // If no realTimeIngestionFn, nothing happens on doc change
+            // User must trigger bulk embedding manually
+
             await payload.jobs.queue<'payloadcms-vectorize:vectorize'>({
               task: 'payloadcms-vectorize:vectorize',
               input: {
@@ -219,7 +321,9 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
                 knowledgePool: pool,
               },
               req: req,
-              ...(pluginOptions.queueName ? { queue: pluginOptions.queueName } : {}),
+              ...(pluginOptions.realtimeQueueName
+                ? { queue: pluginOptions.realtimeQueueName }
+                : {}),
             })
           }
         }
@@ -233,7 +337,6 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
             async (args) => {
               const { doc, req } = args
               const payload = req.payload
-
               return embedQueue(doc, payload, req)
             },
           ],
@@ -261,61 +364,110 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
                   )
                 }
               }
+
+              // Also clean up any pending bulk embedding metadata for this document
+              // This prevents embedding a document that was deleted during a bulk run
+              try {
+                await payload.delete({
+                  collection: BULK_EMBEDDINGS_INPUT_METADATA_SLUG,
+                  where: {
+                    and: [
+                      { sourceCollection: { equals: collectionSlug } },
+                      { docId: { equals: String(id) } },
+                    ],
+                  },
+                })
+              } catch (e) {
+                payload?.logger?.warn?.(
+                  `[payloadcms-vectorize] Failed to delete bulk embedding metadata for ${collectionSlug}:${id}`,
+                  e as Error,
+                )
+              }
             },
           ],
         }
       }
 
-      const incomingOnInit = config.onInit
       const vectorSearchHandlers = createVectorSearchHandlers(pluginOptions.knowledgePools)
+
+      // Create vectorized payload object factory that creates methods bound to a payload instance
+      const createVectorizedPayloadObject = (payload: Payload): VectorizedPayload<TPoolNames> => {
+        return {
+          _isBulkEmbedEnabled: (knowledgePool: TPoolNames): boolean => {
+            const poolConfig = pluginOptions.knowledgePools[knowledgePool]
+            return !!poolConfig?.embeddingConfig?.bulkEmbeddingsFns
+          },
+          search: (params: VectorSearchQuery<TPoolNames>) =>
+            vectorSearchHandlers.vectorSearch(
+              payload,
+              params.query,
+              params.knowledgePool,
+              params.limit,
+              params.where,
+            ),
+          queueEmbed: async (
+            params:
+              | {
+                  collection: string
+                  docId: string
+                }
+              | {
+                  collection: string
+                  doc: Record<string, any>
+                },
+          ) => {
+            const collection = params.collection
+            let doc: Record<string, any>
+            if ('docId' in params && params.docId) {
+              doc = await payload.findByID({
+                collection: collection as any,
+                id: params.docId,
+              })
+            } else if ('doc' in params && params.doc) {
+              doc = params.doc
+            } else {
+              throw new Error(
+                `[payloadcms-vectorize] queueEmbed requires either docId or doc parameter`,
+              )
+            }
+            const embedQueue = collectionToEmbedQueue.get(collection)
+            if (!embedQueue) {
+              throw new Error(
+                `[payloadcms-vectorize] Collection "${collection}" is not configured for vectorization`,
+              )
+            }
+            return embedQueue(doc, payload)
+          },
+          bulkEmbed: (params: { knowledgePool: TPoolNames }): Promise<BulkEmbedResult> =>
+            startBulkEmbed({
+              payload,
+              knowledgePool: params.knowledgePool,
+              knowledgePools: pluginOptions.knowledgePools,
+              queueName: pluginOptions.bulkQueueNames?.prepareBulkEmbedQueueName,
+            }),
+          retryFailedBatch: (params: { batchId: string }): Promise<RetryFailedBatchResult> =>
+            retryBatch({
+              payload,
+              batchId: params.batchId,
+              knowledgePools: pluginOptions.knowledgePools,
+              queueName: pluginOptions.bulkQueueNames?.pollOrCompleteQueueName,
+            }),
+        } as VectorizedPayload<TPoolNames>
+      }
+
+      // Store factory in config.custom
+      config.custom = {
+        ...(config.custom || {}),
+        createVectorizedPayloadObject,
+      }
+
+      const incomingOnInit = config.onInit
       config.onInit = async (payload) => {
         if (incomingOnInit) await incomingOnInit(payload)
-        ;(payload as VectorizedPayload<TPoolNames>).search = (
-          params: VectorSearchQuery<TPoolNames>,
-        ) =>
-          vectorSearchHandlers.vectorSearch(
-            payload,
-            params.query,
-            params.knowledgePool,
-            params.limit,
-            params.where,
-          )
-        ;(payload as VectorizedPayload<TPoolNames>).queueEmbed = async (
-          params:
-            | {
-                collection: string
-                docId: string
-              }
-            | {
-                collection: string
-                doc: Record<string, any>
-              },
-        ) => {
-          const collection = params.collection
-          let doc: Record<string, any>
-          if ('docId' in params && params.docId) {
-            doc = await payload.findByID({
-              collection: collection as any,
-              id: params.docId,
-            })
-          } else if ('doc' in params && params.doc) {
-            doc = params.doc
-          } else {
-            throw new Error(
-              `[payloadcms-vectorize] queueEmbed requires either docId or doc parameter`,
-            )
-          }
-          const embedQueue = collectionToEmbedQueue.get(collection)
-          if (!embedQueue) {
-            throw new Error(
-              `[payloadcms-vectorize] Collection "${collection}" is not configured for vectorization`,
-            )
-          }
-          return embedQueue(doc, payload)
-        }
         // Ensure pgvector artifacts for each knowledge pool
         for (const poolName in staticConfigs) {
           const staticConfig = staticConfigs[poolName]
+          // Drizzle converts camelCase collection slugs to snake_case table names
           await ensurePgvectorArtifacts({
             payload,
             // Drizzle converts camelCase collection slugs to snake_case table names
@@ -329,14 +481,31 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
       if (pluginOptions.endpointOverrides?.enabled !== false) {
         const path = pluginOptions.endpointOverrides?.path || '/vector-search'
         const inputEndpoints = config.endpoints || []
-        config.endpoints = [
+        const endpoints = [
           ...inputEndpoints,
           {
             path,
-            method: 'post',
+            method: 'post' as const,
             handler: vectorSearchHandlers.requestHandler,
           },
+          {
+            path: '/vector-bulk-embed',
+            method: 'post' as const,
+            handler: createBulkEmbedHandler(
+              pluginOptions.knowledgePools,
+              pluginOptions.bulkQueueNames?.prepareBulkEmbedQueueName,
+            ),
+          },
+          {
+            path: '/vector-retry-failed-batch',
+            method: 'post' as const,
+            handler: createRetryFailedBatchHandler(
+              pluginOptions.knowledgePools,
+              pluginOptions.bulkQueueNames?.pollOrCompleteQueueName,
+            ),
+          },
         ]
+        config.endpoints = endpoints
       }
 
       return config

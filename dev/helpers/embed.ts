@@ -1,5 +1,12 @@
 import { voyage } from 'voyage-ai-provider'
 import { embed, embedMany } from 'ai'
+import type {
+  BulkEmbeddingInput,
+  BulkEmbeddingOutput,
+  BulkEmbeddingRunStatus,
+  BulkEmbeddingsFns,
+  BatchSubmission,
+} from 'payloadcms-vectorize'
 
 export const voyageEmbedDocs = async (texts: string[]): Promise<number[][]> => {
   const embedResult = await embedMany({
@@ -54,3 +61,238 @@ export function makeDummyEmbedDocs(dims: number) {
   }
 }
 export const testEmbeddingVersion = 'test-v1'
+
+// Voyage line limit (100,000 lines per batch)
+// https://docs.voyageai.com/docs/batch-inference
+const VOYAGE_LINE_LIMIT = 100_000
+
+/**
+ * Real Voyage Batch API implementation using the new streaming API.
+ */
+export function makeVoyageBulkEmbeddingsConfig(): BulkEmbeddingsFns {
+  // Accumulated chunks for current batch
+  let accumulatedChunks: BulkEmbeddingInput[] = []
+  let batchIndex = 0
+
+  // Helper to submit accumulated chunks to Voyage
+  const submitBatch = async (chunks: BulkEmbeddingInput[]): Promise<BatchSubmission> => {
+    // Create JSONL content for Voyage batch
+    const jsonlLines = chunks.map((input) => {
+      return JSON.stringify({
+        custom_id: input.id,
+        body: {
+          input: input.text,
+        },
+      })
+    })
+    const jsonlContent = jsonlLines.join('\n')
+
+    // Upload file to Voyage Files API using FormData
+    const formData = new FormData()
+    const blob = new Blob([jsonlContent], { type: 'application/jsonl' })
+    formData.append('file', blob, `batch-input-${batchIndex}.jsonl`)
+    formData.append('purpose', 'batch')
+
+    const uploadResponse = await fetch('https://api.voyageai.com/v1/files', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.VOYAGE_API_KEY}`,
+      },
+      body: formData,
+    })
+
+    if (!uploadResponse.ok) {
+      const error = await uploadResponse.text()
+      throw new Error(`Voyage file upload failed: ${error}`)
+    }
+
+    const fileData = await uploadResponse.json()
+    const fileId = fileData.id
+
+    // Create batch
+    const batchResponse = await fetch('https://api.voyageai.com/v1/batches', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.VOYAGE_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        input_file_id: fileId,
+        endpoint: '/v1/embeddings',
+        completion_window: '12h',
+        request_params: {
+          model: 'voyage-3.5-lite',
+          input_type: 'document',
+        },
+      }),
+    })
+
+    if (!batchResponse.ok) {
+      const error = await batchResponse.text()
+      throw new Error(`Voyage batch creation failed: ${error}`)
+    }
+
+    const batchData = await batchResponse.json()
+    const providerBatchId = batchData.id
+
+    batchIndex++
+
+    return { providerBatchId }
+  }
+
+  return {
+    addChunk: async ({ chunk, isLastChunk }) => {
+      // Add chunk to accumulator
+      accumulatedChunks.push(chunk)
+
+      // If we hit the 100,000 limit, submit and start a new batch
+      if (accumulatedChunks.length === VOYAGE_LINE_LIMIT) {
+        const toSubmit = [...accumulatedChunks]
+        accumulatedChunks = []
+        return await submitBatch(toSubmit)
+      }
+
+      // If this is the last chunk, flush everything
+      if (isLastChunk && accumulatedChunks.length > 0) {
+        const toSubmit = [...accumulatedChunks]
+        accumulatedChunks = []
+        return await submitBatch(toSubmit)
+      }
+
+      return null
+    },
+
+    pollOrCompleteBatch: async ({ providerBatchId, onChunk }) => {
+      try {
+        const response = await fetch(`https://api.voyageai.com/v1/batches/${providerBatchId}`, {
+          headers: {
+            Authorization: `Bearer ${process.env.VOYAGE_API_KEY}`,
+          },
+        })
+
+        if (!response.ok) {
+          const error = await response.text()
+          return { status: 'failed', error: `Voyage API error: ${error}` }
+        }
+
+        const batchData = await response.json()
+
+        // Map Voyage status to our status
+        let status: BulkEmbeddingRunStatus
+        switch (batchData.status) {
+          case 'queued':
+          case 'validating':
+            status = 'queued'
+            break
+          case 'running':
+          case 'finalizing':
+            status = 'running'
+            break
+          case 'completed':
+            status = 'succeeded'
+            break
+          case 'failed':
+          case 'cancelled':
+          case 'expired':
+            status = batchData.status === 'cancelled' ? 'canceled' : 'failed'
+            break
+          default:
+            status = 'running'
+        }
+
+        // If succeeded, download and stream outputs
+        if (status === 'succeeded') {
+          const outputFileId = batchData.output_file_id
+          if (!outputFileId) {
+            return { status: 'failed', error: 'No output file available for completed batch' }
+          }
+
+          // Download output file
+          const downloadResponse = await fetch(
+            `https://api.voyageai.com/v1/files/${outputFileId}/content`,
+            {
+              headers: {
+                Authorization: `Bearer ${process.env.VOYAGE_API_KEY}`,
+              },
+            },
+          )
+
+          if (!downloadResponse.ok) {
+            const error = await downloadResponse.text()
+            return { status: 'failed', error: `Failed to download output file: ${error}` }
+          }
+
+          const jsonlContent = await downloadResponse.text()
+          const lines = jsonlContent.trim().split('\n')
+
+          for (const line of lines) {
+            if (!line.trim()) continue
+            try {
+              const result = JSON.parse(line)
+              // Check for error in result.error field
+              if (result.error) {
+                await onChunk({
+                  id: result.custom_id,
+                  error: result.error.message || 'Unknown error',
+                })
+              }
+              // Check for error in result.response.status_code (Voyage AI format)
+              // Error if status_code exists and is >= 400 or not 200
+              else if (result.response?.status_code && result.response.status_code !== 200) {
+                await onChunk({
+                  id: result.custom_id,
+                  error: result.response.message || `HTTP ${result.response.status_code}`,
+                })
+              }
+              // Success case - check for embedding data
+              // Handle body.object === "list" with data array
+              else if (
+                result.response?.body?.object === 'list' &&
+                result.response.body.data?.[0]?.embedding
+              ) {
+                await onChunk({
+                  id: result.custom_id,
+                  embedding: result.response.body.data[0].embedding,
+                })
+              }
+              // Handle body.object === "embedding" (direct embedding)
+              else if (
+                result.response?.body?.object === 'embedding' &&
+                result.response.body.embedding
+              ) {
+                await onChunk({
+                  id: result.custom_id,
+                  embedding: result.response.body.embedding,
+                })
+              }
+              // Unknown format
+              else {
+                await onChunk({
+                  id: result.custom_id,
+                  error: 'Unexpected response format',
+                })
+              }
+            } catch (parseError) {
+              console.error('Failed to parse output line:', line, parseError)
+            }
+          }
+        }
+
+        return { status }
+      } catch (error) {
+        console.error('Voyage pollOrCompleteBatch error:', error)
+        return { status: 'failed', error: 'Failed to poll batch status' }
+      }
+    },
+
+    onError: async ({ providerBatchIds, error }) => {
+      // TODO: Could implement error recovery here, e.g.:
+      // - Cancel running batches via API
+      // - Retry failed embeddings one by one using the regular embed API
+      // - Clean up uploaded files
+      console.log(
+        `Voyage bulk run failed: ${error.message}. ${providerBatchIds.length} batches affected.`,
+      )
+    },
+  }
+}

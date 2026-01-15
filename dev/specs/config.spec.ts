@@ -6,14 +6,21 @@ describe('jobs.tasks merging', () => {
     const cfg = await buildDummyConfig({ jobs: { tasks: [] } })
     const tasks = cfg.jobs?.tasks
     expect(Array.isArray(tasks)).toBe(true)
-    expect(tasks).toEqual([
-      { slug: 'payloadcms-vectorize:vectorize', handler: expect.any(Function) },
-    ])
+    expect(tasks).toEqual(
+      expect.arrayContaining([
+        { slug: 'payloadcms-vectorize:vectorize', handler: expect.any(Function) },
+        { slug: 'payloadcms-vectorize:prepare-bulk-embedding', handler: expect.any(Function) },
+        {
+          slug: 'payloadcms-vectorize:poll-or-complete-bulk-embedding',
+          handler: expect.any(Function),
+        },
+      ]),
+    )
   })
 })
 
-describe('/vector-search endpoint', () => {
-  test('adds the endpoint by default', async () => {
+describe('endpoints: /vector-search, /vector-bulk-embed', () => {
+  test('adds the endpoints by default', async () => {
     const cfg = await buildDummyConfig({})
     const endpoints = cfg.endpoints
     expect(Array.isArray(endpoints)).toBe(true)
@@ -21,6 +28,11 @@ describe('/vector-search endpoint', () => {
       expect.arrayContaining([
         expect.objectContaining({
           path: '/vector-search',
+          method: 'post',
+          handler: expect.any(Function),
+        }),
+        expect.objectContaining({
+          path: '/vector-bulk-embed',
           method: 'post',
           handler: expect.any(Function),
         }),
@@ -40,10 +52,21 @@ describe('/vector-search endpoint', () => {
           method: 'post',
           handler: expect.any(Function),
         }),
+        expect.objectContaining({
+          path: '/vector-bulk-embed',
+          method: 'post',
+          handler: expect.any(Function),
+        }),
+        expect.objectContaining({
+          path: '/vector-retry-failed-batch',
+          method: 'post',
+          handler: expect.any(Function),
+        }),
       ]),
     )
   })
   test('uses the custom path when provided', async () => {
+    // TODO: Add test for custom path for bulk embed and retry failed batch
     const cfg = await buildDummyConfig({
       plugins: [plugin({ ...dummyPluginOptions, endpointOverrides: { path: '/custom-path' } })],
     })

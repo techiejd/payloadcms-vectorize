@@ -1,6 +1,19 @@
 // dev/create-alt-db.ts
-import { Payload } from 'payload'
+import type { Payload, SanitizedConfig } from 'payload'
+import { buildConfig, getPayload } from 'payload'
 import { Client } from 'pg'
+import { postgresAdapter } from '@payloadcms/db-postgres'
+import { lexicalEditor } from '@payloadcms/richtext-lexical'
+import { createVectorizeIntegration } from 'payloadcms-vectorize'
+import { BULK_EMBEDDINGS_RUNS_SLUG } from '../../src/collections/bulkEmbeddingsRuns.js'
+import { BULK_EMBEDDINGS_INPUT_METADATA_SLUG } from '../../src/collections/bulkEmbeddingInputMetadata.js'
+import { BULK_EMBEDDINGS_BATCHES_SLUG } from '../../src/collections/bulkEmbeddingsBatches.js'
+import { makeDummyEmbedDocs } from '../helpers/embed.js'
+import type {
+  BulkEmbeddingsFns,
+  BulkEmbeddingInput,
+  BulkEmbeddingRunStatus,
+} from '../../src/types.js'
 
 export const createTestDb = async ({ dbName }: { dbName: string }) => {
   const adminUri =
@@ -14,37 +27,258 @@ export const createTestDb = async ({ dbName }: { dbName: string }) => {
   await client.end()
 }
 
-// Helper function to wait for vectorization jobs to complete
-export async function waitForVectorizationJobs(payload: Payload, maxWaitMs = 10000) {
+async function waitForTasks(
+  payload: Payload,
+  taskSlugs: string[],
+  maxWaitMs = 10000,
+  intervalMs = 250,
+) {
+  const hasJobsCollection = (payload as any)?.config?.collections?.some(
+    (c: any) => c.slug === 'payload-jobs',
+  )
+  if (!hasJobsCollection) return
+
   const startTime = Date.now()
   while (Date.now() - startTime < maxWaitMs) {
-    const jobs = await payload.find({
+    const pending = await payload.find({
       collection: 'payload-jobs',
       where: {
-        and: [
-          { taskSlug: { equals: 'payloadcms-vectorize:vectorize' } },
-          { processing: { equals: true } },
-        ],
+        and: [{ taskSlug: { in: taskSlugs } }, { completedAt: { exists: false } }],
       },
     })
-    if (jobs.totalDocs === 0) {
-      // No running vectorization jobs, check if any are pending
-      const pendingJobs = await payload.find({
-        collection: 'payload-jobs',
-        where: {
-          and: [
-            { taskSlug: { equals: 'payloadcms-vectorize:vectorize' } },
-            { processing: { equals: false } },
-            { completedAt: { equals: null } },
-          ],
-        },
-      })
-      if (pendingJobs.totalDocs === 0) {
-        return // All jobs completed
-      }
-    }
-    await new Promise((resolve) => setTimeout(resolve, 500)) // Check every 500ms
+    if (pending.totalDocs === 0) return
+    await new Promise((resolve) => setTimeout(resolve, intervalMs))
   }
-  // Fallback: wait a bit more if we hit the timeout
-  await new Promise((resolve) => setTimeout(resolve, 2000))
+  // One last grace wait
+  await new Promise((resolve) => setTimeout(resolve, 500))
+}
+
+export async function waitForVectorizationJobs(payload: Payload, maxWaitMs = 10000) {
+  await waitForTasks(payload, ['payloadcms-vectorize:vectorize'], maxWaitMs)
+}
+
+export async function waitForBulkJobs(payload: Payload, maxWaitMs = 10000) {
+  await waitForTasks(
+    payload,
+    [
+      'payloadcms-vectorize:prepare-bulk-embedding',
+      'payloadcms-vectorize:poll-or-complete-bulk-embedding',
+    ],
+    maxWaitMs,
+  )
+}
+
+export const DEFAULT_DIMS = 8
+export const BULK_QUEUE_NAMES = {
+  prepareBulkEmbedQueueName: 'vectorize-bulk-prepare',
+  pollOrCompleteQueueName: 'vectorize-bulk-poll',
+}
+
+type MockOptions = {
+  statusSequence: BulkEmbeddingRunStatus[]
+  /** Static list of IDs to fail, OR a function to decide at runtime */
+  partialFailure?: { failIds: string[] } | { shouldFail: (id: string) => boolean }
+  /** Optional: flush after this many chunks (for testing multi-batch scenarios) */
+  flushAfterChunks?: number
+  /** Optional: callback to track onError calls for testing */
+  onErrorCallback?: (args: {
+    providerBatchIds: string[]
+    error: Error
+    failedChunkData?: Array<{ collection: string; documentId: string; chunkIndex: number }>
+    failedChunkCount?: number
+  }) => void
+}
+
+/**
+ * Creates a mock BulkEmbeddingsFns for testing the new addChunk API.
+ * User controls batching - we simulate by optionally flushing after N chunks.
+ */
+export function createMockBulkEmbeddings(
+  options: MockOptions,
+  dims: number = DEFAULT_DIMS,
+): BulkEmbeddingsFns {
+  const { statusSequence, partialFailure, flushAfterChunks, onErrorCallback } = options
+  // Accumulated chunks for current batch
+  let accumulatedChunks: BulkEmbeddingInput[] = []
+  let batchIndex = 0
+
+  // Track inputs per batch (keyed by providerBatchId)
+  const batchInputs = new Map<string, BulkEmbeddingInput[]>()
+  // Track poll call count per batch for status sequence
+  const batchPollCount = new Map<string, number>()
+  const embeddings = makeDummyEmbedDocs(dims)
+
+  return {
+    addChunk: async ({ chunk, isLastChunk }) => {
+      // Add current chunk to accumulator
+      accumulatedChunks.push(chunk)
+
+      // Determine if we should flush
+      const shouldFlushDueToSize = flushAfterChunks && accumulatedChunks.length >= flushAfterChunks
+      const shouldFlush = shouldFlushDueToSize || isLastChunk
+
+      if (shouldFlush && accumulatedChunks.length > 0) {
+        const toSubmit = [...accumulatedChunks]
+        accumulatedChunks = []
+        const providerBatchId = `mock-batch-${batchIndex}-${Date.now()}`
+        batchInputs.set(providerBatchId, toSubmit)
+        batchPollCount.set(providerBatchId, 0)
+        batchIndex++
+        return { providerBatchId }
+      }
+
+      return null
+    },
+
+    pollOrCompleteBatch: async ({ providerBatchId, onChunk }) => {
+      const callCount = batchPollCount.get(providerBatchId) ?? 0
+      batchPollCount.set(providerBatchId, callCount + 1)
+      const status = statusSequence[Math.min(callCount, statusSequence.length - 1)]
+
+      // If succeeded, stream the outputs via onChunk
+      if (status === 'succeeded') {
+        const inputs = batchInputs.get(providerBatchId) ?? []
+        if (inputs.length) {
+          const vectors = await embeddings(inputs.map((i) => i.text))
+          for (let idx = 0; idx < inputs.length; idx++) {
+            const input = inputs[idx]
+            // Support both static array and function-based failure check
+            const shouldFail = partialFailure
+              ? 'shouldFail' in partialFailure
+                ? partialFailure.shouldFail(input.id)
+                : partialFailure.failIds?.includes(input.id)
+              : false
+            const output = shouldFail
+              ? { id: input.id, error: 'fail' }
+              : { id: input.id, embedding: vectors[idx] }
+            await onChunk(output)
+          }
+        }
+        // Clean up state
+        batchInputs.delete(providerBatchId)
+        batchPollCount.delete(providerBatchId)
+      }
+
+      return { status }
+    },
+
+    onError: async ({ providerBatchIds, error, failedChunkData, failedChunkCount }) => {
+      // Clean up state
+      for (const batchId of providerBatchIds) {
+        batchInputs.delete(batchId)
+        batchPollCount.delete(batchId)
+      }
+      accumulatedChunks = []
+      batchIndex = 0
+
+      // Call the test callback if provided
+      if (onErrorCallback) {
+        onErrorCallback({ providerBatchIds, error, failedChunkData, failedChunkCount })
+      }
+    },
+  }
+}
+
+export type BuildPayloadArgs = {
+  dbName: string
+  pluginOpts: any
+  key?: string
+}
+
+export async function buildPayloadWithIntegration({
+  dbName,
+  pluginOpts,
+  key,
+}: BuildPayloadArgs): Promise<{ payload: Payload; config: SanitizedConfig }> {
+  const integration = createVectorizeIntegration({
+    default: {
+      dims: DEFAULT_DIMS,
+      ivfflatLists: 1,
+    },
+  })
+
+  const config = await buildConfig({
+    secret: 'test-secret',
+    editor: lexicalEditor(),
+    collections: [
+      {
+        slug: 'posts',
+        fields: [{ name: 'title', type: 'text' }],
+      },
+    ],
+    db: postgresAdapter({
+      extensions: ['vector'],
+      afterSchemaInit: [integration.afterSchemaInitHook],
+      pool: {
+        connectionString: `postgresql://postgres:password@localhost:5433/${dbName}`,
+      },
+    }),
+    plugins: [integration.payloadcmsVectorize(pluginOpts)],
+    jobs: {
+      tasks: [],
+      autoRun: [
+        {
+          cron: '*/2 * * * * *',
+          limit: 10,
+          queue: pluginOpts.realtimeQueueName ?? 'default',
+        },
+        {
+          cron: '*/2 * * * * *',
+          limit: 10,
+          queue: pluginOpts.bulkQueueNames?.prepareBulkEmbedQueueName,
+        },
+        {
+          cron: '*/2 * * * * *',
+          limit: 10,
+          queue: pluginOpts.bulkQueueNames?.pollOrCompleteQueueName,
+        },
+      ],
+    },
+  })
+
+  const payloadKey = key ?? `payload-${dbName}-${Date.now()}`
+  const payload = await getPayload({ config, key: payloadKey, cron: true })
+  return { payload, config }
+}
+
+export const clearAllCollections = async (pl: Payload) => {
+  const hasCollection = (slug: string) =>
+    !!(pl as any)?.config?.collections?.some((c: any) => c.slug === slug)
+
+  const safeDelete = async (slug: string) => {
+    if (!hasCollection(slug)) return
+    try {
+      await (pl as any).delete({
+        collection: slug,
+        where: { id: { exists: true } },
+      })
+    } catch {
+      // ignore if collection not registered in this payload instance
+    }
+  }
+
+  await safeDelete(BULK_EMBEDDINGS_RUNS_SLUG)
+  await safeDelete(BULK_EMBEDDINGS_BATCHES_SLUG)
+  await safeDelete(BULK_EMBEDDINGS_INPUT_METADATA_SLUG)
+  await safeDelete('default')
+  await safeDelete('posts')
+  await safeDelete('payload-jobs')
+}
+
+export async function createSucceededBaselineRun(
+  payload: Payload,
+  {
+    version,
+    completedAt = new Date().toISOString(),
+  }: { version?: string; completedAt?: string } = {},
+) {
+  return (payload as any).create({
+    collection: BULK_EMBEDDINGS_RUNS_SLUG,
+    data: {
+      pool: 'default',
+      embeddingVersion: version ?? '',
+      status: 'succeeded',
+      completedAt,
+    },
+  })
 }

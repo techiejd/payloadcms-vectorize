@@ -34,21 +34,27 @@ describe('Multiple knowledge pools', () => {
       knowledgePools: {
         pool1: {
           collections: {},
-          embedDocs: async (texts: string[]) => texts.map(() => new Array(DIMS_POOL1).fill(0)),
-          embedQuery: async () => new Array(DIMS_POOL1).fill(0),
-          embeddingVersion: 'test-pool1',
+          embeddingConfig: {
+            version: 'test-pool1',
+            queryFn: async () => new Array(DIMS_POOL1).fill(0),
+            realTimeIngestionFn: async (texts: string[]) =>
+              texts.map(() => new Array(DIMS_POOL1).fill(0)),
+          },
         },
         pool2: {
           collections: {},
-          embedDocs: async (texts: string[]) => texts.map(() => new Array(DIMS_POOL2).fill(0)),
-          embedQuery: async () => new Array(DIMS_POOL2).fill(0),
-          embeddingVersion: 'test-pool2',
+          embeddingConfig: {
+            version: 'test-pool2',
+            queryFn: async () => new Array(DIMS_POOL2).fill(0),
+            realTimeIngestionFn: async (texts: string[]) =>
+              texts.map(() => new Array(DIMS_POOL2).fill(0)),
+          },
         },
       },
     }
 
     config = await buildConfig({
-      secret: 'test-secret',
+      secret: process.env.PAYLOAD_SECRET || 'test-secret',
       collections: [],
       editor: lexicalEditor(),
       db: postgresAdapter({

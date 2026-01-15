@@ -5,7 +5,8 @@ A Payload CMS plugin that adds vector search capabilities to your collections us
 ## Features
 
 - 🔍 **Semantic Search**: Vectorize any collection for intelligent content discovery
-- 🚀 **Automatic**: Documents are automatically vectorized when created or updated, and vectors are deleted as soon as the document is deleted.
+- 🚀 **Realtime**: Documents are automatically vectorized when created or updated in realtime, and vectors are deleted as soon as the document is deleted.
+- 🧵 **Bulk embedding**: Run “Embed all” batches that backfill only documents missing the current `embeddingVersion` since the last bulk run in order to save money.
 - 📊 **PostgreSQL Integration**: Built on pgvector for high-performance vector operations
 - ⚡ **Background Processing**: Uses Payload's job system for non-blocking vectorization
 - 🎯 **Flexible Chunking**: Drive chunk creation yourself with `toKnowledgePool` functions so you can combine any fields or content types
@@ -19,12 +20,6 @@ A Payload CMS plugin that adds vector search capabilities to your collections us
 - PostgreSQL with pgvector extension
 - Node.js 18+
 
-**Note for Payload 3.54.0+:** When initializing Payload with `getPayload`, you must include `cron: true` if you want the cron jobs to run correctly:
-
-```typescript
-payload = await getPayload({ config, cron: true })
-```
-
 ## Installation
 
 ```bash
@@ -33,9 +28,9 @@ pnpm add payloadcms-vectorize
 
 ## Quick Start
 
-### 0. Install pgvector
+### 0. Have pgvector permissions
 
-The plugin automatically creates the `vector` extension when Payload initializes. However, your PostgreSQL database user must have permission to create extensions. If your user doesn't have these permissions, you may need to manually create the extension once:
+The plugin expects `vector` extension to be configured (`db: postgresAdapter({extensions: ['vector'],...})`) when Payload initializes. Your PostgreSQL database user must have permission to create extensions. If your user doesn't have these permissions, someone with permissions may need to manually create the extension once:
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;
@@ -100,7 +95,7 @@ const postsToKnowledgePool: ToKnowledgePoolFn = async (doc, payload) => {
 // Create the integration with static configs (dims, ivfflatLists)
 const { afterSchemaInitHook, payloadcmsVectorize } = createVectorizeIntegration({
   // Note limitation: Changing these values requires a migration.
-  main: {
+  mainKnowledgePool: {
     dims: 1536, // Vector dimensions
     ivfflatLists: 100, // IVFFLAT index parameter
   },
@@ -109,6 +104,7 @@ const { afterSchemaInitHook, payloadcmsVectorize } = createVectorizeIntegration(
 export default buildConfig({
   // ... your existing config
   db: postgresAdapter({
+    // configure the 'vector' extension.
     extensions: ['vector'],
     // afterSchemaInitHook adds 'vector' to your schema
     afterSchemaInit: [afterSchemaInitHook],
@@ -117,7 +113,7 @@ export default buildConfig({
   plugins: [
     payloadcmsVectorize({
       knowledgePools: {
-        main: {
+        mainKnowledgePool: {
           collections: {
             posts: {
               toKnowledgePool: postsToKnowledgePool,
@@ -127,21 +123,40 @@ export default buildConfig({
             { name: 'category', type: 'text' },
             { name: 'priority', type: 'number' },
           ],
-          embedDocs,
-          embedQuery,
-          embeddingVersion: 'v1.0.0',
+          embeddingConfig: {
+            version: 'v1.0.0',
+            queryFn: embedQuery,
+            realTimeIngestionFn: embedDocs,
+            // bulkEmbeddingsFns: { ... } // Optional: for batch API support
+          },
         },
       },
       // Optional plugin options:
-      // queueName: 'custom-queue',
-      // endpointOverrides: { path: '/custom-vector-search', enabled: true }, // will be /api/custom-vector-search
+      // realtimeQueueName: 'custom-queue',
+      // endpointOverrides: { path: '/custom-vector-search', enabled: true },
       // disabled: false,
+      // bulkQueueNames: { // Required iff `bulkEmbeddingsFns` included
+      //   prepareBulkEmbedQueueName: ...,
+      //   pollOrCompleteQueueName: ...,
+      // },
     }),
   ],
+  jobs: { // Remember to setup your cron for the embedding
+    autoRun: [
+      ...
+    ],
+  },
 })
 ```
 
-**Important:** `knowledgePools` must have **different names than your collections**—reusing a collection name for a knowledge pool **will cause schema conflicts**. (In this example, the knowledge pool is named 'main' and a collection named 'main' will be created.)
+**Important:** `knowledgePools` must have **different names than your collections**—reusing a collection name for a knowledge pool **will cause schema conflicts**. (In this example, the knowledge pool is named 'mainKnowledgePool' and a collection named 'main-knowledge-pool' will be created.)
+
+**⚠️ Important:** Run this command:
+
+- After initial plugin setup
+- If the "Embed all" button doesn't appear in the admin UI
+
+The import map tells Payload how to resolve component paths (like `'payloadcms-vectorize/client#EmbedAllButton'`) to actual React components. Without it, client components referenced in your collection configs won't render.
 
 ### 2. Search Your Content
 
@@ -169,14 +184,14 @@ const { results } = await response.json()
 Alternatively, you can use the local API directly on the Payload instance:
 
 ```typescript
-import { isVectorizedPayload, type VectorizedPayload } from 'payloadcms-vectorize'
+import { getVectorizedPayload } from 'payloadcms-vectorize'
 
-// After initializing Payload, it will have the search and queueEmbed methods
+// After initializing Payload, get the vectorized payload object
 const payload = await getPayload({ config, cron: true })
+const vectorizedPayload = getVectorizedPayload(payload)
 
-// Type guard to ensure payload has vectorize extensions
-if (isVectorizedPayload(payload)) {
-  const results = await payload.search({
+if (vectorizedPayload) {
+  const results = await vectorizedPayload.search({
     query: 'What is machine learning?',
     knowledgePool: 'main',
     where: {
@@ -185,12 +200,6 @@ if (isVectorizedPayload(payload)) {
     limit: 5,
   })
   // results is an array of VectorSearchResult
-
-  // Manually queue an embedding job
-  await payload.queueEmbed({
-    collection: 'posts',
-    docId: 'some-post-id',
-  })
 }
 ```
 
@@ -198,12 +207,13 @@ if (isVectorizedPayload(payload)) {
 
 ### Plugin Options
 
-| Option              | Type                                                | Required | Description                              |
-| ------------------- | --------------------------------------------------- | -------- | ---------------------------------------- |
-| `knowledgePools`    | `Record<KnowledgePool, KnowledgePoolDynamicConfig>` | ✅       | Knowledge pools and their configurations |
-| `queueName`         | `string`                                            | ❌       | Custom queue name for background jobs    |
-| `endpointOverrides` | `object`                                            | ❌       | Customize the search endpoint            |
-| `disabled`          | `boolean`                                           | ❌       | Disable plugin while keeping schema      |
+| Option              | Type                                                                   | Required | Description                                                                 |
+| ------------------- | ---------------------------------------------------------------------- | -------- | --------------------------------------------------------------------------- |
+| `knowledgePools`    | `Record<KnowledgePool, KnowledgePoolDynamicConfig>`                    | ✅       | Knowledge pools and their configurations                                    |
+| `realtimeQueueName` | `string`                                                               | ❌       | Custom queue name for realtime vectorization jobs                           |
+| `bulkQueueNames`    | `{prepareBulkEmbedQueueName: string, pollOrCompleteQueueName: string}` | ❌       | Queue names for bulk embedding jobs (required if any pool uses bulk ingest) |
+| `endpointOverrides` | `object`                                                               | ❌       | Customize the search endpoint                                               |
+| `disabled`          | `boolean`                                                              | ❌       | Disable plugin, except embeddings deletions, while keeping schema           |
 
 ### Knowledge Pool Config
 
@@ -219,10 +229,292 @@ The embeddings collection name will be the same as the knowledge pool name.
 **2. Dynamic Config** (passed to `payloadcmsVectorize`):
 
 - `collections`: `Record<string, CollectionVectorizeOption>` - Collections and their chunking configs
-- `embedDocs`: `EmbedDocsFn` - Function to embed multiple documents
-- `embedQuery`: `EmbedQueryFn` - Function to embed search queries
-- `embeddingVersion`: `string` - Version string for tracking model changes
 - `extensionFields?`: `Field[]` - Optional fields to extend the embeddings collection schema
+- `embeddingConfig`: Embedding configuration object:
+  - `version`: `string` - Version string for tracking model changes
+  - `queryFn`: `EmbedQueryFn` - Function to embed search queries
+  - `realTimeIngestionFn?`: `EmbedDocsFn` - Function for real-time embedding on document changes
+  - `bulkEmbeddingsFns?`: Streaming bulk embedding callbacks (see below)
+
+If `realTimeIngestionFn` is provided, documents are embedded immediately on create/update.
+If only `bulkEmbeddingsFns` is provided (no `realTimeIngestionFn`), embedding only happens via manual bulk runs.
+If neither is provided, embedding is disabled for that pool.
+
+**Note:** Embedding deletion cannot be disabled. When a source document is deleted, all its embeddings are automatically deleted from all knowledge pools that contain that collection, regardless of how the embeddings were created (bulk or real-time). This behavior ensures data consistency and cannot be configured.
+
+### Bulk Embeddings API
+
+The bulk embedding API is designed for large-scale embedding using provider batch APIs (like Voyage AI). **Bulk runs are never auto-queued** - they must be triggered manually via the admin UI or API.
+
+#### The bulk embedding callbacks
+
+In order to get bulk embeddings to interface with your provider, you must define the following three callbacks per knowledge pool (the functions do not have to be unique so you can re-use across knowledge pools).
+
+```typescript
+type BulkEmbeddingsFns = {
+  addChunk: (args: AddChunkArgs) => Promise<BatchSubmission | null>
+  pollOrCompleteBatch: (args: PollOrCompleteBatchArgs) => Promise<PollBulkEmbeddingsResult>
+  onError?: (args: OnBulkErrorArgs) => Promise<void>
+}
+```
+
+#### `addChunk` - Accumulate and Submit
+
+The plugin streams chunks to your callbacks one at a time; the callback is called for each chunk. You manage your own accumulation and decide when to submit based on file size.
+
+```typescript
+type AddChunkArgs = {
+  chunk: { id: string; text: string }
+  isLastChunk: boolean
+}
+
+type BatchSubmission = {
+  providerBatchId: string
+}
+```
+
+**About the `chunk.id` field:**
+
+- **Plugin-generated**: The plugin automatically generates a unique `id` for each chunk (format: `${collectionSlug}:${docId}:${chunkIndex}`). You don't need to create it.
+- **Purpose**: The `id` is used to correlate embedding outputs back to their original inputs, ensuring each embedding is correctly associated with its source document and chunk.
+- **Usage**: When submitting batches to your provider, you must pass this `id` along with the text (e.g., as `custom_id` in Voyage AI's batch API). This allows your provider to return the `id` with each embedding result.
+
+**Return values:**
+
+- `null` - "I'm accumulating this chunk, not ready to submit yet"
+- `{ providerBatchId }` - "I just submitted a batch to my provider"
+
+**⚠️ Important contract:**
+
+When you return a submission, the plugin assumes **all chunks currently in `pendingChunks` were submitted**. The plugin tracks chunks and creates batch records based on this assumption.
+
+**About `isLastChunk`:**
+
+- `isLastChunk=true` indicates this is the final chunk in the run
+- Use this to flush any remaining accumulated chunks before the run completes
+
+**Example implementation:**
+
+```typescript
+let accumulated: BulkEmbeddingInput[] = []
+const LINE_LIMIT = 100_000 // e.g., Voyage AI's limit
+
+addChunk: async ({ chunk, isLastChunk }) => {
+  // Add current chunk to accumulation first
+  accumulated.push(chunk)
+
+  // Check if we've hit the line limit (after adding current chunk)
+  if (accumulated.length === LINE_LIMIT) {
+    const result = await submitToProvider(accumulated)
+    accumulated = [] // Clear for next batch
+    return { providerBatchId: result.id }
+  }
+
+  // Last chunk? Must flush everything
+  if (isLastChunk && accumulated.length > 0) {
+    const result = await submitToProvider(accumulated)
+    accumulated = []
+    return { providerBatchId: result.id }
+  }
+
+  return null
+}
+```
+
+**Note:** If a single chunk exceeds your provider's file size or line limit, you'll need to handle that edge case in your implementation (e.g., skip it, split it, or fail gracefully).
+
+#### `pollOrCompleteBatch` - Poll and Stream Results
+
+Called repeatedly until the batch reaches a terminal status. When the batch completes, stream the outputs via the `onChunk` callback.
+
+```typescript
+type PollOrCompleteBatchArgs = {
+  providerBatchId: string // You provided it in the earlier step when you submitted a batch.
+  onChunk: (chunk: BulkEmbeddingOutput) => Promise<void>
+}
+
+type PollBulkEmbeddingsResult = {
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled'
+  counts?: { inputs?: number; succeeded?: number; failed?: number }
+  error?: string
+}
+
+type BulkEmbeddingOutput = {
+  id: string // Must match the chunk.id from addChunk
+  embedding?: number[]
+  error?: string
+}
+```
+
+**How it works:**
+
+1. The plugin calls `pollOrCompleteBatch` repeatedly for each batch
+2. While the batch is in progress, return the status (`queued` or `running`) without calling `onChunk`
+3. When the batch completes, stream each embedding result by calling `onChunk` for each output, then return `{ status: 'succeeded' }`
+4. If the batch fails, return `{ status: 'failed', error: '...' }` without calling `onChunk`
+
+**About the `id` field in outputs:**
+
+- **Correlation**: The `id` in each `BulkEmbeddingOutput` must match the `chunk.id` that was passed to `addChunk`. This is how the plugin correlates outputs back to their original inputs.
+- **Extraction**: When processing your provider's response, extract the `id` that you originally sent (e.g., from Voyage's `custom_id` field) and include it in the returned `BulkEmbeddingOutput`.
+- **Example**: If you sent `{ custom_id: "posts:123:0", input: [...] }` to your provider, extract `result.custom_id` from the response and call `await onChunk({ id: result.custom_id, embedding: [...] })`.
+
+#### `onError` - Cleanup on Failure (Optional)
+
+Called when the bulk run fails OR when there are partial chunk failures. Use this to clean up provider-side resources (delete files, cancel batches) and handle failed chunks. The run can be re-queued after cleanup.
+
+```typescript
+type FailedChunkData = {
+  collection: string // Source collection slug
+  documentId: string // Source document ID
+  chunkIndex: number // Index of the chunk within the document
+}
+
+type OnBulkErrorArgs = {
+  providerBatchIds: string[]
+  error: Error
+  /** Data about chunks that failed during completion */
+  failedChunkData?: FailedChunkData[]
+  /** Count of failed chunks */
+  failedChunkCount?: number
+}
+```
+
+**Error handling behavior:**
+
+- **Batch failures**: If any batch fails during polling, the entire run fails and `onError` is called.
+- **Partial chunk failures**: If individual chunks fail during completion (e.g., provider returned an error for specific inputs), the run still succeeds but `onError` is called with `failedChunkData` and `failedChunkCount`.
+- **Failed chunk data**: The `failedChunkData` array contains structured information about failed chunks, including `collection`, `documentId`, and `chunkIndex`. This data is also stored in the run record (`failedChunkData` field) for later inspection and potential retry.
+- **Partial success**: Successful embeddings are still written even when some chunks fail. Only the failed chunks are skipped.
+
+### Bulk Task Model
+
+The plugin uses separate Payload jobs for reliability with long-running providers:
+
+- **`prepare-bulk-embedding`**: Streams through documents, calls your `addChunk` for each chunk, creates batch records.
+- **`poll-or-complete-bulk-embedding`**: Polls all batches, requeues itself until done, then writes all successful embeddings (partial chunk failures are allowed).
+
+### Queue Configuration
+
+For bulk embedding, you must provide the bulk queue names.
+
+```typescript
+plugins: [
+  payloadcmsVectorize({
+    knowledgePools: { /* ... */ },
+    realtimeQueueName: 'vectorize-realtime', // optional
+    bulkQueueNames: { // required iff you are using bulk embeddings
+      prepareBulkEmbedQueueName: 'vectorize-bulk-prepare',
+      pollOrCompleteQueueName: 'vectorize-bulk-poll',
+    },
+  }),
+]
+
+jobs: {
+  autoRun: [ // Must match
+    { cron: '*/5 * * * * *', limit: 10, queue: 'vectorize-realtime' },
+    { cron: '0 0 * * * *', limit: 1, queue: 'vectorize-bulk-prepare' },
+    { cron: '*/30 * * * * *', limit: 5, queue: 'vectorize-bulk-poll' },
+  ],
+}
+```
+
+### Endpoints
+
+#### POST `/api/vector-bulk-embed`
+
+Starts a bulk embedding run for a knowledge pool via HTTP. This is the REST API equivalent of `vectorizedPayload.bulkEmbed()`.
+
+**Request Body:**
+
+```json
+{
+  "knowledgePool": "default"
+}
+```
+
+**Success Response** (202 Accepted):
+
+```json
+{
+  "runId": "123",
+  "status": "queued"
+}
+```
+
+**Conflict Response** (409 Conflict) - when a run is already active:
+
+```json
+{
+  "runId": "456",
+  "status": "running",
+  "message": "A bulk embedding run is already running for this knowledge pool. Wait for it to complete or cancel it first.",
+  "conflict": true
+}
+```
+
+**Error Responses:**
+
+- `400 Bad Request`: Missing or invalid `knowledgePool` parameter
+- `500 Internal Server Error`: Server error during processing
+
+**Example:**
+
+```bash
+curl -X POST http://localhost:3000/api/vector-bulk-embed \
+  -H "Content-Type: application/json" \
+  -d '{"knowledgePool": "default"}'
+```
+
+#### POST `/api/vector-retry-failed-batch`
+
+Retries a failed batch from a bulk embedding run via HTTP. This is the REST API equivalent of `vectorizedPayload.retryFailedBatch()`.
+
+**Request Body:**
+
+```json
+{
+  "batchId": "123"
+}
+```
+
+**Success Response** (202 Accepted):
+
+```json
+{
+  "batchId": "123",
+  "newBatchId": "456",
+  "runId": "789",
+  "status": "queued"
+}
+```
+
+**Already Retried Response** (202 Accepted) - when batch was already retried:
+
+```json
+{
+  "batchId": "123",
+  "newBatchId": "456",
+  "runId": "789",
+  "status": "queued",
+  "message": "Batch was already retried. Returning the retry batch."
+}
+```
+
+**Error Responses:**
+
+- `400 Bad Request`: Missing or invalid `batchId` parameter, or batch is not in a retriable state
+- `404 Not Found`: Batch not found
+- `409 Conflict`: Cannot retry while parent run is still active
+- `500 Internal Server Error`: Server error during processing
+
+**Example:**
+
+```bash
+curl -X POST http://localhost:3000/api/vector-retry-failed-batch \
+  -H "Content-Type: application/json" \
+  -d '{"batchId": "123"}'
+```
 
 #### CollectionVectorizeOption
 
@@ -290,6 +582,8 @@ export const embedQuery = async (text: string): Promise<number[]> => {
 }
 ```
 
+You can see more examples in `dev/helpers/embed.ts`
+
 ## API Reference
 
 ### Search Endpoint
@@ -339,11 +633,66 @@ Search for similar content using vector similarity.
 }
 ```
 
+### Bulk Embedding (Embed All)
+
+- Each knowledge pool's embeddings list shows an **Embed all** admin button that triggers a bulk run.
+- **Note:** Payload automatically generates the import map on startup and during development (HMR), so you typically don't need to run this manually. However, if client components (like the "Embed all" button) don't appear in the admin UI, you may need to manually generate the import map: `pnpm run generate:importmap`.
+- Bulk runs only include documents with mismatched embedding versions for the pool's current `embeddingConfig.version` from the previous bulk run (unless none has been done in which case it embeds all).
+- Progress is recorded in `vector-bulk-embeddings-runs` and `vector-bulk-embeddings-batches` admin UI collections.
+- You can re-run failed bulk embeddings from `vector-bulk-embeddings-batches` admin UI and you can link to the failed batches from the `vector-bulk-embeddings-runs` admin UI.
+- Endpoints: **POST** `/api/vector-bulk-embed` and `/api/vector-retry-failed-batch`
+
+```jsonc
+{
+  "knowledgePool": "main",
+}
+```
+
+The bulk embedding process has **three levels of failure**:
+
+- **Run level**: If any chunk fails during ingestion (toKnowledgePool), the entire run fails and no embeddings are written. This is fully atomic. Your onError is expected to handle clean up from this stage.
+- **Batch level**: If any batch fails during polling, the entire run is marked as failed but embeddings from working batches are written.
+- **Chunk level**: If individual chunks fail during completion (e.g., provider returns errors for specific inputs), the run still succeeds and successful embeddings are written. Failed chunks are tracked in `failedChunkData` (with structured `collection`, `documentId`, and `chunkIndex` fields) and passed to the `onError` callback for cleanup.
+
+This design allows for partial success: if 100 chunks are processed and 2 fail, 98 embeddings are written and the 2 failures are tracked for potential retry.
+
+**Error Recovery:** If a run fails, you can re-queue it. If you provided an `onError` callback, it will be called with all `providerBatchIds` so you can clean up provider-side resources before retrying.
+
+If `bulkEmbeddingsFns` is not provided, the "Embed all" button is disabled.
+
 ### Local API
 
-The plugin extends the Payload instance with `search` and `queueEmbed` methods.
+The plugin provides a `getVectorizedPayload(payload)` function which returns a 'vectorizedPayload' (an object) with `search`, `queueEmbed`, `bulkEmbed` and `retryFailedBatch` methods.
 
-#### `payload.search(params)`
+#### Getting the Vectorized Payload Object
+
+Use the `getVectorizedPayload` function to get the vectorized payload object with all vectorize methods:
+
+```typescript
+import { getVectorizedPayload } from 'payloadcms-vectorize'
+
+const payload = await getPayload({ config, cron: true })
+const vectorizedPayload = getVectorizedPayload(payload)
+
+if (vectorizedPayload) {
+  // Use all vectorize methods
+  const results = await vectorizedPayload.search({
+    query: 'search query',
+    knowledgePool: 'main',
+  })
+
+  await vectorizedPayload.queueEmbed({
+    collection: 'posts',
+    docId: 'some-id',
+  })
+
+  await vectorizedPayload.bulkEmbed({
+    knowledgePool: 'main',
+  })
+}
+```
+
+#### `vectorizedPayload.search(params)`
 
 Perform vector search programmatically without making an HTTP request.
 
@@ -359,21 +708,24 @@ Perform vector search programmatically without making an HTTP request.
 **Example:**
 
 ```typescript
-import type { VectorizedPayload } from 'payloadcms-vectorize'
+import { getVectorizedPayload } from 'payloadcms-vectorize'
 
 const payload = await getPayload({ config, cron: true })
+const vectorizedPayload = getVectorizedPayload<'main'>(payload)
 
-const results = await (payload as VectorizedPayload<'main'>).search({
-  query: 'What is machine learning?',
-  knowledgePool: 'main',
-  where: {
-    category: { equals: 'guides' },
-  },
-  limit: 5,
-})
+if (vectorizedPayload) {
+  const results = await vectorizedPayload.search({
+    query: 'What is machine learning?',
+    knowledgePool: 'main',
+    where: {
+      category: { equals: 'guides' },
+    },
+    limit: 5,
+  })
+}
 ```
 
-#### `payload.queueEmbed(params)`
+#### `vectorizedPayload.queueEmbed(params)`
 
 Manually queue a vectorization job for a document.
 
@@ -394,52 +746,146 @@ Or:
 **Example:**
 
 ```typescript
-// Queue by document ID (fetches document first)
-await (payload as VectorizedPayload).queueEmbed({
-  collection: 'posts',
-  docId: 'some-post-id',
-})
-
-// Queue with document object directly
-await (payload as VectorizedPayload).queueEmbed({
-  collection: 'posts',
-  doc: {
-    id: 'some-post-id',
-    title: 'Post Title',
-    content: {
-      /* ... */
-    },
-  },
-})
-```
-
-#### Type Guard
-
-Use the `isVectorizedPayload` type guard to check if a Payload instance has vectorize extensions:
-
-```typescript
-import { isVectorizedPayload } from 'payloadcms-vectorize'
+import { getVectorizedPayload } from 'payloadcms-vectorize'
 
 const payload = await getPayload({ config, cron: true })
+const vectorizedPayload = getVectorizedPayload(payload)
 
-if (isVectorizedPayload(payload)) {
-  // TypeScript now knows payload has search and queueEmbed methods
-  const results = await payload.search({
-    query: 'search query',
-    knowledgePool: 'main',
+if (vectorizedPayload) {
+  // Queue by document ID (fetches document first)
+  await vectorizedPayload.queueEmbed({
+    collection: 'posts',
+    docId: 'some-post-id',
+  })
+
+  // Queue with document object directly
+  await vectorizedPayload.queueEmbed({
+    collection: 'posts',
+    doc: {
+      id: 'some-post-id',
+      title: 'Post Title',
+      content: {
+        /* ... */
+      },
+    },
   })
 }
 ```
 
+#### `vectorizedPayload.bulkEmbed(params)`
+
+Starts a bulk embedding run for a knowledge pool. This method queues a background job that will process all documents in the knowledge pool's collections, chunk them, and submit them to your embedding provider via the `bulkEmbeddingsFns.addChunk` callback.
+
+**Parameters:**
+
+- `params.knowledgePool` (required): The name of the knowledge pool to embed
+
+**Returns:** `Promise<BulkEmbedResult>`
+
+**Success Response:**
+
+```typescript
+{
+  runId: string // ID of the created bulk embedding run
+  status: 'queued' // Initial status of the run
+}
+```
+
+**Conflict Response** (if a run is already active):
+
+```typescript
+{
+  runId: string // ID of the existing active run
+  status: 'queued' | 'running' // Status of the existing run
+  message: string // Explanation of why a new run wasn't started
+  conflict: true // Indicates a conflict occurred
+}
+```
+
+**Example:**
+
+```typescript
+const result = await vectorizedPayload.bulkEmbed({ knowledgePool: 'default' })
+if ('conflict' in result && result.conflict) {
+  console.log('A run is already active:', result.message)
+} else {
+  console.log('Bulk embed started with run ID:', result.runId)
+}
+```
+
+**Notes:**
+
+- Only one bulk embedding run can be active per knowledge pool at a time
+- The run will process documents that need embedding (those with mismatched `embeddingVersion` or new documents since the last successful run)
+- Progress can be tracked via the `vector-bulk-embeddings-runs` and `vector-bulk-embeddings-batches` collections in the admin UI
+- The run status will progress: `queued` → `running` → `succeeded` or `failed`
+
+#### `vectorizedPayload.retryFailedBatch(params)`
+
+Retries a failed batch from a bulk embedding run. This method reconstructs the chunks from the batch's metadata, resubmits them to your embedding provider, and creates a new batch record. The original batch is marked as `retried` and linked to the new batch.
+
+**Parameters:**
+
+- `params.batchId` (required): The ID of the failed batch to retry
+
+**Returns:** `Promise<RetryFailedBatchResult>`
+
+**Success Response:**
+
+```typescript
+{
+  batchId: string        // ID of the batch being retried
+  newBatchId: string     // ID of the newly created batch
+  runId: string          // ID of the parent run
+  status: 'queued'       // Status of the new batch
+  message?: string       // Optional confirmation message
+}
+```
+
+**Already Retried Response** (if batch was already retried):
+
+```typescript
+{
+  batchId: string // ID of the original batch
+  newBatchId: string // ID of the existing retry batch
+  runId: string // ID of the parent run
+  status: 'queued' // Status of the retry batch
+  message: string // Message indicating batch was already retried
+}
+```
+
+**Error Response:**
+
+```typescript
+{
+  error: string          // Error message
+  conflict?: true        // Present if error is due to a conflict (e.g., run still active)
+}
+```
+
+**Example:**
+
+```typescript
+const result = await vectorizedPayload.retryFailedBatch({ batchId: '123' })
+if ('error' in result) {
+  console.error('Failed to retry batch:', result.error)
+} else {
+  console.log(`Batch ${result.batchId} retried. New batch ID: ${result.newBatchId}`)
+}
+```
+
+**Notes:**
+
+- Only batches with `failed` or `retried` status can be retried
+- The parent run must be in a terminal state (`succeeded` or `failed`) - cannot retry while run is `queued` or `running`
+- If the parent run was `succeeded` or `failed`, it will be reset to `running` status
+- The original batch is marked as `retried` and linked to the new batch via the `retriedBatch` field
+- Chunks are reconstructed from the batch's metadata, so metadata must still exist for the retry to work
+- If a batch was already retried, calling this method again returns the existing retry batch instead of creating a duplicate
+
 ## Changelog
 
 See [CHANGELOG.md](./CHANGELOG.md) for release history, migration notes, and upgrade guides.
-
-## Requirements
-
-- Payload CMS >=3.0.0 <4.0.0 (tested on 3.69.0, previously tested on 3.37.0)
-- PostgreSQL with pgvector extension
-- Node.js ^18.20.2
 
 ## License
 
@@ -471,13 +917,12 @@ Thank you for the stars! The following updates have been completed:
 
 - **Multiple Knowledge Pools**: You can create separate knowledge pools with independent configurations (dims, ivfflatLists, embedding functions) and needs. Each pool operates independently, allowing you to organize your vectorized content by domain, use case, or any other criteria that makes sense for your application.
 - **More expressive queries**: Added ability to change query limit, search on certain collections or certain fields
+- **Bulk embed all**: Batch backfills with admin button, provider callbacks, and run tracking.
 
 The following features are planned for future releases based on community interest and stars:
 
 - **Migrations for vector dimensions**: Easy migration tools for changing vector dimensions and/or ivfflatLists after initial setup
 - **MongoDB support**: Extend vector search capabilities to MongoDB databases
 - **Vercel support**: Optimized deployment and configuration for Vercel hosting
-- **Batch embedding**: More efficient bulk embedding operations for large datasets
-- **'Embed all' button**: Admin UI button to re-embed all content after embeddingVersion changes
 
 **Want to see these features sooner?** Star this repository and open issues for the features you need most!

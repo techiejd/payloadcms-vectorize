@@ -9,6 +9,7 @@ import {
   voyageEmbedDocs,
   voyageEmbedQuery,
   makeDummyEmbedQuery,
+  makeVoyageBulkEmbeddingsConfig,
 } from './helpers/embed.js'
 import sharp from 'sharp'
 import { fileURLToPath } from 'url'
@@ -16,6 +17,7 @@ import { fileURLToPath } from 'url'
 import { testEmailAdapter } from './helpers/testEmailAdapter.js'
 import { seed } from './seed.js'
 import { chunkRichText, chunkText } from './helpers/chunkers.js'
+import { createMockBulkEmbeddings } from './specs/utils.js'
 
 const filename = fileURLToPath(import.meta.url)
 const dirname = path.dirname(filename)
@@ -34,6 +36,15 @@ const ivfflatLists = Number(process.env.IVFFLATLISTS)
 const embedDocs = process.env.USE_VOYAGE !== undefined ? voyageEmbedDocs : makeDummyEmbedDocs(dims)
 const embedQuery =
   process.env.USE_VOYAGE !== undefined ? voyageEmbedQuery : makeDummyEmbedQuery(dims)
+const bulkEmbeddingsFns =
+  process.env.USE_VOYAGE !== undefined
+    ? makeVoyageBulkEmbeddingsConfig()
+    : createMockBulkEmbeddings({
+        statusSequence: ['queued', 'running', 'running', 'succeeded'],
+      })
+
+// Run every hour for voyage, every 5 seconds for mock
+const bulkPollCronSchedule = process.env.USE_VOYAGE !== undefined ? '0 * * * *' : '*/5 * * * * *'
 const ssl =
   process.env.DATABASE_URI !== undefined
     ? {
@@ -46,6 +57,14 @@ const { afterSchemaInitHook, payloadcmsVectorize } = createVectorizeIntegration(
   default: {
     dims,
     ivfflatLists, // Rule of thumb: ivfflatLists = sqrt(total_number_of_vectors). Helps with working memory usage.
+  },
+  bulkDefault: {
+    dims,
+    ivfflatLists,
+  },
+  failingBulkDefault: {
+    dims,
+    ivfflatLists,
   },
 })
 
@@ -84,6 +103,16 @@ const buildConfigWithPostgres = async () => {
           limit: 10,
           queue: 'default',
         },
+        {
+          cron: '*/10 * * * * *', // Run every 10 seconds for bulk jobs
+          limit: 5,
+          queue: 'vectorize-bulk-prepare',
+        },
+        {
+          cron: bulkPollCronSchedule,
+          limit: 5,
+          queue: 'vectorize-bulk-poll',
+        },
       ],
       jobsCollectionOverrides: ({ defaultJobsCollection }) => {
         // Make jobs collection visible in admin for debugging
@@ -119,10 +148,68 @@ const buildConfigWithPostgres = async () => {
                 },
               },
             },
-            embedDocs,
-            embedQuery,
-            embeddingVersion: testEmbeddingVersion,
+            embeddingConfig: {
+              version: testEmbeddingVersion,
+              queryFn: embedQuery,
+              realTimeIngestionFn: embedDocs,
+            },
           },
+          bulkDefault: {
+            collections: {
+              posts: {
+                toKnowledgePool: async (doc, payload) => {
+                  const chunks: Array<{ chunk: string }> = []
+                  // Process title
+                  if (doc.title) {
+                    const titleChunks = chunkText(doc.title)
+                    chunks.push(...titleChunks.map((chunk) => ({ chunk })))
+                  }
+                  // Process content
+                  if (doc.content) {
+                    const contentChunks = await chunkRichText(doc.content, payload)
+                    chunks.push(...contentChunks.map((chunk) => ({ chunk })))
+                  }
+                  return chunks
+                },
+              },
+            },
+            embeddingConfig: {
+              version: testEmbeddingVersion,
+              queryFn: embedQuery,
+              bulkEmbeddingsFns,
+            },
+          },
+          failingBulkDefault: {
+            collections: {
+              posts: {
+                toKnowledgePool: async (doc, payload) => {
+                  const chunks: Array<{ chunk: string }> = []
+                  // Process title
+                  if (doc.title) {
+                    const titleChunks = chunkText(doc.title)
+                    chunks.push(...titleChunks.map((chunk) => ({ chunk })))
+                  }
+                  // Process content
+                  if (doc.content) {
+                    const contentChunks = await chunkRichText(doc.content, payload)
+                    chunks.push(...contentChunks.map((chunk) => ({ chunk })))
+                  }
+                  return chunks
+                },
+              },
+            },
+            embeddingConfig: {
+              version: testEmbeddingVersion,
+              queryFn: embedQuery,
+              bulkEmbeddingsFns: createMockBulkEmbeddings({
+                statusSequence: ['queued', 'running', 'failed'],
+              }),
+            },
+          },
+        },
+        bulkQueueNames: {
+          prepareBulkEmbedQueueName: 'vectorize-bulk-prepare',
+          pollOrCompleteQueueName: 'vectorize-bulk-poll',
         },
       }),
     ],

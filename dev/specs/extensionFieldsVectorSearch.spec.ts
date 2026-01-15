@@ -59,9 +59,11 @@ describe('extensionFields', () => {
           },
         },
       ],
-      embedDocs: makeDummyEmbedDocs(DIMS),
-      embedQuery: makeDummyEmbedQuery(DIMS),
-      embeddingVersion: testEmbeddingVersion,
+      embeddingConfig: {
+        version: testEmbeddingVersion,
+        queryFn: makeDummyEmbedQuery(DIMS),
+        realTimeIngestionFn: makeDummyEmbedDocs(DIMS),
+      },
     } as const
     const configWithExtensions = await buildDummyConfig({
       jobs: {

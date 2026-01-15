@@ -2,7 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.5.0 - 2026-01-15
+
+### New Features
+
+- **Bulk Embedding**: That's right! You can now embed in bulk. Very usseful to save money.
+- **`bulkQueueNames` option**: New plugin option to isolate bulk embedding workloads across separate queues for preparation and polling. Required when any knowledge pool uses bulk embeddings.
+- **Non-blocking bulk polling**: Bulk jobs now use separate, short-lived tasks that can safely handle long-running providers (hours/days) without blocking worker processes.
+- **Improved admin UX**: The "Embed all" button now exists:
+  - Can be used to trigger an 'embed all' bulk embedding
+  - Disables when bulk embeddings are not configured for a pool
+  - Links to the latest bulk run for easy status tracking
+- **Showed Voyage AI example**: Added real Voyage AI Batch API integration in helpers/embed, demonstrating production-ready bulk embedding with file uploads and async polling.
+
+### Breaking Changes
+
+- **`queueName` renamed to `realtimeQueueName`**: The plugin option `queueName` has been renamed to `realtimeQueueName` to clarify that it only affects realtime vectorization jobs.
+- **`bulkQueueName` changed to `bulkQueueNames`**: The plugin option `bulkQueueName` has been replaced with `bulkQueueNames` object containing `prepareBulkEmbedQueueName` and `pollOrCompleteQueueName` for separate queue isolation of bulk preparation vs polling workloads.
+- **`isVectorizedPayload` replaced with `getVectorizedPayload`**: The type guard `isVectorizedPayload(payload)` has been replaced with `getVectorizedPayload(payload)` which returns the vectorized payload object directly (or `null` if not available). This fixes a bug where methods are missing because onInit was not called.
+
+### Tests & Reliability
+
+- Added comprehensive tests for realtime vs bulk ingest behavior, and failing bulk situations
+- Added tests for bulk polling error conditions (`failed`, `canceled` statuses)
+- Added tests for bulk fan-in behavior (multiple documents processed in single run)
+- Improved test coverage for edge cases in bulk embedding workflow
+
 ## 0.4.5 - 2025-01-09
+
+**Note:** This version is deprecated due to a critical bug with `isVectorizedPayload`. Use `getVectorizedPayload(payload)` instead (see 0.5.0 section above). No 0.4 line fix (0.4.6) exists yet.
 
 ### Added
 

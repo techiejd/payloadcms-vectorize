@@ -21,6 +21,12 @@ export default defineConfig(() => {
       hookTimeout: 30_000,
       testTimeout: 30_000,
       exclude: ['**/e2e.spec.{ts,js}', '**/node_modules/**'],
+      // Run test files sequentially to avoid global state interference
+      // (embeddingsTables map and Payload instance caching)
+      fileParallelism: false,
+      // Disable parallel test execution within files as well
+      //threads: false,
+      //maxConcurrency: 1,
     },
   }
 })

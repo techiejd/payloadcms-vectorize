@@ -23,7 +23,7 @@ import type {
   KnowledgePoolName,
   KnowledgePoolDynamicConfig,
   VectorSearchQuery,
-} from 'payloadcms-vectorize'
+} from '../types.js'
 import { getEmbeddingsTable } from '../drizzle/tables.js'
 
 export const createVectorSearchHandlers = <TPoolNames extends KnowledgePoolName>(
@@ -39,7 +39,7 @@ export const createVectorSearchHandlers = <TPoolNames extends KnowledgePoolName>
     const poolConfig = knowledgePools[knowledgePool]
     // Generate embedding for the query using pool-specific embedQuery
     const queryEmbedding = await (async () => {
-      const qE = await poolConfig.embedQuery(query)
+      const qE = await poolConfig.embeddingConfig.queryFn(query)
       return Array.isArray(qE) ? qE : Array.from(qE)
     })()
 

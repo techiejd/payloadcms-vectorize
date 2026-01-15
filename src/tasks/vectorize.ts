@@ -29,7 +29,6 @@ export const createVectorizeTask = ({
   /**
    * Vectorize Task Configuration
    * @description Scheduled task that vectorizes on data change.
-   * Runs every 5 seconds to call the embedding function.
    */
   const processVectorizationTask: TaskConfig<VectorizeTaskInputOutput> = {
     slug: 'payloadcms-vectorize:vectorize',
@@ -73,7 +72,7 @@ async function runVectorizeTask(args: {
   }
 }) {
   const { payload, poolName, dynamicConfig, job } = args
-  const embeddingVersion = dynamicConfig.embeddingVersion
+  const embeddingVersion = dynamicConfig.embeddingConfig.version
   const sourceDoc = job.doc
   const collection = job.collection
   const collectionConfig = dynamicConfig.collections[collection]
@@ -137,7 +136,7 @@ async function runVectorizeTask(args: {
 
   // Extract chunk texts for embedding
   const chunkTexts = chunkData.map((item) => item.chunk)
-  const vectors = await dynamicConfig.embedDocs(chunkTexts)
+  const vectors = await dynamicConfig.embeddingConfig.realTimeIngestionFn!(chunkTexts)
 
   // Create embedding documents with extension field values
   await Promise.all(
