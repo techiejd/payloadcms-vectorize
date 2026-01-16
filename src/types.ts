@@ -46,6 +46,8 @@ export type RetryFailedBatchResult =
 export type VectorizedPayload<TPoolNames extends KnowledgePoolName = KnowledgePoolName> = {
   /** Check if bulk embedding is enabled for a knowledge pool */
   _isBulkEmbedEnabled: (knowledgePool: TPoolNames) => boolean
+  /** Static configs for migration helper access */
+  _staticConfigs: Record<TPoolNames, KnowledgePoolStaticConfig>
   search: (params: VectorSearchQuery<TPoolNames>) => Promise<Array<VectorSearchResult>>
   queueEmbed: (
     params:

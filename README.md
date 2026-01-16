@@ -158,7 +158,34 @@ export default buildConfig({
 
 The import map tells Payload how to resolve component paths (like `'payloadcms-vectorize/client#EmbedAllButton'`) to actual React components. Without it, client components referenced in your collection configs won't render.
 
-### 2. Search Your Content
+### 2. Initial Migration Setup
+
+After configuring the plugin, you need to create an initial migration to set up the IVFFLAT indexes in your database.
+
+**For new setups:**
+
+1. Create your initial Payload migration (this will include the embedding columns via Drizzle schema):
+
+   ```bash
+   pnpm payload migrate:create --name initial
+   ```
+
+2. Use the migration CLI helper to add IVFFLAT index setup:
+
+   ```bash
+   pnpm payload vectorize:migrate
+   ```
+
+   The CLI automatically extracts your static configs from the Payload config and patches the migration file with the necessary IVFFLAT index creation SQL.
+
+3. Review and apply the migration:
+   ```bash
+   pnpm payload migrate
+   ```
+
+**Note:** The embedding columns are created automatically by Drizzle via the `afterSchemaInitHook`, but the IVFFLAT indexes need to be added via migrations for proper schema management.
+
+### 3. Search Your Content
 
 The plugin automatically creates a `/api/vector-search` endpoint:
 
@@ -419,7 +446,68 @@ jobs: {
 }
 ```
 
-### Endpoints
+## Changing Static Config (ivfflatLists or dims) & Migrations
+
+**⚠️ Important:** Changing `dims` is **destructive** - it requires re-embedding all your data. Changing `ivfflatLists` rebuilds the index (non-destructive but may take time).
+
+When you change static config values (`dims` or `ivfflatLists`):
+
+1. **Update your static config** in `payload.config.ts`:
+
+   ```typescript
+   const { afterSchemaInitHook, payloadcmsVectorize } = createVectorizeIntegration({
+     mainKnowledgePool: {
+       dims: 1536, // Changed from previous value
+       ivfflatLists: 200, // Changed from previous value
+     },
+   })
+   ```
+
+2. **Create a migration** using the CLI helper:
+
+   ```bash
+   pnpm payload vectorize:migrate
+   ```
+
+   The CLI will:
+   - Detect changes in your static configs
+   - Create a new Payload migration using `payload.db.createMigration`
+   - Patch it with appropriate SQL:
+     - **If `ivfflatLists` changed**: Rebuilds the IVFFLAT index with the new `lists` parameter (DROP + CREATE INDEX)
+     - **If `dims` changed**: Truncates the embeddings table (destructive - you'll need to re-embed)
+
+3. **Review the migration file** in `src/migrations/` - it will be named something like `*_vectorize-config.ts`
+
+4. **Apply the migration**:
+
+   ```bash
+   pnpm payload migrate
+   ```
+
+5. **If `dims` changed**: Re-embed all your documents using the bulk embed feature.
+
+**Schema name qualification:**
+
+The CLI automatically uses the `schemaName` from your Postgres adapter configuration. If you use a custom schema (e.g., `postgresAdapter({ schemaName: 'custom' })`), all SQL in the migration will be properly qualified with that schema name.
+
+**Idempotency:**
+
+Running `pnpm payload vectorize:migrate` multiple times with no config changes will not create duplicate migrations. The CLI detects when no changes are needed and exits early.
+
+**Development workflow:**
+
+During development, you may want to disable Payload's automatic schema push to ensure migrations are used:
+
+- Set `migrations: { disableAutomaticMigrations: true }` in your Payload config, or
+- Avoid using `pnpm payload migrate:status --force` which auto-generates migrations
+
+This ensures your vector-specific migrations are properly applied.
+
+**Runtime behavior:**
+
+The `ensurePgvectorArtifacts` function is now **presence-only** - it checks that pgvector artifacts (extension, column, index) exist but does not create or modify them. If artifacts are missing, it throws descriptive errors prompting you to run migrations. This ensures migrations are the single source of truth for schema changes.
+
+## Endpoints
 
 #### POST `/api/vector-bulk-embed`
 
@@ -921,7 +1009,6 @@ Thank you for the stars! The following updates have been completed:
 
 The following features are planned for future releases based on community interest and stars:
 
-- **Migrations for vector dimensions**: Easy migration tools for changing vector dimensions and/or ivfflatLists after initial setup
 - **MongoDB support**: Extend vector search capabilities to MongoDB databases
 - **Vercel support**: Optimized deployment and configuration for Vercel hosting
 

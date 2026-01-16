@@ -1,6 +1,8 @@
 import type { Config, Payload, PayloadRequest } from 'payload'
 import { customType } from '@payloadcms/db-postgres/drizzle/pg-core'
 import toSnakeCase from 'to-snake-case'
+import { fileURLToPath } from 'url'
+import { dirname, resolve } from 'path'
 
 import { createEmbeddingsCollection } from './collections/embeddings.js'
 import type {
@@ -76,13 +78,21 @@ export type {
 
 export { getVectorizedPayload } from './types.js'
 
+/**
+ * Presence-only safety net: checks that pgvector artifacts exist.
+ * Does NOT create or modify them - migrations should handle that.
+ * This is a runtime check to fail fast if migrations haven't been applied.
+ */
 async function ensurePgvectorArtifacts(args: {
   payload: Payload
   tableName: string
-  dims: number
   ivfflatLists: number
 }): Promise<void> {
-  const { payload, tableName, dims, ivfflatLists } = args
+  const { payload, tableName } = args
+
+  payload.logger.info(
+    `[payloadcms-vectorize] ensurePgvectorArtifacts: Starting verification for table "${tableName}"`,
+  )
 
   if (!isPostgresPayload(payload)) {
     throw new Error(
@@ -94,29 +104,102 @@ async function ensurePgvectorArtifacts(args: {
   const postgresPayload = payload as PostgresPayload
   const schemaName = postgresPayload.db.schemaName || 'public'
 
-  const sqls: string[] = [
-    `CREATE EXTENSION IF NOT EXISTS vector;`,
-    `ALTER TABLE "${schemaName}"."${tableName}" ADD COLUMN IF NOT EXISTS embedding vector(${dims});`,
-    `CREATE INDEX IF NOT EXISTS ${tableName}_embedding_ivfflat ON "${schemaName}"."${tableName}" USING ivfflat (embedding vector_cosine_ops) WITH (lists = ${ivfflatLists});`,
-  ]
+  payload.logger.info(
+    `[payloadcms-vectorize] ensurePgvectorArtifacts: Using schema "${schemaName}" for table "${tableName}"`,
+  )
+
+  const runQuery = async (sql: string, params?: any[]): Promise<any> => {
+    payload.logger.debug(`[payloadcms-vectorize] ensurePgvectorArtifacts: Executing query: ${sql}`)
+    if (postgresPayload.db.pool?.query) {
+      return postgresPayload.db.pool.query(sql, params)
+    }
+    if (postgresPayload.db.drizzle?.execute) {
+      return postgresPayload.db.drizzle.execute(sql)
+    }
+    throw new Error('[payloadcms-vectorize] No database query function available')
+  }
 
   try {
-    if (postgresPayload.db.pool?.query) {
-      for (const sql of sqls) {
-        await postgresPayload.db.pool.query(sql)
-      }
-    } else if (postgresPayload.db.drizzle?.execute) {
-      for (const sql of sqls) {
-        await postgresPayload.db.drizzle.execute(sql)
-      }
+    // Check extension exists
+    payload.logger.info(
+      '[payloadcms-vectorize] ensurePgvectorArtifacts: Checking pgvector extension...',
+    )
+    const extensionCheck = await runQuery(`SELECT 1 FROM pg_extension WHERE extname = 'vector'`)
+    const extensionRows = Array.isArray(extensionCheck)
+      ? extensionCheck
+      : extensionCheck?.rows || []
+    if (extensionRows.length === 0) {
+      payload.logger.error(
+        '[payloadcms-vectorize] ensurePgvectorArtifacts: pgvector extension not found',
+      )
+      throw new Error(
+        `[payloadcms-vectorize] pgvector extension not found. Please ensure migrations have been applied or manually create the extension: CREATE EXTENSION IF NOT EXISTS vector;`,
+      )
     }
-    postgresPayload.logger.info('[payloadcms-vectorize] pgvector extension/columns/index ensured')
+    payload.logger.info('[payloadcms-vectorize] ensurePgvectorArtifacts: pgvector extension found')
+
+    // Check column exists with correct dims
+    payload.logger.info(
+      `[payloadcms-vectorize] ensurePgvectorArtifacts: Checking embedding column in "${schemaName}"."${tableName}"...`,
+    )
+    const columnCheck = await runQuery(
+      `SELECT column_name, udt_name 
+       FROM information_schema.columns 
+       WHERE table_schema = $1 AND table_name = $2 AND column_name = 'embedding'`,
+      [schemaName, tableName],
+    )
+    const columnRows = Array.isArray(columnCheck) ? columnCheck : columnCheck?.rows || []
+    if (columnRows.length === 0) {
+      payload.logger.error(
+        `[payloadcms-vectorize] ensurePgvectorArtifacts: Embedding column not found in "${schemaName}"."${tableName}"`,
+      )
+      throw new Error(
+        `[payloadcms-vectorize] Embedding column not found in table "${schemaName}"."${tableName}". Please ensure migrations have been applied.`,
+      )
+    }
+    payload.logger.info(
+      `[payloadcms-vectorize] ensurePgvectorArtifacts: Embedding column found (type: ${columnRows[0]?.udt_name || 'unknown'})`,
+    )
+
+    // Check index exists (don't verify lists parameter - migrations handle that)
+    const indexName = `${tableName}_embedding_ivfflat`
+    payload.logger.info(
+      `[payloadcms-vectorize] ensurePgvectorArtifacts: Checking IVFFLAT index "${indexName}"...`,
+    )
+    const indexCheck = await runQuery(
+      `SELECT 1 
+       FROM pg_indexes 
+       WHERE schemaname = $1 AND tablename = $2 AND indexname = $3`,
+      [schemaName, tableName, indexName],
+    )
+    const indexRows = Array.isArray(indexCheck) ? indexCheck : indexCheck?.rows || []
+    if (indexRows.length === 0) {
+      payload.logger.error(
+        `[payloadcms-vectorize] ensurePgvectorArtifacts: IVFFLAT index "${indexName}" not found on "${schemaName}"."${tableName}"`,
+      )
+      throw new Error(
+        `[payloadcms-vectorize] IVFFLAT index not found on table "${schemaName}"."${tableName}". Please ensure migrations have been applied.`,
+      )
+    }
+    payload.logger.info(
+      `[payloadcms-vectorize] ensurePgvectorArtifacts: IVFFLAT index "${indexName}" found`,
+    )
+
+    postgresPayload.logger.info(
+      `[payloadcms-vectorize] pgvector artifacts verified for table "${schemaName}"."${tableName}"`,
+    )
   } catch (err) {
+    payload.logger.error(
+      `[payloadcms-vectorize] ensurePgvectorArtifacts: Error occurred: ${err instanceof Error ? err.message : String(err)}`,
+    )
+    if (err instanceof Error && err.message.includes('[payloadcms-vectorize]')) {
+      throw err
+    }
     postgresPayload.logger.error(
-      '[payloadcms-vectorize] Failed ensuring pgvector artifacts',
+      '[payloadcms-vectorize] Failed checking pgvector artifacts',
       err as Error,
     )
-    throw new Error(`[payloadcms-vectorize] Failed ensuring pgvector artifacts: ${err}`)
+    throw new Error(`[payloadcms-vectorize] Failed checking pgvector artifacts: ${err}`)
   }
 }
 
@@ -177,28 +260,64 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
   const payloadcmsVectorize =
     (pluginOptions: PayloadcmsVectorizeConfig<TPoolNames>) =>
     (config: Config): Config => {
+      console.log('[payloadcms-vectorize] payloadcmsVectorize: Plugin initialization started')
+      console.log(
+        `[payloadcms-vectorize] payloadcmsVectorize: Processing ${Object.keys(pluginOptions.knowledgePools).length} knowledge pool(s)`,
+      )
+
       // Ensure collections array exists
       config.collections = [...(config.collections || [])]
+      console.log(
+        `[payloadcms-vectorize] payloadcmsVectorize: Initial collections count: ${config.collections.length}`,
+      )
 
       // Ensure bulk runs collection exists once
+      console.log('[payloadcms-vectorize] payloadcmsVectorize: Adding bulk runs collection...')
       const bulkRunsCollection = createBulkEmbeddingsRunsCollection()
       if (!config.collections.find((c) => c.slug === BULK_EMBEDDINGS_RUNS_SLUG)) {
         config.collections.push(bulkRunsCollection)
+        console.log('[payloadcms-vectorize] payloadcmsVectorize: Bulk runs collection added')
+      } else {
+        console.log(
+          '[payloadcms-vectorize] payloadcmsVectorize: Bulk runs collection already exists',
+        )
       }
       // Ensure bulk input metadata collection exists once
+      console.log(
+        '[payloadcms-vectorize] payloadcmsVectorize: Adding bulk input metadata collection...',
+      )
       const bulkInputMetadataCollection = createBulkEmbeddingInputMetadataCollection()
       if (!config.collections.find((c) => c.slug === BULK_EMBEDDINGS_INPUT_METADATA_SLUG)) {
         config.collections.push(bulkInputMetadataCollection)
+        console.log(
+          '[payloadcms-vectorize] payloadcmsVectorize: Bulk input metadata collection added',
+        )
+      } else {
+        console.log(
+          '[payloadcms-vectorize] payloadcmsVectorize: Bulk input metadata collection already exists',
+        )
       }
       // Ensure bulk batches collection exists once
+      console.log('[payloadcms-vectorize] payloadcmsVectorize: Adding bulk batches collection...')
       const bulkBatchesCollection = createBulkEmbeddingsBatchesCollection()
       if (!config.collections.find((c) => c.slug === BULK_EMBEDDINGS_BATCHES_SLUG)) {
         config.collections.push(bulkBatchesCollection)
+        console.log('[payloadcms-vectorize] payloadcmsVectorize: Bulk batches collection added')
+      } else {
+        console.log(
+          '[payloadcms-vectorize] payloadcmsVectorize: Bulk batches collection already exists',
+        )
       }
 
       // Validate static/dynamic configs share the same pool names
+      console.log(
+        '[payloadcms-vectorize] payloadcmsVectorize: Validating static/dynamic config alignment...',
+      )
       for (const poolName in pluginOptions.knowledgePools) {
         if (!staticConfigs[poolName]) {
+          console.error(
+            `[payloadcms-vectorize] payloadcmsVectorize: Knowledge pool "${poolName}" not found in static configs`,
+          )
           throw new Error(
             `[payloadcms-vectorize] Knowledge pool "${poolName}" not found in static configs`,
           )
@@ -212,10 +331,16 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
         }
       }
       if (unusedStaticPools.length > 0) {
+        console.error(
+          `[payloadcms-vectorize] payloadcmsVectorize: Static pools without dynamic config: ${unusedStaticPools.join(', ')}`,
+        )
         throw new Error(
           `[payloadcms-vectorize] Static knowledge pool(s) ${unusedStaticPools.join(', ')} lack dynamic configuration`,
         )
       }
+      console.log(
+        '[payloadcms-vectorize] payloadcmsVectorize: Static/dynamic config validation passed',
+      )
 
       // Build reverse mapping: collectionSlug -> KnowledgePoolName[]
       const collectionToPools = new Map<
@@ -227,68 +352,124 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
       >()
 
       // Process each knowledge pool
+      console.log('[payloadcms-vectorize] payloadcmsVectorize: Processing knowledge pools...')
       for (const poolName in pluginOptions.knowledgePools) {
+        console.log(`[payloadcms-vectorize] payloadcmsVectorize: Processing pool "${poolName}"...`)
         const dynamicConfig = pluginOptions.knowledgePools[poolName]
 
         // Add the embeddings collection for this knowledge pool with extensionFields
+        console.log(
+          `[payloadcms-vectorize] payloadcmsVectorize: Creating embeddings collection for pool "${poolName}"...`,
+        )
         const embeddingsCollection = createEmbeddingsCollection(
           poolName,
           dynamicConfig.extensionFields,
         )
         if (!config.collections.find((c) => c.slug === poolName)) {
           config.collections.push(embeddingsCollection)
+          console.log(
+            `[payloadcms-vectorize] payloadcmsVectorize: Embeddings collection "${poolName}" added`,
+          )
+        } else {
+          console.log(
+            `[payloadcms-vectorize] payloadcmsVectorize: Embeddings collection "${poolName}" already exists`,
+          )
         }
 
         // Build reverse mapping for hooks
-        for (const collectionSlug of Object.keys(dynamicConfig.collections)) {
+        const collectionSlugs = Object.keys(dynamicConfig.collections)
+        console.log(
+          `[payloadcms-vectorize] payloadcmsVectorize: Pool "${poolName}" maps to ${collectionSlugs.length} collection(s): ${collectionSlugs.join(', ')}`,
+        )
+        for (const collectionSlug of collectionSlugs) {
           if (!collectionToPools.has(collectionSlug)) {
             collectionToPools.set(collectionSlug, [])
           }
           collectionToPools.get(collectionSlug)!.push({ pool: poolName, dynamic: dynamicConfig })
         }
+        console.log(
+          `[payloadcms-vectorize] payloadcmsVectorize: Pool "${poolName}" processing complete`,
+        )
       }
+      console.log(
+        `[payloadcms-vectorize] payloadcmsVectorize: Knowledge pools processed. Total collections: ${config.collections.length}`,
+      )
 
       // Validate bulk queue requirements
+      console.log(
+        '[payloadcms-vectorize] payloadcmsVectorize: Validating bulk queue requirements...',
+      )
       let bulkIngestEnabled = false
       for (const poolName in pluginOptions.knowledgePools) {
         const dynamicConfig = pluginOptions.knowledgePools[poolName]
         if (dynamicConfig.embeddingConfig.bulkEmbeddingsFns) {
           bulkIngestEnabled = true
+          console.log(
+            `[payloadcms-vectorize] payloadcmsVectorize: Pool "${poolName}" has bulk embedding enabled`,
+          )
           break
         }
       }
       if (bulkIngestEnabled && !pluginOptions.bulkQueueNames) {
+        console.error(
+          '[payloadcms-vectorize] payloadcmsVectorize: bulkQueueNames required but not provided',
+        )
         throw new Error(
           '[payloadcms-vectorize] bulkQueueNames is required when any knowledge pool has bulk embedding configured (embeddingConfig.bulkEmbeddingsFns).',
         )
       }
+      console.log(
+        `[payloadcms-vectorize] payloadcmsVectorize: Bulk queue validation passed (enabled: ${bulkIngestEnabled})`,
+      )
 
       // Exit early if disabled, but keep embeddings collections present for migrations
-      if (pluginOptions.disabled) return config
+      if (pluginOptions.disabled) {
+        console.log('[payloadcms-vectorize] payloadcmsVectorize: Plugin disabled, exiting early')
+        return config
+      }
 
       // Register a single task using Payload Jobs that can handle any knowledge pool
+      console.log('[payloadcms-vectorize] payloadcmsVectorize: Registering Payload Jobs tasks...')
       const incomingJobs = config.jobs || { tasks: [] }
       const tasks = [...(config.jobs?.tasks || [])]
+      console.log(
+        `[payloadcms-vectorize] payloadcmsVectorize: Existing tasks count: ${tasks.length}`,
+      )
 
+      console.log('[payloadcms-vectorize] payloadcmsVectorize: Creating vectorize task...')
       const vectorizeTask = createVectorizeTask({
         knowledgePools: pluginOptions.knowledgePools,
       })
       tasks.push(vectorizeTask)
+      console.log('[payloadcms-vectorize] payloadcmsVectorize: Vectorize task added')
+
+      console.log('[payloadcms-vectorize] payloadcmsVectorize: Creating prepare bulk embed task...')
       const prepareBulkEmbedTask = createPrepareBulkEmbeddingTask({
         knowledgePools: pluginOptions.knowledgePools,
         pollOrCompleteQueueName: pluginOptions.bulkQueueNames?.pollOrCompleteQueueName,
       })
       tasks.push(prepareBulkEmbedTask)
+      console.log('[payloadcms-vectorize] payloadcmsVectorize: Prepare bulk embed task added')
+
+      console.log(
+        '[payloadcms-vectorize] payloadcmsVectorize: Creating poll or complete bulk embed task...',
+      )
       const pollOrCompleteBulkEmbedTask = createPollOrCompleteBulkEmbeddingTask({
         knowledgePools: pluginOptions.knowledgePools,
         pollOrCompleteQueueName: pluginOptions.bulkQueueNames?.pollOrCompleteQueueName,
       })
       tasks.push(pollOrCompleteBulkEmbedTask)
+      console.log(
+        '[payloadcms-vectorize] payloadcmsVectorize: Poll or complete bulk embed task added',
+      )
 
       config.jobs = {
         ...incomingJobs,
         tasks,
       }
+      console.log(
+        `[payloadcms-vectorize] payloadcmsVectorize: Jobs configured. Total tasks: ${tasks.length}`,
+      )
 
       const collectionToEmbedQueue = new Map<
         string,
@@ -296,11 +477,23 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
       >()
 
       // Extend configured collections with hooks
+      console.log(
+        `[payloadcms-vectorize] payloadcmsVectorize: Setting up hooks for ${collectionToPools.size} collection(s)...`,
+      )
       for (const [collectionSlug, pools] of collectionToPools.entries()) {
+        console.log(
+          `[payloadcms-vectorize] payloadcmsVectorize: Setting up hooks for collection "${collectionSlug}" (${pools.length} pool(s))...`,
+        )
         const collection = config.collections.find((c) => c.slug === collectionSlug)
         if (!collection) {
+          console.error(
+            `[payloadcms-vectorize] payloadcmsVectorize: Collection "${collectionSlug}" not found`,
+          )
           throw new Error(`[payloadcms-vectorize] Collection ${collectionSlug} not found`)
         }
+        console.log(
+          `[payloadcms-vectorize] payloadcmsVectorize: Collection "${collectionSlug}" found, adding hooks...`,
+        )
 
         const embedQueue = async (doc: any, payload: Payload, req?: PayloadRequest) => {
           // Queue vectorization jobs for ALL knowledge pools containing this collection
@@ -329,6 +522,9 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
         }
 
         collectionToEmbedQueue.set(collectionSlug, embedQueue)
+        console.log(
+          `[payloadcms-vectorize] payloadcmsVectorize: Embed queue function registered for "${collectionSlug}"`,
+        )
 
         collection.hooks = {
           ...(collection.hooks || {}),
@@ -386,17 +582,27 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
             },
           ],
         }
+        console.log(
+          `[payloadcms-vectorize] payloadcmsVectorize: Hooks configured for collection "${collectionSlug}"`,
+        )
       }
+      console.log('[payloadcms-vectorize] payloadcmsVectorize: All collection hooks configured')
 
+      console.log('[payloadcms-vectorize] payloadcmsVectorize: Creating vector search handlers...')
       const vectorSearchHandlers = createVectorSearchHandlers(pluginOptions.knowledgePools)
+      console.log('[payloadcms-vectorize] payloadcmsVectorize: Vector search handlers created')
 
       // Create vectorized payload object factory that creates methods bound to a payload instance
+      console.log(
+        '[payloadcms-vectorize] payloadcmsVectorize: Creating vectorized payload object factory...',
+      )
       const createVectorizedPayloadObject = (payload: Payload): VectorizedPayload<TPoolNames> => {
         return {
           _isBulkEmbedEnabled: (knowledgePool: TPoolNames): boolean => {
             const poolConfig = pluginOptions.knowledgePools[knowledgePool]
             return !!poolConfig?.embeddingConfig?.bulkEmbeddingsFns
           },
+          _staticConfigs: staticConfigs,
           search: (params: VectorSearchQuery<TPoolNames>) =>
             vectorSearchHandlers.vectorSearch(
               payload,
@@ -456,29 +662,80 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
       }
 
       // Store factory in config.custom
+      console.log(
+        '[payloadcms-vectorize] payloadcmsVectorize: Storing vectorized payload factory in config.custom...',
+      )
       config.custom = {
         ...(config.custom || {}),
         createVectorizedPayloadObject,
       }
+      console.log('[payloadcms-vectorize] payloadcmsVectorize: Factory stored in config.custom')
 
+      // Register bin script for migration helper
+      console.log('[payloadcms-vectorize] payloadcmsVectorize: Registering bin script...')
+      const __filename = fileURLToPath(import.meta.url)
+      const __dirname = dirname(__filename)
+      const binScriptPath = resolve(__dirname, 'bin/vectorize-migrate.ts')
+      console.log(`[payloadcms-vectorize] payloadcmsVectorize: Bin script path: ${binScriptPath}`)
+      config.bin = [
+        ...(config.bin || []),
+        {
+          key: 'vectorize:migrate',
+          scriptPath: binScriptPath,
+        },
+      ]
+      console.log('[payloadcms-vectorize] payloadcmsVectorize: Bin script registered')
+
+      console.log('[payloadcms-vectorize] payloadcmsVectorize: Setting up onInit hook...')
       const incomingOnInit = config.onInit
       config.onInit = async (payload) => {
-        if (incomingOnInit) await incomingOnInit(payload)
-        // Ensure pgvector artifacts for each knowledge pool
-        for (const poolName in staticConfigs) {
-          const staticConfig = staticConfigs[poolName]
-          // Drizzle converts camelCase collection slugs to snake_case table names
-          await ensurePgvectorArtifacts({
-            payload,
+        payload.logger.info(
+          '[payloadcms-vectorize] onInit: Starting pgvector artifacts verification',
+        )
+        try {
+          if (incomingOnInit) {
+            payload.logger.info('[payloadcms-vectorize] onInit: Calling incoming onInit hook')
+            await incomingOnInit(payload)
+            payload.logger.info('[payloadcms-vectorize] onInit: Incoming onInit hook completed')
+          }
+          // Ensure pgvector artifacts for each knowledge pool
+          const poolNames = Object.keys(staticConfigs)
+          payload.logger.info(
+            `[payloadcms-vectorize] onInit: Verifying artifacts for ${poolNames.length} knowledge pool(s): ${poolNames.join(', ')}`,
+          )
+          for (const poolName in staticConfigs) {
+            const staticConfig = staticConfigs[poolName]
+            const tableName = toSnakeCase(poolName)
+            payload.logger.info(
+              `[payloadcms-vectorize] onInit: Verifying artifacts for pool "${poolName}" (table: "${tableName}")`,
+            )
             // Drizzle converts camelCase collection slugs to snake_case table names
-            tableName: toSnakeCase(poolName),
-            dims: staticConfig.dims,
-            ivfflatLists: staticConfig.ivfflatLists,
-          })
+            await ensurePgvectorArtifacts({
+              payload,
+              // Drizzle converts camelCase collection slugs to snake_case table names
+              tableName,
+              ivfflatLists: staticConfig.ivfflatLists,
+            })
+            payload.logger.info(
+              `[payloadcms-vectorize] onInit: Artifacts verified for pool "${poolName}"`,
+            )
+          }
+          payload.logger.info(
+            '[payloadcms-vectorize] onInit: All pgvector artifacts verified successfully',
+          )
+        } catch (error) {
+          payload.logger.error(
+            `[payloadcms-vectorize] onInit: Error verifying pgvector artifacts: ${error instanceof Error ? error.message : String(error)}`,
+          )
+          throw error
         }
       }
+      console.log('[payloadcms-vectorize] payloadcmsVectorize: onInit hook configured')
 
       if (pluginOptions.endpointOverrides?.enabled !== false) {
+        console.log(
+          '[payloadcms-vectorize] payloadcmsVectorize: Setting up vector search endpoint...',
+        )
         const path = pluginOptions.endpointOverrides?.path || '/vector-search'
         const inputEndpoints = config.endpoints || []
         const endpoints = [
@@ -506,8 +763,17 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
           },
         ]
         config.endpoints = endpoints
+        console.log(
+          `[payloadcms-vectorize] payloadcmsVectorize: Vector search endpoint registered at "${path}"`,
+        )
+      } else {
+        console.log('[payloadcms-vectorize] payloadcmsVectorize: Vector search endpoint disabled')
       }
 
+      console.log('[payloadcms-vectorize] payloadcmsVectorize: Plugin initialization complete')
+      console.log(
+        `[payloadcms-vectorize] payloadcmsVectorize: Final collections count: ${config.collections.length}`,
+      )
       return config
     }
   return {
