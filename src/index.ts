@@ -712,7 +712,6 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
             // Drizzle converts camelCase collection slugs to snake_case table names
             await ensurePgvectorArtifacts({
               payload,
-              // Drizzle converts camelCase collection slugs to snake_case table names
               tableName,
               ivfflatLists: staticConfig.ivfflatLists,
             })

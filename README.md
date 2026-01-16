@@ -158,6 +158,13 @@ export default buildConfig({
 
 The import map tells Payload how to resolve component paths (like `'payloadcms-vectorize/client#EmbedAllButton'`) to actual React components. Without it, client components referenced in your collection configs won't render.
 
+**⚠️ Important:** Run this command:
+
+- After initial plugin setup
+- If the "Embed all" button doesn't appear in the admin UI
+
+The import map tells Payload how to resolve component paths (like `'payloadcms-vectorize/client#EmbedAllButton'`) to actual React components. Without it, client components referenced in your collection configs won't render.
+
 ### 2. Initial Migration Setup
 
 After configuring the plugin, you need to create an initial migration to set up the IVFFLAT indexes in your database.
@@ -507,7 +514,7 @@ This ensures your vector-specific migrations are properly applied.
 
 The `ensurePgvectorArtifacts` function is now **presence-only** - it checks that pgvector artifacts (extension, column, index) exist but does not create or modify them. If artifacts are missing, it throws descriptive errors prompting you to run migrations. This ensures migrations are the single source of truth for schema changes.
 
-## Endpoints
+### Endpoints
 
 #### POST `/api/vector-bulk-embed`
 
