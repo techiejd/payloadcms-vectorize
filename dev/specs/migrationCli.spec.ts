@@ -11,147 +11,21 @@ import { script as vectorizeMigrateScript } from '../../src/bin/vectorize-migrat
 import { readdirSync, statSync, existsSync, readFileSync, rmSync } from 'fs'
 import { join, resolve } from 'path'
 
-describe('Migration CLI and ensurePgvectorArtifacts integration tests', () => {
-  const dbName = `migration_cli_test_${Date.now()}`
-  let payload: Payload
+describe('Migration CLI integration tests', () => {
+  describe('VectorizedPayload access', () => {
+    let payload: Payload
+    const dbName = `migration_cli_test_${Date.now()}`
 
-  beforeAll(async () => {
-    await createTestDb({ dbName })
+    beforeAll(async () => {
+      await createTestDb({ dbName })
 
-    const integration = createVectorizeIntegration({
-      default: {
-        dims: DIMS,
-        ivfflatLists: 10,
-      },
-    })
-
-    const config = await buildConfig({
-      secret: 'test-secret',
-      collections: [
-        {
-          slug: 'posts',
-          fields: [{ name: 'title', type: 'text' }],
-        },
-      ],
-      db: postgresAdapter({
-        extensions: ['vector'],
-        afterSchemaInit: [integration.afterSchemaInitHook],
-        pool: {
-          connectionString: `postgresql://postgres:password@localhost:5433/${dbName}`,
-        },
-      }),
-      plugins: [
-        integration.payloadcmsVectorize({
-          knowledgePools: {
-            default: {
-              collections: {
-                posts: {
-                  toKnowledgePool: async (doc) => [{ chunk: doc.title || '' }],
-                },
-              },
-              embeddingConfig: {
-                version: testEmbeddingVersion,
-                queryFn: makeDummyEmbedQuery(DIMS),
-                realTimeIngestionFn: makeDummyEmbedDocs(DIMS),
-              },
-            },
-          },
-        }),
-      ],
-      jobs: {
-        tasks: [],
-        autoRun: [
-          {
-            cron: '*/5 * * * * *',
-            limit: 10,
-          },
-        ],
-      },
-    })
-
-    // Temporarily disable onInit for runtime behavior tests
-    // This prevents ensurePgvectorArtifacts from running before tests can set up their state
-
-    payload = await getPayload({
-      config,
-      cron: true,
-      disableOnInit: true,
-      key: `test-runtime-behavior-${Date.now()}`,
-    })
-  })
-
-  describe('Runtime behavior', () => {
-    test('ensurePgvectorArtifacts is presence-only and does not rebuild index', async () => {
-      const postgresPayload = payload as PostgresPayload
-      const schemaName = postgresPayload.db.schemaName || 'public'
-      const tableName = 'default'
-
-      // Manually create the index first (simulating a migration)
-      await postgresPayload.db.pool?.query(
-        `CREATE INDEX IF NOT EXISTS ${tableName}_embedding_ivfflat ON "${schemaName}"."${tableName}" USING ivfflat (embedding vector_cosine_ops) WITH (lists = 10)`,
-      )
-
-      // Get initial index definition
-      const initialIndex = await postgresPayload.db.pool?.query(
-        `SELECT pg_get_indexdef(c.oid) as def
-       FROM pg_indexes i
-       JOIN pg_class c ON c.relname = i.indexname
-       JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = i.schemaname
-       WHERE i.schemaname = $1 AND i.tablename = $2 AND i.indexname = $3`,
-        [schemaName, tableName, `${tableName}_embedding_ivfflat`],
-      )
-      const initialDef = initialIndex?.rows[0]?.def || ''
-
-      // Call ensurePgvectorArtifacts (via onInit which should check presence)
-      // Since we already have the artifacts, it should pass without modifying
-      // Note: onInit calls ensurePgvectorArtifacts, but since artifacts exist, it should just verify
-      await payload.config.onInit?.(payload)
-
-      // Verify index definition hasn't changed
-      const afterIndex = await postgresPayload.db.pool?.query(
-        `SELECT pg_get_indexdef(c.oid) as def
-       FROM pg_indexes i
-       JOIN pg_class c ON c.relname = i.indexname
-       JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = i.schemaname
-       WHERE i.schemaname = $1 AND i.tablename = $2 AND i.indexname = $3`,
-        [schemaName, tableName, `${tableName}_embedding_ivfflat`],
-      )
-      const afterDef = afterIndex?.rows[0]?.def || ''
-
-      // Index should still exist and be the same
-      expect(afterDef).toBeTruthy()
-      expect(afterDef).toBe(initialDef)
-    })
-
-    test('VectorizedPayload has _staticConfigs', async () => {
-      const { getVectorizedPayload } = await import('payloadcms-vectorize')
-      const vectorizedPayload = getVectorizedPayload(payload)
-
-      expect(vectorizedPayload).toBeTruthy()
-      expect(vectorizedPayload?._staticConfigs).toBeDefined()
-      expect(vectorizedPayload?._staticConfigs.default).toBeDefined()
-      expect(vectorizedPayload?._staticConfigs.default.dims).toBe(DIMS)
-      expect(vectorizedPayload?._staticConfigs.default.ivfflatLists).toBe(10)
-    })
-
-    test('ensurePgvectorArtifacts throws error when artifacts are missing (user has not run migrations)', async () => {
-      // Create a new database without any migrations applied
-      // This simulates the state when a user hasn't run migrations yet
-      const testDbName = `migration_cli_test_missing_${Date.now()}`
-      console.log('[TEST] Step 1: Creating test database:', testDbName)
-      await createTestDb({ dbName: testDbName })
-      console.log('[TEST] Step 2: Database created')
-
-      console.log('[TEST] Step 3: Creating integration')
       const integration = createVectorizeIntegration({
         default: {
           dims: DIMS,
           ivfflatLists: 10,
         },
       })
-      console.log('[TEST] Step 4: Integration created')
 
-      console.log('[TEST] Step 5: Starting buildConfig...')
       const config = await buildConfig({
         secret: 'test-secret',
         collections: [
@@ -164,7 +38,7 @@ describe('Migration CLI and ensurePgvectorArtifacts integration tests', () => {
           extensions: ['vector'],
           afterSchemaInit: [integration.afterSchemaInitHook],
           pool: {
-            connectionString: `postgresql://postgres:password@localhost:5433/${testDbName}`,
+            connectionString: `postgresql://postgres:password@localhost:5433/${dbName}`,
           },
         }),
         plugins: [
@@ -187,19 +61,122 @@ describe('Migration CLI and ensurePgvectorArtifacts integration tests', () => {
         ],
         jobs: {
           tasks: [],
-          autoRun: [],
+          autoRun: [
+            {
+              cron: '*/5 * * * * *',
+              limit: 10,
+            },
+          ],
         },
       })
-      console.log('[TEST] Step 6: buildConfig completed')
 
-      // Note: onInit will be called during getPayload and will throw because artifacts don't exist
-      // This simulates the real-world scenario where a user hasn't run migrations yet
-      // The error will be "Embedding column not found" (first check that fails)
-      console.log('[TEST] Step 7: Calling getPayload (should throw)...')
+      payload = await getPayload({ config, cron: true })
+    })
+
+    test('VectorizedPayload has _staticConfigs', async () => {
+      const { getVectorizedPayload } = await import('payloadcms-vectorize')
+      const vectorizedPayload = getVectorizedPayload(payload)
+
+      expect(vectorizedPayload).toBeTruthy()
+      expect(vectorizedPayload?._staticConfigs).toBeDefined()
+      expect(vectorizedPayload?._staticConfigs.default).toBeDefined()
+      expect(vectorizedPayload?._staticConfigs.default.dims).toBe(DIMS)
+      expect(vectorizedPayload?._staticConfigs.default.ivfflatLists).toBe(10)
+    })
+  })
+
+  describe('Error handling when migrations not run', () => {
+    let payload: Payload
+    const dbName = `migration_error_test_${Date.now()}`
+
+    beforeAll(async () => {
+      await createTestDb({ dbName })
+
+      const integration = createVectorizeIntegration({
+        default: {
+          dims: DIMS,
+          ivfflatLists: 10,
+        },
+      })
+
+      const config = await buildConfig({
+        secret: 'test-secret',
+        collections: [
+          {
+            slug: 'posts',
+            fields: [{ name: 'title', type: 'text' }],
+          },
+        ],
+        db: postgresAdapter({
+          extensions: ['vector'],
+          afterSchemaInit: [integration.afterSchemaInitHook],
+          pool: {
+            connectionString: `postgresql://postgres:password@localhost:5433/${dbName}`,
+          },
+          // Don't push schema changes - we want to test without migrations
+          push: false,
+        }),
+        plugins: [
+          integration.payloadcmsVectorize({
+            knowledgePools: {
+              default: {
+                collections: {
+                  posts: {
+                    toKnowledgePool: async (doc) => [{ chunk: doc.title || '' }],
+                  },
+                },
+                embeddingConfig: {
+                  version: testEmbeddingVersion,
+                  queryFn: makeDummyEmbedQuery(DIMS),
+                  realTimeIngestionFn: makeDummyEmbedDocs(DIMS),
+                },
+              },
+            },
+          }),
+        ],
+        jobs: {
+          tasks: [],
+          autoRun: [
+            {
+              cron: '*/5 * * * * *',
+              limit: 10,
+            },
+          ],
+        },
+      })
+
+      payload = await getPayload({
+        config,
+        cron: false, // Disable cron to avoid background jobs
+        key: `migration-error-test-${Date.now()}`,
+      })
+    })
+
+    test('vector search fails with descriptive error when embedding column missing', async () => {
+      const { getVectorizedPayload } = await import('payloadcms-vectorize')
+      const vectorizedPayload = getVectorizedPayload(payload)
+
+      // Vector search should fail with a descriptive error
       await expect(
-        getPayload({ config, cron: true, key: `test-missing-artifacts-${Date.now()}` }),
-      ).rejects.toThrow('Embedding column not found')
-      console.log('[TEST] Step 8: getPayload threw as expected')
+        vectorizedPayload?.search({
+          knowledgePool: 'default',
+          query: 'test query',
+          limit: 10,
+        }),
+      ).rejects.toThrow()
+    })
+
+    test('creating document fails when embedding table does not exist', async () => {
+      // Try to create a document that would trigger vectorization
+      // This should fail because the embedding table doesn't exist
+      await expect(
+        payload.create({
+          collection: 'posts',
+          data: {
+            title: 'Test Post',
+          },
+        }),
+      ).rejects.toThrow()
     })
   })
 
@@ -283,17 +260,11 @@ describe('Migration CLI and ensurePgvectorArtifacts integration tests', () => {
         },
       })
 
-      // Temporarily disable onInit to avoid ensurePgvectorArtifacts check before migrations are applied
-      const savedOnInit = cliConfig.onInit
-      cliConfig.onInit = async () => {
-        // No-op: migrations haven't been applied yet
-      }
-
+      // Get payload instance
       cliPayload = await getPayload({
         config: cliConfig,
         cron: true,
-        key: `test-initial-setup-${Date.now()}`,
-        disableOnInit: true,
+        key: `migration-cli-test-${Date.now()}`,
       })
 
       // Step 2: Create initial migration (this will include the embedding column via Drizzle)
@@ -433,12 +404,6 @@ describe('Migration CLI and ensurePgvectorArtifacts integration tests', () => {
         }
       }
 
-      // Restore onInit and run it now that migrations are applied
-      cliConfig.onInit = savedOnInit
-      if (cliConfig.onInit) {
-        await cliConfig.onInit(cliPayload)
-      }
-
       // Step 5: Verify index exists with correct lists parameter
       const postgresPayload = cliPayload as PostgresPayload
       const schemaName = postgresPayload.db.schemaName || 'public'
@@ -516,17 +481,11 @@ describe('Migration CLI and ensurePgvectorArtifacts integration tests', () => {
         },
       })
 
-      // Temporarily disable onInit to avoid ensurePgvectorArtifacts check before migrations are applied
-      const savedOnInit = cliConfig.onInit
-      cliConfig.onInit = async () => {
-        // No-op: migrations haven't been applied yet
-      }
-
+      // Get payload instance
       cliPayload = await getPayload({
         config: cliConfig,
         cron: true,
-        key: `test-ivfflat-change-${Date.now()}`,
-        disableOnInit: true,
+        key: `migration-cli-test-${Date.now()}`,
       })
 
       // Step 2: Run vectorize:migrate (should detect change and create migration)
@@ -606,12 +565,6 @@ describe('Migration CLI and ensurePgvectorArtifacts integration tests', () => {
             await migration.up({ db: cliPayload.db.drizzle, payload: cliPayload, req: {} as any })
           }
         }
-      }
-
-      // Restore onInit and run it now that migrations are applied
-      if (savedOnInit) {
-        cliConfig.onInit = savedOnInit
-        await savedOnInit(cliPayload)
       }
 
       // Step 5: Verify index was rebuilt with new lists parameter
@@ -725,17 +678,11 @@ describe('Migration CLI and ensurePgvectorArtifacts integration tests', () => {
         },
       })
 
-      // Temporarily disable onInit to avoid ensurePgvectorArtifacts check before migrations are applied
-      const savedOnInitDims = cliConfig.onInit
-      cliConfig.onInit = async () => {
-        // No-op: migrations haven't been applied yet
-      }
-
+      // Get payload instance
       cliPayload = await getPayload({
         config: cliConfig,
         cron: true,
-        key: `test-dims-change-${Date.now()}`,
-        disableOnInit: true,
+        key: `migration-cli-test-${Date.now()}`,
       })
 
       // Step 2: Run vectorize:migrate (should detect dims change)
@@ -817,14 +764,6 @@ describe('Migration CLI and ensurePgvectorArtifacts integration tests', () => {
         throw error
       }
       console.log('[TEST] Step 4.5: Migration applied successfully')
-
-      // Restore onInit and run it now that migrations are applied
-      console.log('[TEST] Step 4.6: Restoring onInit...')
-      if (savedOnInitDims) {
-        cliConfig.onInit = savedOnInitDims
-        await savedOnInitDims(cliPayload)
-      }
-      console.log('[TEST] Step 4.7: onInit restored and executed')
 
       // Step 5: Verify column type changed and table was truncated
       console.log('[TEST] Step 5: Verifying column type and table state...')

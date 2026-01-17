@@ -345,11 +345,11 @@ function patchMigrationFile(
  * Bin script entry point for creating vector migrations
  */
 export const script = async (config: SanitizedConfig): Promise<void> => {
-  // Disable onInit to avoid ensurePgvectorArtifacts check - migrations may not be applied yet
+  // Use a unique key to ensure we get a fresh Payload instance with the correct config
+  // This is important when running in tests or when the config has been modified
   const payload = await getPayload({
     config,
-    disableOnInit: true,
-    key: `vectorize-migrate-payload-instance-${Date.now()}`,
+    key: `vectorize-migrate-${Date.now()}`,
   })
   const vectorizedPayload = getVectorizedPayload(payload)
 
@@ -366,7 +366,17 @@ export const script = async (config: SanitizedConfig): Promise<void> => {
 
   const poolNames = Object.keys(staticConfigs)
   const schemaName = (payload.db as any).schemaName || 'public'
-  const migrationsDir = (payload.db as any).migrationDir || resolve(process.cwd(), 'src/migrations')
+  
+  // Get migrations directory - the postgres adapter stores it on payload.db.migrationDir
+  // but this may be set to default before config is applied. Try multiple sources.
+  const dbMigrationDir = (payload.db as any).migrationDir
+  
+  // Debug: log migration directory detection
+  console.log('[payloadcms-vectorize] Debug: payload.db.migrationDir =', dbMigrationDir)
+  
+  // Use the payload.db.migrationDir - this is where Payload stores the resolved path
+  const migrationsDir = dbMigrationDir || resolve(process.cwd(), 'src/migrations')
+  console.log('[payloadcms-vectorize] Using migrations directory:', migrationsDir)
 
   console.log('[payloadcms-vectorize] Checking for configuration changes...')
 

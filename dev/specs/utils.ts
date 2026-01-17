@@ -23,24 +23,36 @@ export const createTestDb = async ({ dbName }: { dbName: string }) => {
     process.env.DATABASE_ADMIN_URI || 'postgresql://postgres:password@localhost:5433/postgres' // connect to 'postgres'
   const client = new Client({ connectionString: adminUri })
   await client.connect()
+  
+  /*
+  // Drop and recreate the database to ensure a clean state
+  // First, terminate any existing connections to the database
+  await client.query(`
+    SELECT pg_terminate_backend(pg_stat_activity.pid)
+    FROM pg_stat_activity
+    WHERE pg_stat_activity.datname = $1
+      AND pid <> pg_backend_pid()
+  `, [dbName])*/
+  
   const exists = await client.query('SELECT 1 FROM pg_database WHERE datname = $1', [dbName])
   if (exists.rowCount === 0) {
     await client.query(`CREATE DATABASE ${dbName}`)
+    //await client.query(`DROP DATABASE "${dbName}"`)
   }
+  //await client.query(`DROP DATABASE "${dbName}"`)
   await client.end()
 }
 
 /**
  * Initialize Payload with migrations applied.
  * This handles the full migration setup:
- * 1. Get payload with disableOnInit to avoid ensurePgvectorArtifacts check
+ * 1. Get payload instance
  * 2. Create initial migration
  * 3. Run vectorize:migrate to patch with IVFFLAT index
  * 4. Apply migrations
- * 5. Run onInit
  *
  * @param config - A pre-built SanitizedConfig (must have migrationDir and push: false in db config)
- * @param key - Unique key for getPayload caching
+ * @param key - Unique key for getPayload caching (prevents instance collisions in tests)
  * @param cron - Whether to enable cron jobs (default: true)
  */
 export async function initializePayloadWithMigrations({
@@ -49,11 +61,10 @@ export async function initializePayloadWithMigrations({
   cron = true,
 }: {
   config: SanitizedConfig
-  key: string
+  key?: string
   cron?: boolean
 }): Promise<Payload> {
-  // Get payload with disableOnInit to avoid ensurePgvectorArtifacts check before migrations
-  const payload = await getPayload({ config, key, cron, disableOnInit: true })
+  const payload = await getPayload({ config, key, cron })
 
   // Create initial migration (Payload's schema)
   await payload.db.createMigration({ migrationName: 'initial', payload })
@@ -63,11 +74,6 @@ export async function initializePayloadWithMigrations({
 
   // Apply migrations (forceAcceptWarning bypasses the dev mode prompt)
   await (payload.db as any).migrate({ forceAcceptWarning: true })
-
-  // Now run onInit (it's still available on config, not destroyed by disableOnInit)
-  if (payload.config.onInit) {
-    await payload.config.onInit(payload)
-  }
 
   return payload
 }
@@ -88,67 +94,6 @@ export function createTestMigrationsDir(dbName: string): {
   return {
     migrationsDir,
     cleanup: () => rmSync(migrationsDir, { recursive: true, force: true }),
-  }
-}
-
-/**
- * Create pgvector artifacts (extension + IVFFLAT index) for testing.
- * This should be called after migrations are applied but before onInit runs,
- * or used with disableOnInit to manually set up the test environment.
- */
-export const ensureTestPgvectorArtifacts = async ({
-  dbName,
-  tableName = 'default',
-  dims = DEFAULT_DIMS,
-  ivfflatLists = 1,
-}: {
-  dbName: string
-  tableName?: string
-  dims?: number
-  ivfflatLists?: number
-}) => {
-  const client = new Client({
-    connectionString: `postgresql://postgres:password@localhost:5433/${dbName}`,
-  })
-  await client.connect()
-  try {
-    // Ensure pgvector extension exists
-    await client.query('CREATE EXTENSION IF NOT EXISTS vector')
-
-    // Check if table exists (it should be created by Payload's schema init)
-    const tableCheck = await client.query(
-      `SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1`,
-      [tableName],
-    )
-    if (tableCheck.rowCount === 0) {
-      // Table doesn't exist yet - this is expected before migrations
-      // We'll skip index creation; it will be handled by migrations
-      return
-    }
-
-    // Check if embedding column exists
-    const columnCheck = await client.query(
-      `SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 AND column_name = 'embedding'`,
-      [tableName],
-    )
-    if (columnCheck.rowCount === 0) {
-      // Column doesn't exist yet - skip index creation
-      return
-    }
-
-    // Create IVFFLAT index if it doesn't exist
-    const indexName = `${tableName}_embedding_ivfflat`
-    const indexCheck = await client.query(
-      `SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = $1 AND indexname = $2`,
-      [tableName, indexName],
-    )
-    if (indexCheck.rowCount === 0) {
-      await client.query(
-        `CREATE INDEX "${indexName}" ON "public"."${tableName}" USING ivfflat (embedding vector_cosine_ops) WITH (lists = ${ivfflatLists})`,
-      )
-    }
-  } finally {
-    await client.end()
   }
 }
 
@@ -371,8 +316,7 @@ export async function buildPayloadWithIntegration({
   })
 
   const payloadKey = key ?? `payload-${dbName}-${Date.now()}`
-  // Disable onInit to avoid ensurePgvectorArtifacts check before index exists
-  const payload = await getPayload({ config, key: payloadKey, cron: true, disableOnInit: true })
+  const payload = await getPayload({ config, key: payloadKey, cron: true })
 
   // Create initial migration (Payload's schema)
   await payload.db.createMigration({ migrationName: 'initial', payload })
@@ -382,11 +326,6 @@ export async function buildPayloadWithIntegration({
 
   // Apply migrations (forceAcceptWarning bypasses the dev mode prompt)
   await (payload.db as any).migrate({ forceAcceptWarning: true })
-
-  // Now run onInit (it's still available on config, not destroyed by disableOnInit)
-  if (payload.config.onInit) {
-    await payload.config.onInit(payload)
-  }
 
   return { payload, config }
 }
