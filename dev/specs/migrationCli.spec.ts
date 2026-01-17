@@ -798,5 +798,281 @@ describe('Migration CLI integration tests', () => {
       expect(rowCount).toBe(0)
       console.log('[TEST] Test 4 completed successfully')
     })
+
+    test('5. Add new knowledgePool: CLI creates migration for new table', async () => {
+      console.log('[TEST] Starting test 5: Add new knowledgePool')
+
+      // Step 1: Create integration with an additional knowledgePool "secondary"
+      const integrationWithSecondary = createVectorizeIntegration({
+        default: {
+          dims: 10, // Keep same dims as test 4
+          ivfflatLists: 20, // Keep same lists as test 4
+        },
+        secondary: {
+          dims: DIMS,
+          ivfflatLists: 5,
+        },
+      })
+
+      cliConfig = await buildConfig({
+        secret: 'test-secret',
+        collections: [
+          {
+            slug: 'posts',
+            fields: [{ name: 'title', type: 'text' }],
+          },
+          {
+            slug: 'articles',
+            fields: [{ name: 'content', type: 'text' }],
+          },
+        ],
+        db: postgresAdapter({
+          extensions: ['vector'],
+          afterSchemaInit: [integrationWithSecondary.afterSchemaInitHook],
+          migrationDir: migrationsDir,
+          push: false,
+          pool: {
+            connectionString: `postgresql://postgres:password@localhost:5433/${cliDbName}`,
+          },
+        }),
+        plugins: [
+          integrationWithSecondary.payloadcmsVectorize({
+            knowledgePools: {
+              default: {
+                collections: {
+                  posts: {
+                    toKnowledgePool: async (doc) => [{ chunk: doc.title || '' }],
+                  },
+                },
+                embeddingConfig: {
+                  version: testEmbeddingVersion,
+                  queryFn: makeDummyEmbedQuery(10),
+                  realTimeIngestionFn: makeDummyEmbedDocs(10),
+                },
+              },
+              secondary: {
+                collections: {
+                  articles: {
+                    toKnowledgePool: async (doc: any) => [{ chunk: doc.content || '' }],
+                  },
+                } as any,
+                embeddingConfig: {
+                  version: testEmbeddingVersion,
+                  queryFn: makeDummyEmbedQuery(DIMS),
+                  realTimeIngestionFn: makeDummyEmbedDocs(DIMS),
+                },
+              },
+            },
+          }),
+        ],
+        jobs: {
+          tasks: [],
+          autoRun: [
+            {
+              cron: '*/5 * * * * *',
+              limit: 10,
+            },
+          ],
+        },
+      })
+
+      // Get new payload instance
+      cliPayload = await getPayload({
+        config: cliConfig,
+        cron: true,
+        key: `migration-cli-test-5-${Date.now()}`,
+      })
+
+      // Step 2: Create migration for new table
+      console.log('[TEST] Step 2: Creating migration for new knowledgePool...')
+      try {
+        await cliPayload.db.createMigration({
+          migrationName: 'add_secondary_pool',
+          payload: cliPayload,
+          forceAcceptWarning: true, // Skip prompts in tests
+        })
+        console.log('[TEST] Step 2.5: Migration created')
+      } catch (e) {
+        console.error('[TEST] Step 2 ERROR - createMigration failed:', e)
+        throw e
+      }
+
+      // Step 3: Run vectorize:migrate to add IVFFLAT index for new pool
+      console.log('[TEST] Step 3: Running vectorize:migrate...')
+      try {
+        await vectorizeMigrateScript(cliConfig)
+        console.log('[TEST] Step 3.5: vectorize:migrate completed')
+      } catch (e) {
+        console.error('[TEST] Step 3 ERROR - vectorize:migrate failed:', e)
+        throw e
+      }
+
+      // Step 4: Verify migration file contains secondary table creation and IVFFLAT index
+      const migrations = readdirSync(migrationsDir)
+        .filter(
+          (f) => (f.endsWith('.ts') || f.endsWith('.js')) && f !== 'index.ts' && f !== 'index.js',
+        )
+        .map((f) => ({
+          name: f,
+          path: join(migrationsDir, f),
+          mtime: statSync(join(migrationsDir, f)).mtime,
+        }))
+        .sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
+
+      const newestMigration = migrations[0]
+      console.log(`[TEST] Step 4: Checking newest migration: ${newestMigration.name}`)
+      const migrationContent = readFileSync(newestMigration.path, 'utf-8')
+
+      // Should contain secondary table creation
+      expect(migrationContent).toContain('secondary')
+      // Should contain IVFFLAT index for secondary pool
+      expect(migrationContent).toContain('secondary_embedding_ivfflat')
+      console.log('[TEST] Step 4.5: Migration file verification passed')
+
+      // Step 5: Apply the migration
+      console.log('[TEST] Step 5: Applying migration...')
+      try {
+        await (cliPayload.db as any).migrate({ forceAcceptWarning: true })
+        console.log('[TEST] Step 5.5: Migration applied')
+      } catch (e) {
+        console.error('[TEST] Step 5 ERROR - migrate failed:', e)
+        throw e
+      }
+
+      // Step 6: Verify new table exists with IVFFLAT index
+      const postgresPayload = cliPayload as PostgresPayload
+      const schemaName = postgresPayload.db.schemaName || 'public'
+
+      // Check table exists
+      const tableCheck = await postgresPayload.db.pool?.query(
+        `SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = $1 AND table_name = 'secondary'
+        )`,
+        [schemaName],
+      )
+      expect(tableCheck?.rows[0]?.exists).toBe(true)
+      console.log('[TEST] Step 6: Secondary table exists')
+
+      // Check IVFFLAT index exists
+      const indexCheck = await postgresPayload.db.pool?.query(
+        `SELECT indexname FROM pg_indexes WHERE schemaname = $1 AND indexname = $2`,
+        [schemaName, 'secondary_embedding_ivfflat'],
+      )
+      expect(indexCheck?.rows.length).toBeGreaterThan(0)
+      console.log('[TEST] Step 6.5: Secondary IVFFLAT index exists')
+      console.log('[TEST] Test 5 completed successfully')
+    })
+
+    test('6. Remove knowledgePool: Secondary table can be dropped manually', async () => {
+      console.log('[TEST] Starting test 6: Remove knowledgePool')
+
+      // Note: Payload's migration system doesn't automatically generate DROP TABLE 
+      // migrations when collections are removed. Users need to manually drop tables.
+      // This test verifies that after removing a pool, the vectorize plugin handles
+      // it gracefully and the table can be dropped manually.
+
+      // Step 1: Create integration with only 'default' pool (removing 'secondary')
+      const integrationWithoutSecondary = createVectorizeIntegration({
+        default: {
+          dims: 10,
+          ivfflatLists: 20,
+        },
+      })
+
+      cliConfig = await buildConfig({
+        secret: 'test-secret',
+        collections: [
+          {
+            slug: 'posts',
+            fields: [{ name: 'title', type: 'text' }],
+          },
+        ],
+        db: postgresAdapter({
+          extensions: ['vector'],
+          afterSchemaInit: [integrationWithoutSecondary.afterSchemaInitHook],
+          migrationDir: migrationsDir,
+          push: false,
+          pool: {
+            connectionString: `postgresql://postgres:password@localhost:5433/${cliDbName}`,
+          },
+        }),
+        plugins: [
+          integrationWithoutSecondary.payloadcmsVectorize({
+            knowledgePools: {
+              default: {
+                collections: {
+                  posts: {
+                    toKnowledgePool: async (doc) => [{ chunk: doc.title || '' }],
+                  },
+                },
+                embeddingConfig: {
+                  version: testEmbeddingVersion,
+                  queryFn: makeDummyEmbedQuery(10),
+                  realTimeIngestionFn: makeDummyEmbedDocs(10),
+                },
+              },
+            },
+          }),
+        ],
+        jobs: {
+          tasks: [],
+          autoRun: [
+            {
+              cron: '*/5 * * * * *',
+              limit: 10,
+            },
+          ],
+        },
+      })
+
+      // Get new payload instance
+      cliPayload = await getPayload({
+        config: cliConfig,
+        cron: true,
+        key: `migration-cli-test-6-${Date.now()}`,
+      })
+
+      // Step 2: Run vectorize:migrate - should detect no changes for default pool
+      // and not error out because secondary is no longer in config
+      console.log('[TEST] Step 2: Running vectorize:migrate with secondary pool removed...')
+      await vectorizeMigrateScript(cliConfig)
+      console.log('[TEST] Step 2.5: vectorize:migrate completed (no changes expected)')
+
+      // Step 3: Verify secondary table still exists (Payload doesn't auto-drop)
+      const postgresPayload = cliPayload as PostgresPayload
+      const schemaName = postgresPayload.db.schemaName || 'public'
+
+      const tableCheck = await postgresPayload.db.pool?.query(
+        `SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = $1 AND table_name = 'secondary'
+        )`,
+        [schemaName],
+      )
+      // Table should still exist since Payload doesn't auto-drop tables
+      expect(tableCheck?.rows[0]?.exists).toBe(true)
+      console.log('[TEST] Step 3: Secondary table still exists (as expected - manual drop required)')
+
+      // Step 4: Manually drop the secondary table and its index
+      console.log('[TEST] Step 4: Manually dropping secondary table...')
+      await postgresPayload.db.pool?.query(
+        `DROP INDEX IF EXISTS "${schemaName}"."secondary_embedding_ivfflat"`,
+      )
+      await postgresPayload.db.pool?.query(`DROP TABLE IF EXISTS "${schemaName}"."secondary" CASCADE`)
+      console.log('[TEST] Step 4.5: Secondary table dropped')
+
+      // Step 5: Verify secondary table no longer exists
+      const tableCheckAfter = await postgresPayload.db.pool?.query(
+        `SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = $1 AND table_name = 'secondary'
+        )`,
+        [schemaName],
+      )
+      expect(tableCheckAfter?.rows[0]?.exists).toBe(false)
+      console.log('[TEST] Step 5: Secondary table no longer exists')
+      console.log('[TEST] Test 6 completed successfully')
+    })
   })
 })

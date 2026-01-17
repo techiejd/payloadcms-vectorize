@@ -88,14 +88,33 @@ function getPriorStateFromMigrations(
           )
         }
 
-        // Check for dims in vector column definition (search full content as dims should be consistent)
-        const dimsMatch = content.match(new RegExp(`vector\\((\\d+)\\)`, 'i'))
+        // Check for dims in vector column definition
+        // Look for pool-specific patterns to avoid mixing up dims from different pools
+        // Use non-greedy .*? to match table-specific sections
+        const dimsMatch =
+          // ALTER TABLE specific to this table
+          content.match(
+            new RegExp(`ALTER\\s+TABLE[^;]*?"${tableName}"[^;]*?vector\\((\\d+)\\)`, 'is'),
+          ) ||
+          // CREATE TABLE for this table (with non-greedy match to the table content)
+          content.match(
+            new RegExp(`CREATE\\s+TABLE[^;]*?"${tableName}"[^;]*?embedding[^;]*?vector\\((\\d+)\\)`, 'is'),
+          ) ||
+          // Table definition in Drizzle format: "tableName" (...embedding vector(X)...)
+          content.match(
+            new RegExp(`"${tableName}"\\s*\\([^)]*embedding[^)]*vector\\((\\d+)\\)`, 'is'),
+          )
+        
         if (dimsMatch && !state.get(poolName)?.dims) {
           const dims = parseInt(dimsMatch[1], 10)
           const current = state.get(poolName) || { dims: null, ivfflatLists: null }
           state.set(poolName, { ...current, dims })
           console.log(
-            `[payloadcms-vectorize] Found prior dims=${dims} for pool "${poolName}" in ${file.name}`,
+            `[payloadcms-vectorize] Found prior dims=${dims} for pool "${poolName}" (table="${tableName}") in ${file.name}`,
+          )
+        } else if (!state.get(poolName)?.dims) {
+          console.log(
+            `[payloadcms-vectorize] No dims found for pool "${poolName}" (table="${tableName}") in ${file.name}`,
           )
         }
       }
@@ -345,14 +364,14 @@ function patchMigrationFile(
  * Bin script entry point for creating vector migrations
  */
 export const script = async (config: SanitizedConfig): Promise<void> => {
-  // Use a unique key to ensure we get a fresh Payload instance with the correct config
-  // This is important when running in tests or when the config has been modified
+  // Get Payload instance for db operations and to access static configs via VectorizedPayload
   const payload = await getPayload({
     config,
     key: `vectorize-migrate-${Date.now()}`,
   })
-  const vectorizedPayload = getVectorizedPayload(payload)
 
+  // Get static configs from VectorizedPayload
+  const vectorizedPayload = getVectorizedPayload(payload)
   if (!vectorizedPayload) {
     throw new Error(
       '[payloadcms-vectorize] Vectorize plugin not found. Ensure payloadcmsVectorize is configured in your Payload config.',
@@ -513,6 +532,7 @@ export const script = async (config: SanitizedConfig): Promise<void> => {
       await payload.db.createMigration({
         migrationName: 'vectorize-config',
         payload,
+        forceAcceptWarning: true,
       })
       console.log('[payloadcms-vectorize] Migration created successfully')
     } catch (error) {
