@@ -100,7 +100,6 @@ async function performCosineSearch(
     throw new Error('Only works with Postgres')
   }
 
-  payload.db.createMigration
   // In PayloadCMS, payload.db IS the adapter, and drizzle is at payload.db.drizzle
   const adapter = payload.db
   if (!adapter) {

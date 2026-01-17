@@ -14,9 +14,14 @@ import { $createHeadingNode } from '@payloadcms/richtext-lexical/lexical/rich-te
 import { PostgresPayload } from '../../src/types.js'
 import { editorConfigFactory, getEnabledNodes, lexicalEditor } from '@payloadcms/richtext-lexical'
 import { DIMS, getInitialMarkdownContent } from './constants.js'
-import { createTestDb, waitForVectorizationJobs } from './utils.js'
+import {
+  createTestDb,
+  waitForVectorizationJobs,
+  initializePayloadWithMigrations,
+  createTestMigrationsDir,
+} from './utils.js'
 import { postgresAdapter } from '@payloadcms/db-postgres'
-import { buildConfig, getPayload } from 'payload'
+import { buildConfig } from 'payload'
 import { createVectorizeIntegration } from 'payloadcms-vectorize'
 
 const embedFn = makeDummyEmbedDocs(DIMS)
@@ -31,6 +36,8 @@ describe('Plugin integration tests', () => {
 
   beforeAll(async () => {
     await createTestDb({ dbName })
+
+    const { migrationsDir } = createTestMigrationsDir(dbName)
 
     // Create isolated integration for this test suite
     const integration = createVectorizeIntegration({
@@ -55,6 +62,8 @@ describe('Plugin integration tests', () => {
       db: postgresAdapter({
         extensions: ['vector'],
         afterSchemaInit: [integration.afterSchemaInitHook],
+        migrationDir: migrationsDir,
+        push: false, // Prevent dev mode schema push - use migrations only
         pool: {
           connectionString: `postgresql://postgres:password@localhost:5433/${dbName}`,
         },
@@ -99,7 +108,13 @@ describe('Plugin integration tests', () => {
       },
     })
 
-    payload = await getPayload({ config, key: `int-test-${Date.now()}`, cron: true })
+    // Initialize Payload with migrations
+    payload = await initializePayloadWithMigrations({
+      config,
+      key: `int-test-${Date.now()}`,
+      cron: true,
+    })
+
     markdownContent = await getInitialMarkdownContent(config)
   })
 

@@ -675,7 +675,7 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
       console.log('[payloadcms-vectorize] payloadcmsVectorize: Registering bin script...')
       const __filename = fileURLToPath(import.meta.url)
       const __dirname = dirname(__filename)
-      const binScriptPath = resolve(__dirname, 'bin/vectorize-migrate.ts')
+      const binScriptPath = resolve(__dirname, 'bin/vectorize-migrate.js')
       console.log(`[payloadcms-vectorize] payloadcmsVectorize: Bin script path: ${binScriptPath}`)
       config.bin = [
         ...(config.bin || []),

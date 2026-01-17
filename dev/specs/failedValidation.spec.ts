@@ -1,12 +1,17 @@
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { buildConfig } from 'payload'
-import { getPayload } from 'payload'
 import { describe, expect, test } from 'vitest'
 
 import { createVectorizeIntegration } from '../../src/index.js'
-import { createTestDb, waitForVectorizationJobs } from './utils.js'
+import {
+  createTestDb,
+  waitForVectorizationJobs,
+  initializePayloadWithMigrations,
+  createTestMigrationsDir,
+} from './utils.js'
 
 const DIMS = 8
+const dbName = 'failed_validation_test'
 
 const embedDocs = async (texts: string[]) => texts.map(() => Array(DIMS).fill(0))
 const embedQuery = async (_text: string) => Array(DIMS).fill(0)
@@ -18,8 +23,7 @@ const { afterSchemaInitHook, payloadcmsVectorize } = createVectorizeIntegration(
   },
 })
 
-const buildMalformedConfig = async () => {
-  await createTestDb({ dbName: 'failed_validation_test' })
+const buildMalformedConfig = async (migrationsDir: string) => {
   return buildConfig({
     jobs: {
       tasks: [],
@@ -39,10 +43,12 @@ const buildMalformedConfig = async () => {
     db: postgresAdapter({
       extensions: ['vector'],
       afterSchemaInit: [afterSchemaInitHook],
+      migrationDir: migrationsDir,
+      push: false,
       pool: {
         connectionString:
           process.env.DATABASE_URI ||
-          'postgresql://postgres:password@localhost:5433/failed_validation_test',
+          `postgresql://postgres:password@localhost:5433/${dbName}`,
       },
     }),
     plugins: [
@@ -70,8 +76,15 @@ const buildMalformedConfig = async () => {
 
 describe('Validation failures mark jobs as errored', () => {
   test('malformed chunk entry fails the vectorize job', async () => {
-    const config = await buildMalformedConfig()
-    const payload = await getPayload({ config, cron: true })
+    await createTestDb({ dbName })
+    const { migrationsDir } = createTestMigrationsDir(dbName)
+
+    const config = await buildMalformedConfig(migrationsDir)
+    const payload = await initializePayloadWithMigrations({
+      config,
+      key: `failed-validation-test-${Date.now()}`,
+      cron: true,
+    })
 
     await payload.create({
       collection: 'posts',
