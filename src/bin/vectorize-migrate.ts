@@ -36,15 +36,12 @@ function getPriorStateFromMigrations(
     }))
     .sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
 
-  console.log(`[payloadcms-vectorize] Found ${migrationFiles.length} migration file(s) to scan for prior state`)
-
   // Read migration files to find vector config
   for (const file of migrationFiles) {
     try {
       const content = readFileSync(file.path, 'utf-8')
       
       // Extract only the UP function content to avoid matching values in DOWN function
-      // The DOWN function contains previous/rollback values which we don't want
       const upFunctionMatch = content.match(
         /export\s+async\s+function\s+up\s*\([^)]*\)[^{]*\{([\s\S]*?)(?=\}\s*(?:export\s+async\s+function\s+down|$))/i,
       )
@@ -55,52 +52,32 @@ function getPriorStateFromMigrations(
         const tableName = toSnakeCase(poolName)
         const indexName = `${tableName}_embedding_ivfflat`
 
-        // Check if this migration creates the index (only in UP function)
-        // The code format is: await db.execute(sql.raw(`CREATE INDEX "indexName" ... WITH (lists = 10)`))
-        // We need to match the lists parameter in the template literal
-        // Use non-greedy .*? to match the FIRST occurrence
         const indexMatch =
-          // Match: db.execute(sql.raw(`...CREATE INDEX..."indexName"...WITH (lists = 10)...`))
           upContent.match(
             new RegExp(
               `db\\.execute\\(sql\\.raw.*?CREATE INDEX.*?"${indexName}".*?WITH\\s*\\(lists\\s*=\\s*(\\d+)\\)`,
               'is',
             ),
           ) ||
-          // Match: CREATE INDEX "indexName" ... WITH (lists = 10) (in any context)
           upContent.match(
             new RegExp(`CREATE INDEX.*?"${indexName}".*?WITH\\s*\\(lists\\s*=\\s*(\\d+)\\)`, 'is'),
           ) ||
-          // Match: lists = <number> near ivfflat (non-greedy)
           upContent.match(new RegExp(`ivfflat.*?lists\\s*=\\s*(\\d+)`, 'is'))
         
         if (indexMatch && !state.get(poolName)?.ivfflatLists) {
           const lists = parseInt(indexMatch[1], 10)
           const current = state.get(poolName) || { dims: null, ivfflatLists: null }
           state.set(poolName, { ...current, ivfflatLists: lists })
-          console.log(
-            `[payloadcms-vectorize] Found prior ivfflatLists=${lists} for pool "${poolName}" in ${file.name}`,
-          )
-        } else if (!state.get(poolName)?.ivfflatLists) {
-          // Debug: log if we didn't find it
-          console.log(
-            `[payloadcms-vectorize] No ivfflatLists found for pool "${poolName}" in ${file.name}`,
-          )
         }
 
-        // Check for dims in vector column definition
-        // Look for pool-specific patterns to avoid mixing up dims from different pools
-        // Use non-greedy .*? to match table-specific sections
+        // Check for dims in vector column definition (pool-specific patterns)
         const dimsMatch =
-          // ALTER TABLE specific to this table
           content.match(
             new RegExp(`ALTER\\s+TABLE[^;]*?"${tableName}"[^;]*?vector\\((\\d+)\\)`, 'is'),
           ) ||
-          // CREATE TABLE for this table (with non-greedy match to the table content)
           content.match(
             new RegExp(`CREATE\\s+TABLE[^;]*?"${tableName}"[^;]*?embedding[^;]*?vector\\((\\d+)\\)`, 'is'),
           ) ||
-          // Table definition in Drizzle format: "tableName" (...embedding vector(X)...)
           content.match(
             new RegExp(`"${tableName}"\\s*\\([^)]*embedding[^)]*vector\\((\\d+)\\)`, 'is'),
           )
@@ -109,13 +86,6 @@ function getPriorStateFromMigrations(
           const dims = parseInt(dimsMatch[1], 10)
           const current = state.get(poolName) || { dims: null, ivfflatLists: null }
           state.set(poolName, { ...current, dims })
-          console.log(
-            `[payloadcms-vectorize] Found prior dims=${dims} for pool "${poolName}" (table="${tableName}") in ${file.name}`,
-          )
-        } else if (!state.get(poolName)?.dims) {
-          console.log(
-            `[payloadcms-vectorize] No dims found for pool "${poolName}" (table="${tableName}") in ${file.name}`,
-          )
         }
       }
     } catch (err) {
@@ -183,9 +153,7 @@ function patchMigrationFile(
   schemaName: string,
   priorState: Map<string, { dims: number | null; ivfflatLists: number | null }>,
 ): void {
-  console.log(`[vectorize-migrate] Reading migration file: ${migrationPath}`)
   const content = readFileSync(migrationPath, 'utf-8')
-  console.log(`[vectorize-migrate] File read successfully, length: ${content.length} characters`)
 
   // Generate SQL code for each pool
   const vectorUpCode: string[] = []
@@ -273,17 +241,6 @@ function patchMigrationFile(
     /export\s+async\s+function\s+up\s*\([^)]*\)\s*:\s*Promise<void>\s*\{/i,
   )
   if (!upFunctionMatch) {
-    console.error(
-      `[vectorize-migrate] Could not find 'up' function in migration file: ${migrationPath}`,
-    )
-    console.error(`[vectorize-migrate] File content length: ${content.length} characters`)
-    console.error(`[vectorize-migrate] File content (first 1000 chars):`)
-    console.error(content.substring(0, 1000))
-    console.error(`[vectorize-migrate] File content (last 1000 chars):`)
-    console.error(content.substring(Math.max(0, content.length - 1000)))
-    console.error(
-      `[vectorize-migrate] Searching for pattern: /export\\s+async\\s+function\\s+up\\s*\\([^)]*\\)\\s*:\\s*Promise<void>\\s*\\{/i`,
-    )
     throw new Error(`Could not find 'up' function in migration file: ${migrationPath}`)
   }
 
@@ -294,9 +251,6 @@ function patchMigrationFile(
   // Find the last closing brace before down function or end
   const upFunctionBody = content.substring(upFunctionStart, searchEnd)
   const lastBraceIndex = upFunctionBody.lastIndexOf('}')
-  console.log(`[vectorize-migrate] up function body length: ${upFunctionBody.length}`)
-  console.log(`[vectorize-migrate] lastBraceIndex in body: ${lastBraceIndex}`)
-  console.log(`[vectorize-migrate] up function body ends with: ${upFunctionBody.substring(Math.max(0, upFunctionBody.length - 200))}`)
   if (lastBraceIndex === -1) {
     throw new Error(
       `Could not find closing brace for 'up' function in migration file: ${migrationPath}`,
@@ -306,21 +260,9 @@ function patchMigrationFile(
   // Insert our code before the closing brace
   const beforeBrace = content.substring(0, upFunctionStart + lastBraceIndex)
   const afterBrace = content.substring(upFunctionStart + lastBraceIndex)
-  console.log(`[vectorize-migrate] Insertion point: beforeBrace ends with: ${beforeBrace.substring(Math.max(0, beforeBrace.length - 100))}`)
-  console.log(`[vectorize-migrate] Insertion point: afterBrace starts with: ${afterBrace.substring(0, 100)}`)
 
   const codeToInsert = '\n' + vectorUpCode.join('\n') + '\n'
-  console.log(`[vectorize-migrate] Inserting ${vectorUpCode.length} line(s) of code into migration`)
-  console.log(`[vectorize-migrate] Code to insert:\n${codeToInsert}`)
   let newContent = beforeBrace + codeToInsert + afterBrace
-  console.log(`[vectorize-migrate] Migration file will be ${newContent.length} characters after patching (was ${content.length})`)
-  
-  // Verify insertion point looks correct
-  const insertionPointPreview = newContent.substring(
-    Math.max(0, beforeBrace.length - 50),
-    Math.min(newContent.length, beforeBrace.length + codeToInsert.length + 50),
-  )
-  console.log(`[vectorize-migrate] Insertion point preview:\n${insertionPointPreview}`)
 
   // Handle down function
   if (downFunctionMatch) {
@@ -349,15 +291,6 @@ function patchMigrationFile(
   }
 
   writeFileSync(migrationPath, newContent, 'utf-8')
-  console.log(`[vectorize-migrate] Migration file written successfully`)
-  // Verify the code was inserted
-  const verifyContent = readFileSync(migrationPath, 'utf-8')
-  const hasIvfflatCode = verifyContent.includes('ivfflat') && verifyContent.includes('lists =')
-  console.log(`[vectorize-migrate] Verification: migration contains IVFFLAT code: ${hasIvfflatCode}`)
-  if (!hasIvfflatCode && vectorUpCode.length > 0) {
-    console.error(`[vectorize-migrate] WARNING: IVFFLAT code was supposed to be inserted but not found in file!`)
-    console.error(`[vectorize-migrate] Expected to find: ${vectorUpCode.join(' | ')}`)
-  }
 }
 
 /**
@@ -386,31 +319,12 @@ export const script = async (config: SanitizedConfig): Promise<void> => {
   const poolNames = Object.keys(staticConfigs)
   const schemaName = (payload.db as any).schemaName || 'public'
   
-  // Get migrations directory - the postgres adapter stores it on payload.db.migrationDir
-  // but this may be set to default before config is applied. Try multiple sources.
+  // Get migrations directory
   const dbMigrationDir = (payload.db as any).migrationDir
-  
-  // Debug: log migration directory detection
-  console.log('[payloadcms-vectorize] Debug: payload.db.migrationDir =', dbMigrationDir)
-  
-  // Use the payload.db.migrationDir - this is where Payload stores the resolved path
   const migrationsDir = dbMigrationDir || resolve(process.cwd(), 'src/migrations')
-  console.log('[payloadcms-vectorize] Using migrations directory:', migrationsDir)
-
-  console.log('[payloadcms-vectorize] Checking for configuration changes...')
 
   // Get prior state from migrations
   const priorState = getPriorStateFromMigrations(migrationsDir, poolNames)
-  
-  // Debug: log prior state
-  console.log('[payloadcms-vectorize] Prior state from migrations:')
-  for (const [poolName, state] of priorState.entries()) {
-    console.log(`[payloadcms-vectorize]   ${poolName}: dims=${state.dims}, ivfflatLists=${state.ivfflatLists}`)
-  }
-  console.log('[payloadcms-vectorize] Current static configs:')
-  for (const [poolName, config] of Object.entries(staticConfigs)) {
-    console.log(`[payloadcms-vectorize]   ${poolName}: dims=${config.dims}, ivfflatLists=${config.ivfflatLists}`)
-  }
 
   // Check if any changes are needed
   let hasChanges = false
@@ -419,13 +333,9 @@ export const script = async (config: SanitizedConfig): Promise<void> => {
     const prior = priorState.get(poolName) || { dims: null, ivfflatLists: null }
     
     // Check if this is the first migration (no IVFFLAT index exists yet)
-    // Note: dims might be found from Drizzle schema, but ivfflatLists won't be found until we create the index
     if (prior.ivfflatLists === null) {
       isFirstMigration = true
       hasChanges = true
-      console.log(
-        `[payloadcms-vectorize] First migration detected for pool "${poolName}" (ivfflatLists not found in prior migrations)`,
-      )
       break
     }
     
@@ -435,40 +345,27 @@ export const script = async (config: SanitizedConfig): Promise<void> => {
       (prior.ivfflatLists !== null && prior.ivfflatLists !== currentConfig.ivfflatLists)
     ) {
       hasChanges = true
-      console.log(
-        `[payloadcms-vectorize] Change detected for pool "${poolName}": dims ${prior.dims}→${currentConfig.dims}, ivfflatLists ${prior.ivfflatLists}→${currentConfig.ivfflatLists}`,
-      )
       break
     }
   }
 
-  // If no changes detected, check if artifacts exist (idempotency)
+  // If no changes detected
   if (!hasChanges) {
     console.log('[payloadcms-vectorize] No configuration changes detected.')
-    console.log(
-      '[payloadcms-vectorize] If this is the first migration, ensure your initial migration creates the embedding columns via Drizzle schema.',
-    )
     return
   }
-
-  console.log('[payloadcms-vectorize] Changes detected.')
   
   // Determine if there are actual schema changes (dims change) or just index parameter changes (ivfflatLists)
-  // payload.db.createMigration only works when there are schema changes
-  // For index-only changes, we need to create the migration file manually
   let hasSchemaChanges = false
   for (const [poolName, currentConfig] of Object.entries(staticConfigs)) {
     const prior = priorState.get(poolName) || { dims: null, ivfflatLists: null }
     if (prior.dims !== null && prior.dims !== currentConfig.dims) {
       hasSchemaChanges = true
-      console.log(`[payloadcms-vectorize] Schema change detected for pool "${poolName}": dims ${prior.dims}→${currentConfig.dims}`)
       break
     }
   }
   
   if (isFirstMigration) {
-    console.log('[payloadcms-vectorize] This is the first migration - checking if we should patch existing migration or create new one')
-    
     // Check if there's a very recent migration file (created in last 10 seconds) that we should patch
     const recentMigrations = existsSync(migrationsDir)
       ? readdirSync(migrationsDir)
@@ -486,24 +383,16 @@ export const script = async (config: SanitizedConfig): Promise<void> => {
     
     if (recentMigrations.length > 0) {
       const recentMigration = recentMigrations[0]
-      console.log(`[payloadcms-vectorize] Found recent migration to patch: ${recentMigration.name}`)
       // Check if it already has IVFFLAT index code
       const recentContent = readFileSync(recentMigration.path, 'utf-8')
       const hasIvfflatCode = recentContent.includes('ivfflat') && (recentContent.includes('drizzle.execute') || recentContent.includes('CREATE INDEX'))
       
       if (!hasIvfflatCode) {
-        console.log(`[payloadcms-vectorize] Patching existing migration: ${recentMigration.path}`)
         patchMigrationFile(recentMigration.path, staticConfigs, schemaName, priorState)
         console.log('[payloadcms-vectorize] Migration patched successfully!')
         return
-      } else {
-        console.log(`[payloadcms-vectorize] Recent migration already has IVFFLAT code, creating new migration instead`)
       }
     }
-    
-    console.log('[payloadcms-vectorize] Creating new migration with IVFFLAT index setup')
-  } else {
-    console.log('[payloadcms-vectorize] Creating new migration for configuration change')
   }
 
   // Create migration using Payload's API OR create manually for index-only changes
@@ -525,20 +414,12 @@ export const script = async (config: SanitizedConfig): Promise<void> => {
 
   // If there are schema changes (dims changed), use Payload's createMigration
   // Otherwise (only ivfflatLists changed), create the migration file manually
-  // because Payload's createMigration hangs when there are no schema changes to detect
   if (hasSchemaChanges) {
-    console.log('[payloadcms-vectorize] Schema changes detected - using payload.db.createMigration...')
-    try {
-      await payload.db.createMigration({
-        migrationName: 'vectorize-config',
-        payload,
-        forceAcceptWarning: true,
-      })
-      console.log('[payloadcms-vectorize] Migration created successfully')
-    } catch (error) {
-      console.error('[payloadcms-vectorize] Error creating migration:', error)
-      throw error
-    }
+    await payload.db.createMigration({
+      migrationName: 'vectorize-config',
+      payload,
+      forceAcceptWarning: true,
+    })
 
     // Find the newest migration file (should be the one just created)
     const migrationsAfter = existsSync(migrationsDir)
@@ -567,10 +448,6 @@ export const script = async (config: SanitizedConfig): Promise<void> => {
     migrationPath = foundPath
   } else {
     // No schema changes (only ivfflatLists changed) - create migration file manually
-    // Payload's createMigration API doesn't support this case (it hangs when no schema changes detected)
-    console.log('[payloadcms-vectorize] No schema changes (only index parameter changes) - creating migration file manually...')
-    
-    // Generate timestamp for migration filename (format: YYYYMMDD_HHMMSS)
     const now = new Date()
     const timestamp = [
       now.getFullYear(),
@@ -585,7 +462,6 @@ export const script = async (config: SanitizedConfig): Promise<void> => {
     const migrationFileName = `${timestamp}_vectorize_ivfflat_rebuild.ts`
     migrationPath = join(migrationsDir, migrationFileName)
     
-    // Create a minimal migration file that we'll patch with our IVFFLAT code
     const migrationTemplate = `import { MigrateUpArgs, MigrateDownArgs, sql } from '@payloadcms/db-postgres'
 
 export async function up({ db, payload, req }: MigrateUpArgs): Promise<void> {
@@ -598,18 +474,12 @@ export async function down({ db, payload, req }: MigrateDownArgs): Promise<void>
 `
     
     writeFileSync(migrationPath, migrationTemplate, 'utf-8')
-    console.log(`[payloadcms-vectorize] Created migration file: ${migrationPath}`)
   }
-
-  console.log(`[payloadcms-vectorize] Patching migration: ${migrationPath}`)
 
   // Patch the migration file
   patchMigrationFile(migrationPath, staticConfigs, schemaName, priorState)
 
   console.log('[payloadcms-vectorize] Migration created and patched successfully!')
-  console.log(
-    '[payloadcms-vectorize] Review the migration file and apply it with: pnpm payload migrate',
-  )
 
   // Only exit if not in test environment (when called from tests, just return)
   if (process.env.NODE_ENV !== 'test' && !process.env.VITEST) {

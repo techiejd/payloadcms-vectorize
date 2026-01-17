@@ -135,64 +135,28 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
   const payloadcmsVectorize =
     (pluginOptions: PayloadcmsVectorizeConfig<TPoolNames>) =>
     (config: Config): Config => {
-      console.log('[payloadcms-vectorize] payloadcmsVectorize: Plugin initialization started')
-      console.log(
-        `[payloadcms-vectorize] payloadcmsVectorize: Processing ${Object.keys(pluginOptions.knowledgePools).length} knowledge pool(s)`,
-      )
-
       // Ensure collections array exists
       config.collections = [...(config.collections || [])]
-      console.log(
-        `[payloadcms-vectorize] payloadcmsVectorize: Initial collections count: ${config.collections.length}`,
-      )
 
       // Ensure bulk runs collection exists once
-      console.log('[payloadcms-vectorize] payloadcmsVectorize: Adding bulk runs collection...')
       const bulkRunsCollection = createBulkEmbeddingsRunsCollection()
       if (!config.collections.find((c) => c.slug === BULK_EMBEDDINGS_RUNS_SLUG)) {
         config.collections.push(bulkRunsCollection)
-        console.log('[payloadcms-vectorize] payloadcmsVectorize: Bulk runs collection added')
-      } else {
-        console.log(
-          '[payloadcms-vectorize] payloadcmsVectorize: Bulk runs collection already exists',
-        )
       }
       // Ensure bulk input metadata collection exists once
-      console.log(
-        '[payloadcms-vectorize] payloadcmsVectorize: Adding bulk input metadata collection...',
-      )
       const bulkInputMetadataCollection = createBulkEmbeddingInputMetadataCollection()
       if (!config.collections.find((c) => c.slug === BULK_EMBEDDINGS_INPUT_METADATA_SLUG)) {
         config.collections.push(bulkInputMetadataCollection)
-        console.log(
-          '[payloadcms-vectorize] payloadcmsVectorize: Bulk input metadata collection added',
-        )
-      } else {
-        console.log(
-          '[payloadcms-vectorize] payloadcmsVectorize: Bulk input metadata collection already exists',
-        )
       }
       // Ensure bulk batches collection exists once
-      console.log('[payloadcms-vectorize] payloadcmsVectorize: Adding bulk batches collection...')
       const bulkBatchesCollection = createBulkEmbeddingsBatchesCollection()
       if (!config.collections.find((c) => c.slug === BULK_EMBEDDINGS_BATCHES_SLUG)) {
         config.collections.push(bulkBatchesCollection)
-        console.log('[payloadcms-vectorize] payloadcmsVectorize: Bulk batches collection added')
-      } else {
-        console.log(
-          '[payloadcms-vectorize] payloadcmsVectorize: Bulk batches collection already exists',
-        )
       }
 
       // Validate static/dynamic configs share the same pool names
-      console.log(
-        '[payloadcms-vectorize] payloadcmsVectorize: Validating static/dynamic config alignment...',
-      )
       for (const poolName in pluginOptions.knowledgePools) {
         if (!staticConfigs[poolName]) {
-          console.error(
-            `[payloadcms-vectorize] payloadcmsVectorize: Knowledge pool "${poolName}" not found in static configs`,
-          )
           throw new Error(
             `[payloadcms-vectorize] Knowledge pool "${poolName}" not found in static configs`,
           )
@@ -206,16 +170,10 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
         }
       }
       if (unusedStaticPools.length > 0) {
-        console.error(
-          `[payloadcms-vectorize] payloadcmsVectorize: Static pools without dynamic config: ${unusedStaticPools.join(', ')}`,
-        )
         throw new Error(
           `[payloadcms-vectorize] Static knowledge pool(s) ${unusedStaticPools.join(', ')} lack dynamic configuration`,
         )
       }
-      console.log(
-        '[payloadcms-vectorize] payloadcmsVectorize: Static/dynamic config validation passed',
-      )
 
       // Build reverse mapping: collectionSlug -> KnowledgePoolName[]
       const collectionToPools = new Map<
@@ -227,124 +185,73 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
       >()
 
       // Process each knowledge pool
-      console.log('[payloadcms-vectorize] payloadcmsVectorize: Processing knowledge pools...')
       for (const poolName in pluginOptions.knowledgePools) {
-        console.log(`[payloadcms-vectorize] payloadcmsVectorize: Processing pool "${poolName}"...`)
         const dynamicConfig = pluginOptions.knowledgePools[poolName]
 
         // Add the embeddings collection for this knowledge pool with extensionFields
-        console.log(
-          `[payloadcms-vectorize] payloadcmsVectorize: Creating embeddings collection for pool "${poolName}"...`,
-        )
         const embeddingsCollection = createEmbeddingsCollection(
           poolName,
           dynamicConfig.extensionFields,
         )
         if (!config.collections.find((c) => c.slug === poolName)) {
           config.collections.push(embeddingsCollection)
-          console.log(
-            `[payloadcms-vectorize] payloadcmsVectorize: Embeddings collection "${poolName}" added`,
-          )
-        } else {
-          console.log(
-            `[payloadcms-vectorize] payloadcmsVectorize: Embeddings collection "${poolName}" already exists`,
-          )
         }
 
         // Build reverse mapping for hooks
         const collectionSlugs = Object.keys(dynamicConfig.collections)
-        console.log(
-          `[payloadcms-vectorize] payloadcmsVectorize: Pool "${poolName}" maps to ${collectionSlugs.length} collection(s): ${collectionSlugs.join(', ')}`,
-        )
         for (const collectionSlug of collectionSlugs) {
           if (!collectionToPools.has(collectionSlug)) {
             collectionToPools.set(collectionSlug, [])
           }
           collectionToPools.get(collectionSlug)!.push({ pool: poolName, dynamic: dynamicConfig })
         }
-        console.log(
-          `[payloadcms-vectorize] payloadcmsVectorize: Pool "${poolName}" processing complete`,
-        )
       }
-      console.log(
-        `[payloadcms-vectorize] payloadcmsVectorize: Knowledge pools processed. Total collections: ${config.collections.length}`,
-      )
 
       // Validate bulk queue requirements
-      console.log(
-        '[payloadcms-vectorize] payloadcmsVectorize: Validating bulk queue requirements...',
-      )
       let bulkIngestEnabled = false
       for (const poolName in pluginOptions.knowledgePools) {
         const dynamicConfig = pluginOptions.knowledgePools[poolName]
         if (dynamicConfig.embeddingConfig.bulkEmbeddingsFns) {
           bulkIngestEnabled = true
-          console.log(
-            `[payloadcms-vectorize] payloadcmsVectorize: Pool "${poolName}" has bulk embedding enabled`,
-          )
           break
         }
       }
       if (bulkIngestEnabled && !pluginOptions.bulkQueueNames) {
-        console.error(
-          '[payloadcms-vectorize] payloadcmsVectorize: bulkQueueNames required but not provided',
-        )
         throw new Error(
           '[payloadcms-vectorize] bulkQueueNames is required when any knowledge pool has bulk embedding configured (embeddingConfig.bulkEmbeddingsFns).',
         )
       }
-      console.log(
-        `[payloadcms-vectorize] payloadcmsVectorize: Bulk queue validation passed (enabled: ${bulkIngestEnabled})`,
-      )
 
       // Exit early if disabled, but keep embeddings collections present for migrations
       if (pluginOptions.disabled) {
-        console.log('[payloadcms-vectorize] payloadcmsVectorize: Plugin disabled, exiting early')
         return config
       }
 
-      // Register a single task using Payload Jobs that can handle any knowledge pool
-      console.log('[payloadcms-vectorize] payloadcmsVectorize: Registering Payload Jobs tasks...')
+      // Register tasks using Payload Jobs
       const incomingJobs = config.jobs || { tasks: [] }
       const tasks = [...(config.jobs?.tasks || [])]
-      console.log(
-        `[payloadcms-vectorize] payloadcmsVectorize: Existing tasks count: ${tasks.length}`,
-      )
 
-      console.log('[payloadcms-vectorize] payloadcmsVectorize: Creating vectorize task...')
       const vectorizeTask = createVectorizeTask({
         knowledgePools: pluginOptions.knowledgePools,
       })
       tasks.push(vectorizeTask)
-      console.log('[payloadcms-vectorize] payloadcmsVectorize: Vectorize task added')
 
-      console.log('[payloadcms-vectorize] payloadcmsVectorize: Creating prepare bulk embed task...')
       const prepareBulkEmbedTask = createPrepareBulkEmbeddingTask({
         knowledgePools: pluginOptions.knowledgePools,
         pollOrCompleteQueueName: pluginOptions.bulkQueueNames?.pollOrCompleteQueueName,
       })
       tasks.push(prepareBulkEmbedTask)
-      console.log('[payloadcms-vectorize] payloadcmsVectorize: Prepare bulk embed task added')
 
-      console.log(
-        '[payloadcms-vectorize] payloadcmsVectorize: Creating poll or complete bulk embed task...',
-      )
       const pollOrCompleteBulkEmbedTask = createPollOrCompleteBulkEmbeddingTask({
         knowledgePools: pluginOptions.knowledgePools,
         pollOrCompleteQueueName: pluginOptions.bulkQueueNames?.pollOrCompleteQueueName,
       })
       tasks.push(pollOrCompleteBulkEmbedTask)
-      console.log(
-        '[payloadcms-vectorize] payloadcmsVectorize: Poll or complete bulk embed task added',
-      )
 
       config.jobs = {
         ...incomingJobs,
         tasks,
       }
-      console.log(
-        `[payloadcms-vectorize] payloadcmsVectorize: Jobs configured. Total tasks: ${tasks.length}`,
-      )
 
       const collectionToEmbedQueue = new Map<
         string,
@@ -352,23 +259,11 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
       >()
 
       // Extend configured collections with hooks
-      console.log(
-        `[payloadcms-vectorize] payloadcmsVectorize: Setting up hooks for ${collectionToPools.size} collection(s)...`,
-      )
       for (const [collectionSlug, pools] of collectionToPools.entries()) {
-        console.log(
-          `[payloadcms-vectorize] payloadcmsVectorize: Setting up hooks for collection "${collectionSlug}" (${pools.length} pool(s))...`,
-        )
         const collection = config.collections.find((c) => c.slug === collectionSlug)
         if (!collection) {
-          console.error(
-            `[payloadcms-vectorize] payloadcmsVectorize: Collection "${collectionSlug}" not found`,
-          )
           throw new Error(`[payloadcms-vectorize] Collection ${collectionSlug} not found`)
         }
-        console.log(
-          `[payloadcms-vectorize] payloadcmsVectorize: Collection "${collectionSlug}" found, adding hooks...`,
-        )
 
         const embedQueue = async (doc: any, payload: Payload, req?: PayloadRequest) => {
           // Queue vectorization jobs for ALL knowledge pools containing this collection
@@ -397,9 +292,6 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
         }
 
         collectionToEmbedQueue.set(collectionSlug, embedQueue)
-        console.log(
-          `[payloadcms-vectorize] payloadcmsVectorize: Embed queue function registered for "${collectionSlug}"`,
-        )
 
         collection.hooks = {
           ...(collection.hooks || {}),
@@ -457,20 +349,11 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
             },
           ],
         }
-        console.log(
-          `[payloadcms-vectorize] payloadcmsVectorize: Hooks configured for collection "${collectionSlug}"`,
-        )
       }
-      console.log('[payloadcms-vectorize] payloadcmsVectorize: All collection hooks configured')
 
-      console.log('[payloadcms-vectorize] payloadcmsVectorize: Creating vector search handlers...')
       const vectorSearchHandlers = createVectorSearchHandlers(pluginOptions.knowledgePools)
-      console.log('[payloadcms-vectorize] payloadcmsVectorize: Vector search handlers created')
 
       // Create vectorized payload object factory that creates methods bound to a payload instance
-      console.log(
-        '[payloadcms-vectorize] payloadcmsVectorize: Creating vectorized payload object factory...',
-      )
       const createVectorizedPayloadObject = (payload: Payload): VectorizedPayload<TPoolNames> => {
         return {
           _isBulkEmbedEnabled: (knowledgePool: TPoolNames): boolean => {
@@ -537,21 +420,15 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
       }
 
       // Store factory in config.custom
-      console.log(
-        '[payloadcms-vectorize] payloadcmsVectorize: Storing vectorized payload factory in config.custom...',
-      )
       config.custom = {
         ...(config.custom || {}),
         createVectorizedPayloadObject,
       }
-      console.log('[payloadcms-vectorize] payloadcmsVectorize: Factory stored in config.custom')
 
       // Register bin script for migration helper
-      console.log('[payloadcms-vectorize] payloadcmsVectorize: Registering bin script...')
       const __filename = fileURLToPath(import.meta.url)
       const __dirname = dirname(__filename)
       const binScriptPath = resolve(__dirname, 'bin/vectorize-migrate.js')
-      console.log(`[payloadcms-vectorize] payloadcmsVectorize: Bin script path: ${binScriptPath}`)
       config.bin = [
         ...(config.bin || []),
         {
@@ -559,12 +436,8 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
           scriptPath: binScriptPath,
         },
       ]
-      console.log('[payloadcms-vectorize] payloadcmsVectorize: Bin script registered')
 
       if (pluginOptions.endpointOverrides?.enabled !== false) {
-        console.log(
-          '[payloadcms-vectorize] payloadcmsVectorize: Setting up vector search endpoint...',
-        )
         const path = pluginOptions.endpointOverrides?.path || '/vector-search'
         const inputEndpoints = config.endpoints || []
         const endpoints = [
@@ -592,17 +465,8 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
           },
         ]
         config.endpoints = endpoints
-        console.log(
-          `[payloadcms-vectorize] payloadcmsVectorize: Vector search endpoint registered at "${path}"`,
-        )
-      } else {
-        console.log('[payloadcms-vectorize] payloadcmsVectorize: Vector search endpoint disabled')
       }
 
-      console.log('[payloadcms-vectorize] payloadcmsVectorize: Plugin initialization complete')
-      console.log(
-        `[payloadcms-vectorize] payloadcmsVectorize: Final collections count: ${config.collections.length}`,
-      )
       return config
     }
   return {
