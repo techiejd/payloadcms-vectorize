@@ -300,7 +300,8 @@ export const script = async (config: SanitizedConfig): Promise<void> => {
   // Get Payload instance for db operations and to access static configs via VectorizedPayload
   const payload = await getPayload({
     config,
-    key: `vectorize-migrate-${Date.now()}`,
+    // In test environment, use unique key and enable cron for job processing
+    ...(process.env.TEST_ENV ? { key: `vectorize-migrate-${Date.now()}`, cron: true } : {}),
   })
 
   // Get static configs from VectorizedPayload
