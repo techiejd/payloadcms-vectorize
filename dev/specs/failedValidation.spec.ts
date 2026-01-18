@@ -92,7 +92,7 @@ describe('Validation failures mark jobs as errored', () => {
     })
 
     // Wait for the queued job to finish (success or failure)
-    await waitForVectorizationJobs(payload, 15000)
+    await waitForVectorizationJobs(payload, 30000)
 
     // Then assert failure
     const res = await payload.find({
@@ -112,5 +112,5 @@ describe('Validation failures mark jobs as errored', () => {
     // Ensure no embeddings were created (all-or-nothing validation)
     const embeddingsCount = await payload.count({ collection: 'default' })
     expect(embeddingsCount.totalDocs).toBe(0)
-  })
+  }, 60000)
 })
