@@ -59,19 +59,22 @@ export async function initializePayloadWithMigrations({
   config,
   key,
   cron = true,
+  skipMigrations = false,
 }: {
   config: SanitizedConfig
   key?: string
   cron?: boolean
+  skipMigrations?: boolean
 }): Promise<Payload> {
+  if (skipMigrations) {
+    return await getPayload({ config, key, cron })
+  }
+
   const migrationKey = `${key ?? 'payload'}-migrations-${Date.now()}`
   const payloadForMigrations = await getPayload({ config, key: migrationKey, cron: false })
 
   // Create initial migration (Payload's schema)
-  await payloadForMigrations.db.createMigration({
-    migrationName: 'initial',
-    payload: payloadForMigrations,
-  })
+  await payloadForMigrations.db.createMigration({ migrationName: 'initial', payload: payloadForMigrations })
 
   // Run vectorize:migrate to patch with IVFFLAT index
   await vectorizeMigrateScript(config)
@@ -83,8 +86,7 @@ export async function initializePayloadWithMigrations({
     return payloadForMigrations
   }
 
-  const runtimeKey = key ?? `payload-${Date.now()}`
-  return await getPayload({ config, key: runtimeKey, cron: true })
+  return await getPayload({ config, key, cron: true })
 }
 
 /**
@@ -262,12 +264,14 @@ export type BuildPayloadArgs = {
   dbName: string
   pluginOpts: any
   key?: string
+  skipMigrations?: boolean
 }
 
 export async function buildPayloadWithIntegration({
   dbName,
   pluginOpts,
   key,
+  skipMigrations,
 }: BuildPayloadArgs): Promise<{ payload: Payload; config: SanitizedConfig }> {
   // Create a unique migration directory for this test
   const migrationsDir = join(process.cwd(), 'dev', `test-migrations-${dbName}`)
@@ -325,7 +329,12 @@ export async function buildPayloadWithIntegration({
   })
 
   const payloadKey = key ?? `payload-${dbName}-${Date.now()}`
-  const payload = await initializePayloadWithMigrations({ config, key: payloadKey, cron: true })
+  const payload = await initializePayloadWithMigrations({
+    config,
+    key: payloadKey,
+    cron: true,
+    skipMigrations,
+  })
 
   return { payload, config }
 }
