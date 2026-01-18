@@ -72,13 +72,13 @@ function getPriorStateFromMigrations(
 
         // Check for dims in vector column definition (pool-specific patterns)
         const dimsMatch =
-          content.match(
+          upContent.match(
             new RegExp(`ALTER\\s+TABLE[^;]*?"${tableName}"[^;]*?vector\\((\\d+)\\)`, 'is'),
           ) ||
-          content.match(
+          upContent.match(
             new RegExp(`CREATE\\s+TABLE[^;]*?"${tableName}"[^;]*?embedding[^;]*?vector\\((\\d+)\\)`, 'is'),
           ) ||
-          content.match(
+          upContent.match(
             new RegExp(`"${tableName}"\\s*\\([^)]*embedding[^)]*vector\\((\\d+)\\)`, 'is'),
           )
         
