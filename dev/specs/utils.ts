@@ -316,16 +316,7 @@ export async function buildPayloadWithIntegration({
   })
 
   const payloadKey = key ?? `payload-${dbName}-${Date.now()}`
-  const payload = await getPayload({ config, key: payloadKey, cron: true })
-
-  // Create initial migration (Payload's schema)
-  await payload.db.createMigration({ migrationName: 'initial', payload })
-
-  // Run vectorize:migrate to patch with IVFFLAT index
-  await vectorizeMigrateScript(config)
-
-  // Apply migrations (forceAcceptWarning bypasses the dev mode prompt)
-  await (payload.db as any).migrate({ forceAcceptWarning: true })
+  const payload = await initializePayloadWithMigrations({ config, key: payloadKey, cron: true })
 
   return { payload, config }
 }
