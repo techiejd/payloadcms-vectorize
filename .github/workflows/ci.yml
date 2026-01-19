@@ -7,7 +7,53 @@ on:
     branches: [main]
 
 jobs:
-  test:
+  test_int:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg15
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: payload_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5433:5432
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Install pgvector extension
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          PGPASSWORD=password psql -h localhost -p 5433 -U postgres -d payload_test -c "CREATE EXTENSION IF NOT EXISTS vector;"
+
+      - name: Run Vitest integration tests
+        run: pnpm test:int
+        env:
+          PAYLOAD_SECRET: test-secret-key
+          DIMS: 8
+          IVFFLATLISTS: 1
+          TEST_ENV: 1
+
+  test_e2e:
     runs-on: ubuntu-latest
 
     services:
@@ -48,9 +94,10 @@ jobs:
           sudo apt-get install -y postgresql-client
           PGPASSWORD=password psql -h localhost -p 5433 -U postgres -d payload_test -c "CREATE EXTENSION IF NOT EXISTS vector;"
 
-      - name: Run tests
-        run: pnpm test
+      - name: Run Playwright e2e tests
+        run: pnpm test:e2e
         env:
           PAYLOAD_SECRET: test-secret-key
           DIMS: 8
           IVFFLATLISTS: 1
+          TEST_ENV: 1

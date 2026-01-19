@@ -100,7 +100,7 @@ test.describe('Vector embedding e2e tests', () => {
     page,
     request,
   }) => {
-    test.setTimeout(120000)
+    test.setTimeout(180000)
 
     // Login to admin first
     await loginToAdmin(page)

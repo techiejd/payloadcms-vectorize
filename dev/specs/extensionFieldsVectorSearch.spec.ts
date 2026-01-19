@@ -1,8 +1,12 @@
-import { getPayload } from 'payload'
 import { describe, expect, test } from 'vitest'
 import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
 import { buildDummyConfig, DIMS, integration, plugin } from './constants.js'
-import { createTestDb, waitForVectorizationJobs } from './utils.js'
+import {
+  createTestDb,
+  waitForVectorizationJobs,
+  initializePayloadWithMigrations,
+  createTestMigrationsDir,
+} from './utils.js'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { chunkRichText, chunkText } from 'helpers/chunkers.js'
 import { createVectorSearchHandlers } from '../../src/endpoints/vectorSearch.js'
@@ -11,7 +15,9 @@ import type { KnowledgePoolDynamicConfig } from 'payloadcms-vectorize'
 describe('extensionFields', () => {
   test('returns extensionFields in search results with correct types', async () => {
     // Create a new payload instance with extensionFields
-    await createTestDb({ dbName: 'endpoint_test_extension' })
+    const dbName = 'endpoint_test_extension'
+    await createTestDb({ dbName })
+    const { migrationsDir } = createTestMigrationsDir(dbName)
     const defaultKnowledgePool: KnowledgePoolDynamicConfig = {
       collections: {
         posts: {
@@ -89,8 +95,10 @@ describe('extensionFields', () => {
       db: postgresAdapter({
         extensions: ['vector'],
         afterSchemaInit: [integration.afterSchemaInitHook],
+        migrationDir: migrationsDir,
+        push: false,
         pool: {
-          connectionString: 'postgresql://postgres:password@localhost:5433/endpoint_test_extension',
+          connectionString: `postgresql://postgres:password@localhost:5433/${dbName}`,
         },
       }),
       plugins: [
@@ -101,7 +109,12 @@ describe('extensionFields', () => {
         }),
       ],
     })
-    const payloadWithExtensions = await getPayload({ config: configWithExtensions, cron: true })
+
+    const payloadWithExtensions = await initializePayloadWithMigrations({
+      config: configWithExtensions,
+      key: `extension-fields-vector-search-test-${Date.now()}`,
+      cron: true,
+    })
 
     // Create a post with extension field values
     const testQuery = 'Extension fields test content'

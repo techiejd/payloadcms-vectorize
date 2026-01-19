@@ -2,6 +2,8 @@
 import type { Payload, SanitizedConfig } from 'payload'
 import { buildConfig, getPayload } from 'payload'
 import { Client } from 'pg'
+import { mkdirSync, rmSync } from 'fs'
+import { join } from 'path'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { lexicalEditor } from '@payloadcms/richtext-lexical'
 import { createVectorizeIntegration } from 'payloadcms-vectorize'
@@ -9,6 +11,7 @@ import { BULK_EMBEDDINGS_RUNS_SLUG } from '../../src/collections/bulkEmbeddingsR
 import { BULK_EMBEDDINGS_INPUT_METADATA_SLUG } from '../../src/collections/bulkEmbeddingInputMetadata.js'
 import { BULK_EMBEDDINGS_BATCHES_SLUG } from '../../src/collections/bulkEmbeddingsBatches.js'
 import { makeDummyEmbedDocs } from '../helpers/embed.js'
+import { script as vectorizeMigrateScript } from '../../src/bin/vectorize-migrate.js'
 import type {
   BulkEmbeddingsFns,
   BulkEmbeddingInput,
@@ -20,11 +23,89 @@ export const createTestDb = async ({ dbName }: { dbName: string }) => {
     process.env.DATABASE_ADMIN_URI || 'postgresql://postgres:password@localhost:5433/postgres' // connect to 'postgres'
   const client = new Client({ connectionString: adminUri })
   await client.connect()
+  
+  /*
+  // Drop and recreate the database to ensure a clean state
+  // First, terminate any existing connections to the database
+  await client.query(`
+    SELECT pg_terminate_backend(pg_stat_activity.pid)
+    FROM pg_stat_activity
+    WHERE pg_stat_activity.datname = $1
+      AND pid <> pg_backend_pid()
+  `, [dbName])*/
+  
   const exists = await client.query('SELECT 1 FROM pg_database WHERE datname = $1', [dbName])
   if (exists.rowCount === 0) {
     await client.query(`CREATE DATABASE ${dbName}`)
+    //await client.query(`DROP DATABASE "${dbName}"`)
   }
+  //await client.query(`DROP DATABASE "${dbName}"`)
   await client.end()
+}
+
+/**
+ * Initialize Payload with migrations applied.
+ * This handles the full migration setup:
+ * 1. Get payload instance
+ * 2. Create initial migration
+ * 3. Run vectorize:migrate to patch with IVFFLAT index
+ * 4. Apply migrations
+ *
+ * @param config - A pre-built SanitizedConfig (must have migrationDir and push: false in db config)
+ * @param key - Unique key for getPayload caching (prevents instance collisions in tests)
+ * @param cron - Whether to enable cron jobs (default: true)
+ */
+export async function initializePayloadWithMigrations({
+  config,
+  key,
+  cron = true,
+  skipMigrations = false,
+}: {
+  config: SanitizedConfig
+  key?: string
+  cron?: boolean
+  skipMigrations?: boolean
+}): Promise<Payload> {
+  if (skipMigrations) {
+    return await getPayload({ config, key, cron })
+  }
+
+  const migrationKey = `${key ?? 'payload'}-migrations-${Date.now()}`
+  const payloadForMigrations = await getPayload({ config, key: migrationKey, cron: false })
+
+  // Create initial migration (Payload's schema)
+  await payloadForMigrations.db.createMigration({ migrationName: 'initial', payload: payloadForMigrations })
+
+  // Run vectorize:migrate to patch with IVFFLAT index
+  await vectorizeMigrateScript(config)
+
+  // Apply migrations (forceAcceptWarning bypasses the dev mode prompt)
+  await (payloadForMigrations.db as any).migrate({ forceAcceptWarning: true })
+
+  if (!cron) {
+    return payloadForMigrations
+  }
+
+  return await getPayload({ config, key, cron: true })
+}
+
+/**
+ * Create a unique migration directory for a test.
+ * Returns the path and a cleanup function.
+ */
+export function createTestMigrationsDir(dbName: string): {
+  migrationsDir: string
+  cleanup: () => void
+} {
+  const migrationsDir = join(process.cwd(), 'dev', `test-migrations-${dbName}`)
+  // Clean up any existing migration directory
+  rmSync(migrationsDir, { recursive: true, force: true })
+  mkdirSync(migrationsDir, { recursive: true })
+
+  return {
+    migrationsDir,
+    cleanup: () => rmSync(migrationsDir, { recursive: true, force: true }),
+  }
 }
 
 async function waitForTasks(
@@ -183,13 +264,22 @@ export type BuildPayloadArgs = {
   dbName: string
   pluginOpts: any
   key?: string
+  skipMigrations?: boolean
 }
 
 export async function buildPayloadWithIntegration({
   dbName,
   pluginOpts,
   key,
+  skipMigrations,
 }: BuildPayloadArgs): Promise<{ payload: Payload; config: SanitizedConfig }> {
+  // Create a unique migration directory for this test
+  const migrationsDir = join(process.cwd(), 'dev', `test-migrations-${dbName}`)
+  
+  // Clean up any existing migration directory
+  rmSync(migrationsDir, { recursive: true, force: true })
+  mkdirSync(migrationsDir, { recursive: true })
+
   const integration = createVectorizeIntegration({
     default: {
       dims: DEFAULT_DIMS,
@@ -209,6 +299,8 @@ export async function buildPayloadWithIntegration({
     db: postgresAdapter({
       extensions: ['vector'],
       afterSchemaInit: [integration.afterSchemaInitHook],
+      migrationDir: migrationsDir,
+      push: false, // Prevent dev mode schema push - use migrations only
       pool: {
         connectionString: `postgresql://postgres:password@localhost:5433/${dbName}`,
       },
@@ -237,7 +329,13 @@ export async function buildPayloadWithIntegration({
   })
 
   const payloadKey = key ?? `payload-${dbName}-${Date.now()}`
-  const payload = await getPayload({ config, key: payloadKey, cron: true })
+  const payload = await initializePayloadWithMigrations({
+    config,
+    key: payloadKey,
+    cron: true,
+    skipMigrations,
+  })
+
   return { payload, config }
 }
 
