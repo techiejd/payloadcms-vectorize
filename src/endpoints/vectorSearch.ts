@@ -81,7 +81,7 @@ export const createVectorSearchHandlers = <TPoolNames extends KnowledgePoolName>
 
       return Response.json({ results })
     } catch (error) {
-      return Response.json({ error: 'Internal server error' }, { status: 500 })
+      return Response.json({ error: `Internal server error: ${error}` }, { status: 500 })
     }
   }
   return { vectorSearch, requestHandler }

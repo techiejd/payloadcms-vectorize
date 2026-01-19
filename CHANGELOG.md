@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.5.2 - 2026-01-20
+
+### Changed
+
+- `vectorSearch` now includes error details in the 500 response to make debugging easier.
+
 ## 0.5.1 - 2026-01-19
 
 ### Added
