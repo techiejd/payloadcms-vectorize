@@ -1,10 +1,14 @@
 import type { Payload } from 'payload'
 
-import { getPayload } from 'payload'
 import { beforeAll, describe, expect, test } from 'vitest'
 import { getVectorizedPayload, VectorizedPayload } from '../../src/types.js'
 import { buildDummyConfig, DIMS, getInitialMarkdownContent } from './constants.js'
-import { createTestDb, waitForVectorizationJobs } from './utils.js'
+import {
+  createTestDb,
+  waitForVectorizationJobs,
+  initializePayloadWithMigrations,
+  createTestMigrationsDir,
+} from './utils.js'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
 import { chunkRichText, chunkText } from 'helpers/chunkers.js'
@@ -30,9 +34,12 @@ describe('VectorizedPayload', () => {
   let payload: Payload
   let markdownContent: SerializedEditorState
   const titleAndQuery = 'VectorizedPayload Test Title'
+  const dbName = 'vectorized_payload_test'
 
   beforeAll(async () => {
-    await createTestDb({ dbName: 'vectorized_payload_test' })
+    await createTestDb({ dbName })
+    const { migrationsDir } = createTestMigrationsDir(dbName)
+
     const config = await buildDummyConfig({
       jobs: {
         tasks: [],
@@ -55,8 +62,10 @@ describe('VectorizedPayload', () => {
       db: postgresAdapter({
         extensions: ['vector'],
         afterSchemaInit: [integration.afterSchemaInitHook],
+        migrationDir: migrationsDir,
+        push: false,
         pool: {
-          connectionString: 'postgresql://postgres:password@localhost:5433/vectorized_payload_test',
+          connectionString: `postgresql://postgres:password@localhost:5433/${dbName}`,
         },
       }),
       plugins: [
@@ -89,7 +98,12 @@ describe('VectorizedPayload', () => {
         }),
       ],
     })
-    payload = await getPayload({ config, cron: true })
+
+    payload = await initializePayloadWithMigrations({
+      config,
+      key: `vectorized-payload-test-${Date.now()}`,
+      cron: true,
+    })
     markdownContent = await getInitialMarkdownContent(config)
   })
 

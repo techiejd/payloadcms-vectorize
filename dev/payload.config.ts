@@ -44,7 +44,9 @@ const bulkEmbeddingsFns =
       })
 
 // Run every hour for voyage, every 5 seconds for mock
-const bulkPollCronSchedule = process.env.USE_VOYAGE !== undefined ? '0 * * * *' : '*/5 * * * * *'
+const isCI = !!process.env.CI
+const bulkPollCronSchedule =
+  process.env.USE_VOYAGE !== undefined ? '0 * * * *' : isCI ? '*/2 * * * * *' : '*/5 * * * * *'
 const ssl =
   process.env.DATABASE_URI !== undefined
     ? {
@@ -99,12 +101,12 @@ const buildConfigWithPostgres = async () => {
       tasks: [],
       autoRun: [
         {
-          cron: '*/5 * * * * *', // Run every 5 seconds in development
+          cron: isCI ? '*/2 * * * * *' : '*/5 * * * * *', // Run every 5 seconds in development
           limit: 10,
           queue: 'default',
         },
         {
-          cron: '*/10 * * * * *', // Run every 10 seconds for bulk jobs
+          cron: isCI ? '*/4 * * * * *' : '*/10 * * * * *', // Run every 10 seconds for bulk jobs
           limit: 5,
           queue: 'vectorize-bulk-prepare',
         },

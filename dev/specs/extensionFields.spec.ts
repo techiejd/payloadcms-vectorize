@@ -1,9 +1,13 @@
 import type { Payload } from 'payload'
-import { getPayload } from 'payload'
 import { beforeAll, describe, expect, test } from 'vitest'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { buildDummyConfig, integration, plugin } from './constants.js'
-import { createTestDb, waitForVectorizationJobs } from './utils.js'
+import {
+  createTestDb,
+  waitForVectorizationJobs,
+  initializePayloadWithMigrations,
+  createTestMigrationsDir,
+} from './utils.js'
 import { PostgresPayload } from '../../src/types.js'
 import { chunkText, chunkRichText } from 'helpers/chunkers.js'
 import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
@@ -15,6 +19,8 @@ describe('Extension fields integration tests', () => {
 
   beforeAll(async () => {
     await createTestDb({ dbName })
+    const { migrationsDir } = createTestMigrationsDir(dbName)
+
     const config = await buildDummyConfig({
       jobs: {
         tasks: [],
@@ -39,6 +45,8 @@ describe('Extension fields integration tests', () => {
       db: postgresAdapter({
         extensions: ['vector'],
         afterSchemaInit: [integration.afterSchemaInitHook],
+        migrationDir: migrationsDir,
+        push: false,
         pool: {
           connectionString: `postgresql://postgres:password@localhost:5433/${dbName}`,
         },
@@ -104,7 +112,12 @@ describe('Extension fields integration tests', () => {
         }),
       ],
     })
-    payload = await getPayload({ config, cron: true })
+
+    payload = await initializePayloadWithMigrations({
+      config,
+      key: `extension-fields-test-${Date.now()}`,
+      cron: true,
+    })
   })
 
   test('extension fields are added to the embeddings table schema', async () => {

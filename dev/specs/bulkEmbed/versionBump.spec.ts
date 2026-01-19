@@ -91,6 +91,7 @@ describe('Bulk embed - version bump', () => {
           bulkQueueNames: BULK_QUEUE_NAMES_1,
         },
         key: `payload1`,
+        skipMigrations: true,
       })
     ).payload
 

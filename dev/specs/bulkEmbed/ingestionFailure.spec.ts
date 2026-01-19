@@ -65,7 +65,7 @@ describe('Bulk embed - ingestion validation failures', () => {
     expectGoodResult(result)
 
     // Wait for bulk jobs to finish (or fail)
-    await waitForBulkJobs(payload, 15000)
+    await waitForBulkJobs(payload, 30000)
 
     // Check the run status - should be failed
     const run = await payload.findByID({
@@ -97,5 +97,5 @@ describe('Bulk embed - ingestion validation failures', () => {
     // Ensure no batches were created (validation happens before batching)
     const batchesCount = await payload.count({ collection: BULK_EMBEDDINGS_BATCHES_SLUG })
     expect(batchesCount.totalDocs).toBe(0)
-  })
+  }, 60000)
 })

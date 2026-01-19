@@ -3,13 +3,17 @@ import type { Payload } from 'payload'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
 import { Client } from 'pg'
-import { getPayload } from 'payload'
 import { beforeAll, describe, expect, test } from 'vitest'
 
 import type { PostgresPayload } from '../../src/types.js'
 
 import { buildDummyConfig, DIMS, integration, plugin } from './constants.js'
-import { createTestDb, waitForVectorizationJobs } from './utils.js'
+import {
+  createTestDb,
+  waitForVectorizationJobs,
+  initializePayloadWithMigrations,
+  createTestMigrationsDir,
+} from './utils.js'
 import { createVectorSearchHandlers } from '../../src/endpoints/vectorSearch.js'
 import type { KnowledgePoolDynamicConfig } from 'payloadcms-vectorize'
 const CUSTOM_SCHEMA = 'custom'
@@ -20,6 +24,7 @@ describe('Custom schemaName support', () => {
 
   beforeAll(async () => {
     await createTestDb({ dbName })
+    const { migrationsDir } = createTestMigrationsDir(dbName)
 
     // Create the custom schema before Payload initializes
     const client = new Client({
@@ -42,6 +47,8 @@ describe('Custom schemaName support', () => {
       db: postgresAdapter({
         afterSchemaInit: [integration.afterSchemaInitHook],
         extensions: ['vector'],
+        migrationDir: migrationsDir,
+        push: false,
         pool: {
           connectionString: `postgresql://postgres:password@localhost:5433/${dbName}`,
         },
@@ -85,7 +92,11 @@ describe('Custom schemaName support', () => {
       ],
     })
 
-    payload = await getPayload({ config, cron: true })
+    payload = await initializePayloadWithMigrations({
+      config,
+      key: `schema-name-test-${Date.now()}`,
+      cron: true,
+    })
   })
 
   test('embeddings table is created in custom schema', async () => {

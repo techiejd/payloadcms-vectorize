@@ -1,9 +1,8 @@
-import { getPayload } from 'payload'
-import { beforeAll, describe, expect, test } from 'vitest'
+import { describe, expect, test } from 'vitest'
 import { chunkText, chunkRichText } from 'helpers/chunkers.js'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { buildDummyConfig, getInitialMarkdownContent, integration } from './constants.js'
-import { createTestDb } from './utils.js'
+import { createTestDb, initializePayloadWithMigrations, createTestMigrationsDir } from './utils.js'
 
 describe('Chunkers', () => {
   test('textChunker', () => {
@@ -17,20 +16,27 @@ describe('Chunkers', () => {
   })
 
   test('richTextChunker splits by H2', async () => {
-    beforeAll(async () => {
-      createTestDb({ dbName: 'chunkers_test' })
-    })
+    const dbName = 'chunkers_test'
+    await createTestDb({ dbName })
+    const { migrationsDir } = createTestMigrationsDir(dbName)
+
     const cfg = await buildDummyConfig({
       db: postgresAdapter({
         extensions: ['vector'],
         afterSchemaInit: [integration.afterSchemaInitHook],
+        migrationDir: migrationsDir,
+        push: false,
         pool: {
-          connectionString: 'postgresql://postgres:password@localhost:5433/chunkers_test',
+          connectionString: `postgresql://postgres:password@localhost:5433/${dbName}`,
         },
       }),
     })
     const markdownContent = await getInitialMarkdownContent(cfg)
-    const thisPayload = await getPayload({ config: cfg })
+
+    const thisPayload = await initializePayloadWithMigrations({
+      config: cfg,
+      key: `chunkers-test-${Date.now()}`,
+    })
     const chunks = await chunkRichText(markdownContent, thisPayload)
 
     expect(chunks.length).toBe(3)

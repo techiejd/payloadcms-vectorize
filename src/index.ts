@@ -1,6 +1,8 @@
 import type { Config, Payload, PayloadRequest } from 'payload'
 import { customType } from '@payloadcms/db-postgres/drizzle/pg-core'
 import toSnakeCase from 'to-snake-case'
+import { fileURLToPath } from 'url'
+import { dirname, resolve } from 'path'
 
 import { createEmbeddingsCollection } from './collections/embeddings.js'
 import type {
@@ -75,50 +77,6 @@ export type {
 } from './types.js'
 
 export { getVectorizedPayload } from './types.js'
-
-async function ensurePgvectorArtifacts(args: {
-  payload: Payload
-  tableName: string
-  dims: number
-  ivfflatLists: number
-}): Promise<void> {
-  const { payload, tableName, dims, ivfflatLists } = args
-
-  if (!isPostgresPayload(payload)) {
-    throw new Error(
-      '[payloadcms-vectorize] This plugin requires the Postgres adapter. Please configure @payloadcms/db-postgres.',
-    )
-  }
-
-  // Now payload is typed as PostgresPayload
-  const postgresPayload = payload as PostgresPayload
-  const schemaName = postgresPayload.db.schemaName || 'public'
-
-  const sqls: string[] = [
-    `CREATE EXTENSION IF NOT EXISTS vector;`,
-    `ALTER TABLE "${schemaName}"."${tableName}" ADD COLUMN IF NOT EXISTS embedding vector(${dims});`,
-    `CREATE INDEX IF NOT EXISTS ${tableName}_embedding_ivfflat ON "${schemaName}"."${tableName}" USING ivfflat (embedding vector_cosine_ops) WITH (lists = ${ivfflatLists});`,
-  ]
-
-  try {
-    if (postgresPayload.db.pool?.query) {
-      for (const sql of sqls) {
-        await postgresPayload.db.pool.query(sql)
-      }
-    } else if (postgresPayload.db.drizzle?.execute) {
-      for (const sql of sqls) {
-        await postgresPayload.db.drizzle.execute(sql)
-      }
-    }
-    postgresPayload.logger.info('[payloadcms-vectorize] pgvector extension/columns/index ensured')
-  } catch (err) {
-    postgresPayload.logger.error(
-      '[payloadcms-vectorize] Failed ensuring pgvector artifacts',
-      err as Error,
-    )
-    throw new Error(`[payloadcms-vectorize] Failed ensuring pgvector artifacts: ${err}`)
-  }
-}
 
 // ==================
 // Plugin entry point
@@ -240,7 +198,8 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
         }
 
         // Build reverse mapping for hooks
-        for (const collectionSlug of Object.keys(dynamicConfig.collections)) {
+        const collectionSlugs = Object.keys(dynamicConfig.collections)
+        for (const collectionSlug of collectionSlugs) {
           if (!collectionToPools.has(collectionSlug)) {
             collectionToPools.set(collectionSlug, [])
           }
@@ -264,9 +223,11 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
       }
 
       // Exit early if disabled, but keep embeddings collections present for migrations
-      if (pluginOptions.disabled) return config
+      if (pluginOptions.disabled) {
+        return config
+      }
 
-      // Register a single task using Payload Jobs that can handle any knowledge pool
+      // Register tasks using Payload Jobs
       const incomingJobs = config.jobs || { tasks: [] }
       const tasks = [...(config.jobs?.tasks || [])]
 
@@ -274,11 +235,13 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
         knowledgePools: pluginOptions.knowledgePools,
       })
       tasks.push(vectorizeTask)
+
       const prepareBulkEmbedTask = createPrepareBulkEmbeddingTask({
         knowledgePools: pluginOptions.knowledgePools,
         pollOrCompleteQueueName: pluginOptions.bulkQueueNames?.pollOrCompleteQueueName,
       })
       tasks.push(prepareBulkEmbedTask)
+
       const pollOrCompleteBulkEmbedTask = createPollOrCompleteBulkEmbeddingTask({
         knowledgePools: pluginOptions.knowledgePools,
         pollOrCompleteQueueName: pluginOptions.bulkQueueNames?.pollOrCompleteQueueName,
@@ -397,6 +360,7 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
             const poolConfig = pluginOptions.knowledgePools[knowledgePool]
             return !!poolConfig?.embeddingConfig?.bulkEmbeddingsFns
           },
+          _staticConfigs: staticConfigs,
           search: (params: VectorSearchQuery<TPoolNames>) =>
             vectorSearchHandlers.vectorSearch(
               payload,
@@ -461,22 +425,17 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
         createVectorizedPayloadObject,
       }
 
-      const incomingOnInit = config.onInit
-      config.onInit = async (payload) => {
-        if (incomingOnInit) await incomingOnInit(payload)
-        // Ensure pgvector artifacts for each knowledge pool
-        for (const poolName in staticConfigs) {
-          const staticConfig = staticConfigs[poolName]
-          // Drizzle converts camelCase collection slugs to snake_case table names
-          await ensurePgvectorArtifacts({
-            payload,
-            // Drizzle converts camelCase collection slugs to snake_case table names
-            tableName: toSnakeCase(poolName),
-            dims: staticConfig.dims,
-            ivfflatLists: staticConfig.ivfflatLists,
-          })
-        }
-      }
+      // Register bin script for migration helper
+      const __filename = fileURLToPath(import.meta.url)
+      const __dirname = dirname(__filename)
+      const binScriptPath = resolve(__dirname, 'bin/vectorize-migrate.js')
+      config.bin = [
+        ...(config.bin || []),
+        {
+          key: 'vectorize:migrate',
+          scriptPath: binScriptPath,
+        },
+      ]
 
       if (pluginOptions.endpointOverrides?.enabled !== false) {
         const path = pluginOptions.endpointOverrides?.path || '/vector-search'

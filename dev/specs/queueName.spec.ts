@@ -1,11 +1,10 @@
 import type { Payload, SanitizedConfig } from 'payload'
-import { getPayload } from 'payload'
 import { beforeAll, describe, expect, test } from 'vitest'
 import { chunkText, chunkRichText } from 'helpers/chunkers.js'
 import type { SerializedEditorState } from '@payloadcms/richtext-lexical/lexical'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { buildDummyConfig, getInitialMarkdownContent, integration, plugin } from './constants.js'
-import { createTestDb } from './utils.js'
+import { createTestDb, initializePayloadWithMigrations, createTestMigrationsDir } from './utils.js'
 
 describe('Queue tests', () => {
   let config: SanitizedConfig
@@ -15,6 +14,8 @@ describe('Queue tests', () => {
   const dbName = 'queue_test'
   beforeAll(async () => {
     await createTestDb({ dbName })
+    const { migrationsDir } = createTestMigrationsDir(dbName)
+
     config = await buildDummyConfig({
       collections: [
         {
@@ -28,8 +29,10 @@ describe('Queue tests', () => {
       db: postgresAdapter({
         extensions: ['vector'],
         afterSchemaInit: [integration.afterSchemaInitHook],
+        migrationDir: migrationsDir,
+        push: false,
         pool: {
-          connectionString: 'postgresql://postgres:password@localhost:5433/queue_test',
+          connectionString: `postgresql://postgres:password@localhost:5433/${dbName}`,
         },
       }),
       plugins: [
@@ -65,7 +68,11 @@ describe('Queue tests', () => {
         }),
       ],
     })
-    payload = await getPayload({ config })
+
+    payload = await initializePayloadWithMigrations({
+      config,
+      key: `queue-test-${Date.now()}`,
+    })
     markdownContent = await getInitialMarkdownContent(config)
   })
   test('vectorization jobs are queued using the queueName', async () => {

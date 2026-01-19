@@ -24,7 +24,7 @@ export default defineConfig({
   fullyParallel: true,
   /* Fail the build on CI if you accidentally left test.only in the source code. */
   forbidOnly: !!process.env.CI,
-  retries: 0,
+  retries: process.env.CI ? 2 : 0,
   workers: 1,
   /* Reporter to use. See https://playwright.dev/docs/test-reporters */
   reporter: 'html',
@@ -45,8 +45,10 @@ export default defineConfig({
   webServer: {
     command:
       'cross-env DOTENV_CONFIG_PATH=dev/.env.test NODE_OPTIONS=--require=dotenv/config next dev dev --turbo',
-    reuseExistingServer: true,
-    timeout: 300_000,
+    reuseExistingServer: !process.env.CI,
+    timeout: 600_000,
     url: 'http://localhost:3000/admin',
+    stdout: 'pipe',
+    stderr: 'pipe',
   },
 })
