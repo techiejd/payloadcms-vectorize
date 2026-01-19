@@ -54,3 +54,4 @@ jobs:
           PAYLOAD_SECRET: test-secret-key
           DIMS: 8
           IVFFLATLISTS: 1
+          TEST_ENV: 1
