@@ -8,7 +8,7 @@ import { createTestDb } from './utils.js'
 import { DIMS } from './constants.js'
 import type { PostgresPayload } from '../../src/types.js'
 import { script as vectorizeMigrateScript } from '../../src/bin/vectorize-migrate.js'
-import { readdirSync, statSync, existsSync, readFileSync, rmSync } from 'fs'
+import { readdirSync, statSync, existsSync, readFileSync, writeFileSync, rmSync } from 'fs'
 import { join, resolve } from 'path'
 
 describe('Migration CLI integration tests', () => {
@@ -273,8 +273,46 @@ describe('Migration CLI integration tests', () => {
         payload: cliPayload,
       })
 
+      // step 2.1: For protection purposes, we will remove sql from the import line,
+      // (because it's possible eslint or other tools could remove it and we're trying to protect against that)
+      // and then check that it's added
+      const migrationsBeforePatch = readdirSync(migrationsDir)
+        .filter((f) => f.endsWith('.ts') && f !== 'index.ts')
+        .map((f) => ({
+          name: f,
+          path: join(migrationsDir, f),
+          mtime: statSync(join(migrationsDir, f)).mtime,
+        }))
+        .sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
+      const initialMigrationPath = migrationsBeforePatch[0]?.path
+      expect(initialMigrationPath).toBeTruthy()
+      if (initialMigrationPath) {
+        const migrationContent = readFileSync(initialMigrationPath, 'utf-8')
+        const importMatch = migrationContent.match(
+          /import\s+\{([^}]+)\}\s+from\s+['"]@payloadcms\/db-postgres['"]/,
+        )
+        if (importMatch) {
+          const imports = importMatch[1]
+            .split(',')
+            .map((part) => part.trim())
+            .filter((part) => part && part !== 'sql')
+          const updatedImport = `import { ${imports.join(', ')} } from '@payloadcms/db-postgres'`
+          const updatedContent = migrationContent.replace(importMatch[0], updatedImport)
+          writeFileSync(initialMigrationPath, updatedContent, 'utf-8')
+        }
+      }
+
       // Step 3: Run vectorize:migrate to add IVFFLAT index to the migration
       await vectorizeMigrateScript(cliConfig)
+
+      // step 3.1: For protection purposes, check that sql is being imported
+      // import { sql } from '@payloadcms/db-postgres'
+      if (initialMigrationPath) {
+        const migrationContentAfter = readFileSync(initialMigrationPath, 'utf-8')
+        expect(migrationContentAfter).toMatch(
+          /import\s+\{[^}]*\bsql\b[^}]*\}\s+from\s+['"]@payloadcms\/db-postgres['"]/,
+        )
+      }
 
       // Step 4: Apply the migration
       await cliPayload.db.migrate()

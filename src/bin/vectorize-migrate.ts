@@ -155,7 +155,25 @@ function patchMigrationFile(
   schemaName: string,
   priorState: Map<string, { dims: number | null; ivfflatLists: number | null }>,
 ): void {
-  const content = readFileSync(migrationPath, 'utf-8')
+  let content = readFileSync(migrationPath, 'utf-8')
+
+  // Ensure sql import exists for injected sql.raw usage
+  const sqlImportRegex =
+    /import\s+\{([^}]+)\}\s+from\s+['"]@payloadcms\/db-postgres['"]/
+  const importMatch = content.match(sqlImportRegex)
+  if (importMatch) {
+    const imports = importMatch[1]
+      .split(',')
+      .map((part) => part.trim())
+      .filter(Boolean)
+    if (!imports.includes('sql')) {
+      imports.push('sql')
+      const updatedImport = `import { ${imports.join(', ')} } from '@payloadcms/db-postgres'`
+      content = content.replace(importMatch[0], updatedImport)
+    }
+  } else {
+    content = `import { sql } from '@payloadcms/db-postgres'\n${content}`
+  }
 
   // Generate SQL code for each pool
   const vectorUpCode: string[] = []
