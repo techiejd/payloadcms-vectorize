@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.5.1 - 2026-01-19
+
+### Added
+
+- **Migration-based vector setup**: Added the `payload vectorize:migrate` CLI to patch Payload-generated migrations with pgvector artifacts, including initial IVFFLAT index creation, IVFFLAT `lists` rebuilds, and destructive `dims` changes (drop index → alter vector column → truncate embeddings → recreate index).
+
+
 ## 0.5.0 - 2026-01-15
 
 ### New Features

@@ -464,7 +464,7 @@ jobs: {
 
 ## Changing Static Config (ivfflatLists or dims) & Migrations
 
-**⚠️ Important:** Changing `dims` is **destructive** - it requires re-embedding all your data. Changing `ivfflatLists` rebuilds the index (non-destructive but may take time).
+**⚠️ Important:** Changing `dims` is **DESTRUCTIVE** - it requires re-embedding all your data. Changing `ivfflatLists` rebuilds the index (non-destructive but may take time).
 
 When you change static config values (`dims` or `ivfflatLists`):
 
@@ -480,6 +480,10 @@ When you change static config values (`dims` or `ivfflatLists`):
    ```
 
 2. **Create a migration** using the CLI helper:
+  
+   ```bash
+   pnpm payload migrate:create --name migration_name
+   ```
 
    ```bash
    pnpm payload vectorize:migrate
@@ -490,7 +494,7 @@ When you change static config values (`dims` or `ivfflatLists`):
    - Create a new Payload migration using `payload.db.createMigration`
    - Patch it with appropriate SQL:
      - **If `ivfflatLists` changed**: Rebuilds the IVFFLAT index with the new `lists` parameter (DROP + CREATE INDEX)
-     - **If `dims` changed**: Truncates the embeddings table (destructive - you'll need to re-embed)
+     - **If `dims` changed**: Truncates the embeddings table (DESTRUCTIVE - you'll need to re-embed)
 
 3. **Review the migration file** in `src/migrations/` - it will be named something like `*_vectorize-config.ts`
 
