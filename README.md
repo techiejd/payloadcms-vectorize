@@ -151,12 +151,21 @@ export default buildConfig({
 
 **Important:** `knowledgePools` must have **different names than your collections**—reusing a collection name for a knowledge pool **will cause schema conflicts**. (In this example, the knowledge pool is named 'mainKnowledgePool' and a collection named 'main-knowledge-pool' will be created.)
 
-**⚠️ Important:** Run this command:
+**⚠️ Important (Import map):** The import map tells Payload how to resolve component paths (like `'payloadcms-vectorize/client#EmbedAllButton'`) to actual React components. Without it, client components referenced in your collection configs won't render.
 
-- After initial plugin setup
-- If the "Embed all" button doesn't appear in the admin UI
+Run:
 
-The import map tells Payload how to resolve component paths (like `'payloadcms-vectorize/client#EmbedAllButton'`) to actual React components. Without it, client components referenced in your collection configs won't render.
+- After initial plugin setup and if in production mode.
+- If client components (like the "Embed all" button) don't appear in the admin UI
+
+```bash
+pnpm run generate:importmap
+```
+
+**Note:** Payload automatically generates the import map on startup during development (HMR), so you typically don't need to run this manually in development. However:
+
+- **For production builds**: You MUST run `pnpm run generate:importmap` BEFORE running `pnpm build`, otherwise custom components won't be found during the build process.
+- **If client components don't appear**: Try manually generating the import map: `pnpm run generate:importmap`
 
 **⚠️ Important:** Run this command:
 
@@ -731,7 +740,7 @@ Search for similar content using vector similarity.
 ### Bulk Embedding (Embed All)
 
 - Each knowledge pool's embeddings list shows an **Embed all** admin button that triggers a bulk run.
-- **Note:** Payload automatically generates the import map on startup and during development (HMR), so you typically don't need to run this manually. However, if client components (like the "Embed all" button) don't appear in the admin UI, you may need to manually generate the import map: `pnpm run generate:importmap`.
+- **Import map note:** In development (`pnpm dev`), Payload auto-generates the import map. For production builds (`pnpm build`), you must run `pnpm run generate:importmap` first (see Quick Start above).
 - Bulk runs only include documents with mismatched embedding versions for the pool's current `embeddingConfig.version` from the previous bulk run (unless none has been done in which case it embeds all).
 - Progress is recorded in `vector-bulk-embeddings-runs` and `vector-bulk-embeddings-batches` admin UI collections.
 - You can re-run failed bulk embeddings from `vector-bulk-embeddings-batches` admin UI and you can link to the failed batches from the `vector-bulk-embeddings-runs` admin UI.
