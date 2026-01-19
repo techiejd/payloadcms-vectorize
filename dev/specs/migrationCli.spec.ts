@@ -755,6 +755,63 @@ describe('Migration CLI integration tests', () => {
         [schemaName, 'secondary_embedding_ivfflat'],
       )
       expect(indexCheck?.rows.length).toBeGreaterThan(0)
+
+      // Verify secondary index lists value is correct
+      const secondaryIndexDefCheck = await postgresPayload.db.pool?.query(
+        `SELECT pg_get_indexdef(c.oid) as def
+       FROM pg_indexes i
+       JOIN pg_class c ON c.relname = i.indexname
+       JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = i.schemaname
+       WHERE i.schemaname = $1 AND i.indexname = $2`,
+        [schemaName, 'secondary_embedding_ivfflat'],
+      )
+      const secondaryIndexDef = secondaryIndexDefCheck?.rows[0]?.def || ''
+      expect(secondaryIndexDef).toBeTruthy()
+      expect(secondaryIndexDef).toMatch(/lists\s*=\s*['"]?5['"]?/i)
+
+      // Verify default index lists value is correct
+      const defaultIndexDefCheck = await postgresPayload.db.pool?.query(
+        `SELECT pg_get_indexdef(c.oid) as def
+       FROM pg_indexes i
+       JOIN pg_class c ON c.relname = i.indexname
+       JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = i.schemaname
+       WHERE i.schemaname = $1 AND i.indexname = $2`,
+        [schemaName, 'default_embedding_ivfflat'],
+      )
+      const defaultIndexDef = defaultIndexDefCheck?.rows[0]?.def || ''
+      expect(defaultIndexDef).toBeTruthy()
+      expect(defaultIndexDef).toMatch(/lists\s*=\s*['"]?20['"]?/i)
+
+      // Verify embedding column dims for both pools
+      const defaultDimsCheck = await postgresPayload.db.pool?.query(
+        `SELECT format_type(atttypid, atttypmod) as column_type
+       FROM pg_attribute
+       JOIN pg_class ON pg_attribute.attrelid = pg_class.oid
+       JOIN pg_namespace ON pg_class.relnamespace = pg_namespace.oid
+       WHERE pg_namespace.nspname = $1
+         AND pg_class.relname = $2
+         AND pg_attribute.attname = 'embedding'
+         AND pg_attribute.attnum > 0
+         AND NOT pg_attribute.attisdropped`,
+        [schemaName, 'default'],
+      )
+      const defaultColumnType = defaultDimsCheck?.rows[0]?.column_type || ''
+      expect(defaultColumnType).toContain('vector(10)')
+
+      const secondaryDimsCheck = await postgresPayload.db.pool?.query(
+        `SELECT format_type(atttypid, atttypmod) as column_type
+       FROM pg_attribute
+       JOIN pg_class ON pg_attribute.attrelid = pg_class.oid
+       JOIN pg_namespace ON pg_class.relnamespace = pg_namespace.oid
+       WHERE pg_namespace.nspname = $1
+         AND pg_class.relname = $2
+         AND pg_attribute.attname = 'embedding'
+         AND pg_attribute.attnum > 0
+         AND NOT pg_attribute.attisdropped`,
+        [schemaName, 'secondary'],
+      )
+      const secondaryColumnType = secondaryDimsCheck?.rows[0]?.column_type || ''
+      expect(secondaryColumnType).toContain(`vector(${DIMS})`)
     })
 
     test('6. Remove knowledgePool: Secondary table can be dropped manually', async () => {

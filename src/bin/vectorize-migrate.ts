@@ -62,7 +62,9 @@ function getPriorStateFromMigrations(
           upContent.match(
             new RegExp(`CREATE INDEX.*?"${indexName}".*?WITH\\s*\\(lists\\s*=\\s*(\\d+)\\)`, 'is'),
           ) ||
-          upContent.match(new RegExp(`ivfflat.*?lists\\s*=\\s*(\\d+)`, 'is'))
+          upContent.match(
+            new RegExp(`"${indexName}"[\\s\\S]*?lists\\s*=\\s*(\\d+)`, 'is'),
+          )
         
         if (indexMatch && !state.get(poolName)?.ivfflatLists) {
           const lists = parseInt(indexMatch[1], 10)
