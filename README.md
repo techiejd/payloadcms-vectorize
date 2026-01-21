@@ -28,6 +28,16 @@ pnpm add payloadcms-vectorize
 
 ## Quick Start
 
+### Videos
+
+#### Implementing Semantic Search with PayloadCMS Vectorize
+
+[![Setup + real-time ingestion](https://img.youtube.com/vi/jK54HXu19gM/0.jpg)](https://youtu.be/jK54HXu19gM)
+
+#### Save 50% on Bulk Embeddings and Migrations in Payload CMS (Part 2)
+
+[![Bulk embedding](https://img.youtube.com/vi/oIcqu08k1Ok/0.jpg)](https://youtu.be/oIcqu08k1Ok)
+
 ### 0. Have pgvector permissions
 
 The plugin expects `vector` extension to be configured (`db: postgresAdapter({extensions: ['vector'],...})`) when Payload initializes. Your PostgreSQL database user must have permission to create extensions. If your user doesn't have these permissions, someone with permissions may need to manually create the extension once:
