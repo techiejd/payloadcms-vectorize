@@ -1,5 +1,5 @@
 import type { Config, Payload, PayloadRequest } from 'payload'
-import { customType } from '@payloadcms/db-postgres/drizzle/pg-core'
+import { customType, index } from '@payloadcms/db-postgres/drizzle/pg-core'
 import toSnakeCase from 'to-snake-case'
 import { fileURLToPath } from 'url'
 import { dirname, resolve } from 'path'
@@ -124,6 +124,11 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
           columns: {
             embedding: vectorType('embedding'),
           },
+          extraConfig: (cols) => ({
+            embeddingIvfflatIndex: index(`${tableName}_embedding_ivfflat`)
+              .using('ivfflat', cols.embedding.op('vector_cosine_ops'))
+              .with({ lists: staticConfig.ivfflatLists }),
+          }),
         })
       }
 

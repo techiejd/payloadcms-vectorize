@@ -186,30 +186,22 @@ The import map tells Payload how to resolve component paths (like `'payloadcms-v
 
 ### 2. Initial Migration Setup
 
-After configuring the plugin, you need to create an initial migration to set up the IVFFLAT indexes in your database.
+After configuring the plugin, create and apply your initial migration. The IVFFLAT indexes are created automatically via the `afterSchemaInitHook` using Drizzle's `extraConfig`.
 
 **For new setups:**
 
-1. Create your initial Payload migration (this will include the embedding columns via Drizzle schema):
+1. Create your initial Payload migration (this will include both embedding columns and IVFFLAT indexes via Drizzle schema):
 
    ```bash
    pnpm payload migrate:create --name initial
    ```
 
-2. Use the migration CLI helper to add IVFFLAT index setup:
-
-   ```bash
-   pnpm payload vectorize:migrate
-   ```
-
-   The CLI automatically extracts your static configs from the Payload config and patches the migration file with the necessary IVFFLAT index creation SQL.
-
-3. Review and apply the migration:
+2. Review and apply the migration:
    ```bash
    pnpm payload migrate
    ```
 
-**Note:** The embedding columns are created automatically by Drizzle via the `afterSchemaInitHook`, but the IVFFLAT indexes need to be added via migrations for proper schema management.
+**Note:** Both the embedding columns and IVFFLAT indexes are created automatically by Drizzle via the `afterSchemaInitHook`. No additional CLI steps are required for initial setup or when changing `ivfflatLists`. However, if you change `dims` after initial setup, you must run `pnpm payload vectorize:migrate` to add the required TRUNCATE statement to your migration (see "Changing dims" section below). There is no need to run `vectorize:migrate` on the first migration.
 
 ### 3. Search Your Content
 
@@ -489,26 +481,34 @@ When you change static config values (`dims` or `ivfflatLists`):
    })
    ```
 
-2. **Create a migration** using the CLI helper:
-  
+2. **Create a migration**:
+
    ```bash
    pnpm payload migrate:create --name migration_name
    ```
+
+   Drizzle will automatically generate the index rebuild SQL.
+
+3. **Changing `dims`(Destructive, Optional)**:
+
+Skip this step if:
+- this is your first integration of the plugin.
+- you did not change the `dims`.
+
+Changing `dims` requires truncating the embeddings table because existing vectors are incompatible with the new dimensions. You must use the `vectorize:migrate` CLI to add the TRUNCATE statement:
 
    ```bash
    pnpm payload vectorize:migrate
    ```
 
    The CLI will:
-   - Detect changes in your static configs
-   - Create a new Payload migration using `payload.db.createMigration`
-   - Patch it with appropriate SQL:
-     - **If `ivfflatLists` changed**: Rebuilds the IVFFLAT index with the new `lists` parameter (DROP + CREATE INDEX)
-     - **If `dims` changed**: Truncates the embeddings table (DESTRUCTIVE - you'll need to re-embed)
+   - Detect the dims change
+   - Patch the migration with TRUNCATE TABLE (with CASCADE)
+   - Add appropriate down migration to restore the old column type
 
-3. **Review the migration file** in `src/migrations/` - it will be named something like `*_vectorize-config.ts`
+4. **Review the migration file** in `src/migrations/`
 
-4. **Apply the migration**:
+5. **Apply the migration**:
 
    ```bash
    pnpm payload migrate
@@ -524,18 +524,6 @@ The CLI automatically uses the `schemaName` from your Postgres adapter configura
 
 Running `pnpm payload vectorize:migrate` multiple times with no config changes will not create duplicate migrations. The CLI detects when no changes are needed and exits early.
 
-**Development workflow:**
-
-During development, you may want to disable Payload's automatic schema push to ensure migrations are used:
-
-- Set `migrations: { disableAutomaticMigrations: true }` in your Payload config, or
-- Avoid using `pnpm payload migrate:status --force` which auto-generates migrations
-
-This ensures your vector-specific migrations are properly applied.
-
-**Runtime behavior:**
-
-The `ensurePgvectorArtifacts` function is now **presence-only** - it checks that pgvector artifacts (extension, column, index) exist but does not create or modify them. If artifacts are missing, it throws descriptive errors prompting you to run migrations. This ensures migrations are the single source of truth for schema changes.
 
 ### Endpoints
 
