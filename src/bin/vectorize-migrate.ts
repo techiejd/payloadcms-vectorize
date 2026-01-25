@@ -56,7 +56,10 @@ function getPriorDimsFromMigrations(
             new RegExp(`ALTER\\s+TABLE[^;]*?"${tableName}"[^;]*?vector\\((\\d+)\\)`, 'is'),
           ) ||
           upContent.match(
-            new RegExp(`CREATE\\s+TABLE[^;]*?"${tableName}"[^;]*?embedding[^;]*?vector\\((\\d+)\\)`, 'is'),
+            new RegExp(
+              `CREATE\\s+TABLE[^;]*?"${tableName}"[^;]*?embedding[^;]*?vector\\((\\d+)\\)`,
+              'is',
+            ),
           ) ||
           upContent.match(
             new RegExp(`"${tableName}"\\s*\\([^)]*embedding[^)]*vector\\((\\d+)\\)`, 'is'),
@@ -119,8 +122,7 @@ function patchMigrationFileForDimsChange(
   let content = readFileSync(migrationPath, 'utf-8')
 
   // Ensure sql import exists for injected sql.raw usage
-  const sqlImportRegex =
-    /import\s+\{([^}]+)\}\s+from\s+['"]@payloadcms\/db-postgres['"]/
+  const sqlImportRegex = /import\s+\{([^}]+)\}\s+from\s+['"]@payloadcms\/db-postgres['"]/
   const importMatch = content.match(sqlImportRegex)
   if (importMatch) {
     const imports = importMatch[1]
@@ -229,7 +231,12 @@ export const script = async (config: SanitizedConfig): Promise<void> => {
   const priorDims = getPriorDimsFromMigrations(migrationsDir, poolNames)
 
   // Check if any dims have changed
-  const dimsChanges: Array<{ poolName: string; tableName: string; oldDims: number; newDims: number }> = []
+  const dimsChanges: Array<{
+    poolName: string
+    tableName: string
+    oldDims: number
+    newDims: number
+  }> = []
 
   for (const poolName of poolNames) {
     const currentConfig = staticConfigs[poolName] as KnowledgePoolStaticConfig
@@ -250,12 +257,10 @@ export const script = async (config: SanitizedConfig): Promise<void> => {
   // If no dims changes detected, show deprecation message
   if (dimsChanges.length === 0) {
     console.log(
-      '\n[payloadcms-vectorize] You no longer need to run this script. ' +
-      'The IVFFLAT index is now created automatically as long as you include the afterSchemaInitHook. ' +
-      'This script is only needed when changing dims (which requires truncating the embeddings table). ' +
-      'This message will be deleted in 1.0.0.\n'
+      '\n[payloadcms-vectorize] No dims changes detected. ' +
+        'This script is only needed when changing dims (which requires truncating the embeddings table). ',
     )
-    return
+    process.exit(0)
   }
 
   // Dims changed - we need to patch the most recent migration with TRUNCATE
@@ -269,7 +274,7 @@ export const script = async (config: SanitizedConfig): Promise<void> => {
   if (!existsSync(migrationsDir)) {
     throw new Error(
       `[payloadcms-vectorize] Migrations directory not found: ${migrationsDir}\n` +
-      `Please run 'payload migrate:create' first to create a migration for the dims change.`
+        `Please run 'payload migrate:create' first to create a migration for the dims change.`,
     )
   }
 
@@ -285,7 +290,7 @@ export const script = async (config: SanitizedConfig): Promise<void> => {
   if (migrationFiles.length === 0) {
     throw new Error(
       `[payloadcms-vectorize] No migration files found in ${migrationsDir}\n` +
-      `Please run 'payload migrate:create' first to create a migration for the dims change.`
+        `Please run 'payload migrate:create' first to create a migration for the dims change.`,
     )
   }
 
@@ -293,8 +298,13 @@ export const script = async (config: SanitizedConfig): Promise<void> => {
 
   // Check if migration already has truncate code
   const migrationContent = readFileSync(latestMigration.path, 'utf-8')
-  if (migrationContent.includes('TRUNCATE TABLE') && migrationContent.includes('payloadcms-vectorize')) {
-    console.log('[payloadcms-vectorize] Migration already patched with TRUNCATE. No changes needed.')
+  if (
+    migrationContent.includes('TRUNCATE TABLE') &&
+    migrationContent.includes('payloadcms-vectorize')
+  ) {
+    console.log(
+      '[payloadcms-vectorize] Migration already patched with TRUNCATE. No changes needed.',
+    )
     return
   }
 

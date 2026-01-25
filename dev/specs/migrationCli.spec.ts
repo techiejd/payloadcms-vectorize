@@ -671,7 +671,7 @@ describe('Migration CLI integration tests', () => {
       expect(rowCount).toBe(0)
     })
 
-    test('3. Idempotency: CLI does not re-patch already patched migration', async () => {
+    test('3. Idempotency: CLI does not create new migration if no dims changes', async () => {
       // Get migration count before
       const migrationsBefore = readdirSync(migrationsDir).filter(
         (f) => f.endsWith('.ts') || f.endsWith('.js'),
@@ -682,10 +682,8 @@ describe('Migration CLI integration tests', () => {
 
       await vectorizeMigrateScript(dimsConfig)
 
-      // Should see "already patched" message
-      expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining('already patched'),
-      )
+      // Should see "No dims changes detected" message
+      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('No dims changes detected'))
 
       consoleSpy.mockRestore()
 
