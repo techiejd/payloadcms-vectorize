@@ -392,7 +392,9 @@ describe('Migration CLI integration tests', () => {
       await vectorizeMigrateScript(autoConfig)
 
       expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining('You no longer need to run this script'),
+        expect.stringContaining(
+          'No dims changes detected. This script is only needed when changing dims (which requires truncating the embeddings table).',
+        ),
       )
 
       consoleSpy.mockRestore()
@@ -682,8 +684,10 @@ describe('Migration CLI integration tests', () => {
 
       await vectorizeMigrateScript(dimsConfig)
 
-      // Should see "No dims changes detected" message
-      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('No dims changes detected'))
+      // Should see "already patched" message since the migration was already patched in test 2
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Migration already patched with TRUNCATE'),
+      )
 
       consoleSpy.mockRestore()
 

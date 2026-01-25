@@ -36,8 +36,12 @@ function getPriorDimsFromMigrations(
     }))
     .sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
 
+  // Skip the most recent migration when determining prior dims, since it may contain
+  // the pending dims change that we're trying to detect
+  const filesToCheck = migrationFiles.slice(1)
+
   // Read migration files to find vector dims
-  for (const file of migrationFiles) {
+  for (const file of filesToCheck) {
     try {
       const content = readFileSync(file.path, 'utf-8')
 
