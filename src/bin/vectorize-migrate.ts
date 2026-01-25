@@ -260,7 +260,7 @@ export const script = async (config: SanitizedConfig): Promise<void> => {
       '\n[payloadcms-vectorize] No dims changes detected. ' +
         'This script is only needed when changing dims (which requires truncating the embeddings table). ',
     )
-    process.exit(0)
+    return
   }
 
   // Dims changed - we need to patch the most recent migration with TRUNCATE
