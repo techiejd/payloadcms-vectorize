@@ -7,7 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Changed
 
 - **Automatic IVFFLAT index creation**: The IVFFLAT index is now created automatically via the `afterSchemaInitHook` using Drizzle's `extraConfig`. No need to run `vectorize:migrate` for initial setup or when changing `ivfflatLists`.
-- **Simplified `vectorize:migrate` CLI**: The CLI now only handles only `dims` changes (which require truncating the embeddings table). Running it without dims changes shows a deprecation message. The script will be removed in 1.0.0.
+- **Simplified `vectorize:migrate` CLI**: The CLI now only handles only `dims` changes (which require truncating the embeddings table, so it truncates the embeddings table for you). Running it without dims changes shows a message letting you know nothing changed.
 
 ### Migration Notes
 

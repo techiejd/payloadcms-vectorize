@@ -748,6 +748,7 @@ describe('Migration CLI integration tests', () => {
           },
         ],
         db: postgresAdapter({
+          push: false,
           extensions: ['vector'],
           afterSchemaInit: [integration.afterSchemaInitHook],
           migrationDir: migrationsDir,

@@ -491,20 +491,19 @@ When you change static config values (`dims` or `ivfflatLists`):
 
 3. **Changing `dims`(Destructive, Optional)**:
 
-Skip this step if:
-- this is your first integration of the plugin.
-- you did not change the `dims`.
+Skip this step if you did not change the `dims`.
 
 Changing `dims` requires truncating the embeddings table because existing vectors are incompatible with the new dimensions. You must use the `vectorize:migrate` CLI to add the TRUNCATE statement:
 
-   ```bash
-   pnpm payload vectorize:migrate
-   ```
+```bash
+pnpm payload vectorize:migrate
+```
 
-   The CLI will:
-   - Detect the dims change
-   - Patch the migration with TRUNCATE TABLE (with CASCADE)
-   - Add appropriate down migration to restore the old column type
+The CLI will:
+
+- Detect the dims change
+- Patch the migration with TRUNCATE TABLE (with CASCADE)
+- Add appropriate down migration to restore the old column type
 
 4. **Review the migration file** in `src/migrations/`
 
@@ -514,7 +513,7 @@ Changing `dims` requires truncating the embeddings table because existing vector
    pnpm payload migrate
    ```
 
-5. **If `dims` changed**: Re-embed all your documents using the bulk embed feature.
+6. **If `dims` changed**: Re-embed all your documents using the bulk embed feature.
 
 **Schema name qualification:**
 
@@ -523,7 +522,6 @@ The CLI automatically uses the `schemaName` from your Postgres adapter configura
 **Idempotency:**
 
 Running `pnpm payload vectorize:migrate` multiple times with no config changes will not create duplicate migrations. The CLI detects when no changes are needed and exits early.
-
 
 ### Endpoints
 
