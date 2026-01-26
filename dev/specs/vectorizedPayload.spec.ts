@@ -6,9 +6,8 @@ import { buildDummyConfig, DIMS, getInitialMarkdownContent } from './constants.j
 import {
   createTestDb,
   waitForVectorizationJobs,
-  initializePayloadWithMigrations,
-  createTestMigrationsDir,
 } from './utils.js'
+import { getPayload } from 'payload'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
 import { chunkRichText, chunkText } from 'helpers/chunkers.js'
@@ -38,7 +37,6 @@ describe('VectorizedPayload', () => {
 
   beforeAll(async () => {
     await createTestDb({ dbName })
-    const { migrationsDir } = createTestMigrationsDir(dbName)
 
     const config = await buildDummyConfig({
       jobs: {
@@ -62,8 +60,6 @@ describe('VectorizedPayload', () => {
       db: postgresAdapter({
         extensions: ['vector'],
         afterSchemaInit: [integration.afterSchemaInitHook],
-        migrationDir: migrationsDir,
-        push: false,
         pool: {
           connectionString: `postgresql://postgres:password@localhost:5433/${dbName}`,
         },
@@ -99,7 +95,7 @@ describe('VectorizedPayload', () => {
       ],
     })
 
-    payload = await initializePayloadWithMigrations({
+    payload = await getPayload({
       config,
       key: `vectorized-payload-test-${Date.now()}`,
       cron: true,

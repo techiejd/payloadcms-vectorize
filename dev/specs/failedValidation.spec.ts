@@ -6,9 +6,8 @@ import { createVectorizeIntegration } from '../../src/index.js'
 import {
   createTestDb,
   waitForVectorizationJobs,
-  initializePayloadWithMigrations,
-  createTestMigrationsDir,
 } from './utils.js'
+import { getPayload } from 'payload'
 
 const DIMS = 8
 const dbName = 'failed_validation_test'
@@ -23,7 +22,7 @@ const { afterSchemaInitHook, payloadcmsVectorize } = createVectorizeIntegration(
   },
 })
 
-const buildMalformedConfig = async (migrationsDir: string) => {
+const buildMalformedConfig = async () => {
   return buildConfig({
     jobs: {
       tasks: [],
@@ -43,8 +42,6 @@ const buildMalformedConfig = async (migrationsDir: string) => {
     db: postgresAdapter({
       extensions: ['vector'],
       afterSchemaInit: [afterSchemaInitHook],
-      migrationDir: migrationsDir,
-      push: false,
       pool: {
         connectionString:
           process.env.DATABASE_URI ||
@@ -77,10 +74,9 @@ const buildMalformedConfig = async (migrationsDir: string) => {
 describe('Validation failures mark jobs as errored', () => {
   test('malformed chunk entry fails the vectorize job', async () => {
     await createTestDb({ dbName })
-    const { migrationsDir } = createTestMigrationsDir(dbName)
 
-    const config = await buildMalformedConfig(migrationsDir)
-    const payload = await initializePayloadWithMigrations({
+    const config = await buildMalformedConfig()
+    const payload = await getPayload({
       config,
       key: `failed-validation-test-${Date.now()}`,
       cron: true,

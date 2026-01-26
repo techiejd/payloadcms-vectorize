@@ -5,7 +5,8 @@ import { beforeAll, describe, expect, test } from 'vitest'
 import { createVectorizeIntegration } from 'payloadcms-vectorize'
 import { lexicalEditor } from '@payloadcms/richtext-lexical'
 import { postgresAdapter } from '@payloadcms/db-postgres'
-import { createTestDb, initializePayloadWithMigrations, createTestMigrationsDir } from './utils.js'
+import { createTestDb } from './utils.js'
+import { getPayload } from 'payload'
 import type { PostgresPayload } from '../../src/types.js'
 
 const DIMS_POOL1 = 8
@@ -18,7 +19,6 @@ describe('Multiple knowledge pools', () => {
 
   beforeAll(async () => {
     await createTestDb({ dbName })
-    const { migrationsDir } = createTestMigrationsDir(dbName)
 
     const multiPoolIntegration = createVectorizeIntegration({
       pool1: {
@@ -61,8 +61,6 @@ describe('Multiple knowledge pools', () => {
       db: postgresAdapter({
         extensions: ['vector'],
         afterSchemaInit: [multiPoolIntegration.afterSchemaInitHook],
-        migrationDir: migrationsDir,
-        push: false,
         pool: {
           connectionString: `postgresql://postgres:password@localhost:5433/${dbName}`,
         },
@@ -70,9 +68,10 @@ describe('Multiple knowledge pools', () => {
       plugins: [multiPoolIntegration.payloadcmsVectorize(multiPoolPluginOptions)],
     })
 
-    payload = await initializePayloadWithMigrations({
+    payload = await getPayload({
       config,
       key: `multipools-test-${Date.now()}`,
+      cron: true,
     })
   })
 

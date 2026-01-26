@@ -11,9 +11,8 @@ import { buildDummyConfig, DIMS, integration, plugin } from './constants.js'
 import {
   createTestDb,
   waitForVectorizationJobs,
-  initializePayloadWithMigrations,
-  createTestMigrationsDir,
 } from './utils.js'
+import { getPayload } from 'payload'
 import { createVectorSearchHandlers } from '../../src/endpoints/vectorSearch.js'
 import type { KnowledgePoolDynamicConfig } from 'payloadcms-vectorize'
 const CUSTOM_SCHEMA = 'custom'
@@ -24,7 +23,6 @@ describe('Custom schemaName support', () => {
 
   beforeAll(async () => {
     await createTestDb({ dbName })
-    const { migrationsDir } = createTestMigrationsDir(dbName)
 
     // Create the custom schema before Payload initializes
     const client = new Client({
@@ -47,8 +45,6 @@ describe('Custom schemaName support', () => {
       db: postgresAdapter({
         afterSchemaInit: [integration.afterSchemaInitHook],
         extensions: ['vector'],
-        migrationDir: migrationsDir,
-        push: false,
         pool: {
           connectionString: `postgresql://postgres:password@localhost:5433/${dbName}`,
         },
@@ -92,7 +88,7 @@ describe('Custom schemaName support', () => {
       ],
     })
 
-    payload = await initializePayloadWithMigrations({
+    payload = await getPayload({
       config,
       key: `schema-name-test-${Date.now()}`,
       cron: true,

@@ -51,6 +51,9 @@ export const createTestDb = async ({ dbName }: { dbName: string }) => {
  * 3. Run vectorize:migrate to patch with IVFFLAT index
  * 4. Apply migrations
  *
+ * NOTE: This function is only used by migration-specific tests (e.g., migrationCli.spec.ts).
+ * All other tests should use getPayload() directly without migrations.
+ *
  * @param config - A pre-built SanitizedConfig (must have migrationDir and push: false in db config)
  * @param key - Unique key for getPayload caching (prevents instance collisions in tests)
  * @param cron - Whether to enable cron jobs (default: true)
@@ -273,13 +276,6 @@ export async function buildPayloadWithIntegration({
   key,
   skipMigrations,
 }: BuildPayloadArgs): Promise<{ payload: Payload; config: SanitizedConfig }> {
-  // Create a unique migration directory for this test
-  const migrationsDir = join(process.cwd(), 'dev', `test-migrations-${dbName}`)
-  
-  // Clean up any existing migration directory
-  rmSync(migrationsDir, { recursive: true, force: true })
-  mkdirSync(migrationsDir, { recursive: true })
-
   const integration = createVectorizeIntegration({
     default: {
       dims: DEFAULT_DIMS,
@@ -299,8 +295,6 @@ export async function buildPayloadWithIntegration({
     db: postgresAdapter({
       extensions: ['vector'],
       afterSchemaInit: [integration.afterSchemaInitHook],
-      migrationDir: migrationsDir,
-      push: false, // Prevent dev mode schema push - use migrations only
       pool: {
         connectionString: `postgresql://postgres:password@localhost:5433/${dbName}`,
       },
@@ -329,11 +323,10 @@ export async function buildPayloadWithIntegration({
   })
 
   const payloadKey = key ?? `payload-${dbName}-${Date.now()}`
-  const payload = await initializePayloadWithMigrations({
+  const payload = await getPayload({
     config,
     key: payloadKey,
     cron: true,
-    skipMigrations,
   })
 
   return { payload, config }

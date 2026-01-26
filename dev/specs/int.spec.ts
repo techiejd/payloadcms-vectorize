@@ -17,9 +17,8 @@ import { DIMS, getInitialMarkdownContent } from './constants.js'
 import {
   createTestDb,
   waitForVectorizationJobs,
-  initializePayloadWithMigrations,
-  createTestMigrationsDir,
 } from './utils.js'
+import { getPayload } from 'payload'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { buildConfig } from 'payload'
 import { createVectorizeIntegration } from 'payloadcms-vectorize'
@@ -36,8 +35,6 @@ describe('Plugin integration tests', () => {
 
   beforeAll(async () => {
     await createTestDb({ dbName })
-
-    const { migrationsDir } = createTestMigrationsDir(dbName)
 
     // Create isolated integration for this test suite
     const integration = createVectorizeIntegration({
@@ -62,8 +59,6 @@ describe('Plugin integration tests', () => {
       db: postgresAdapter({
         extensions: ['vector'],
         afterSchemaInit: [integration.afterSchemaInitHook],
-        migrationDir: migrationsDir,
-        push: false, // Prevent dev mode schema push - use migrations only
         pool: {
           connectionString: `postgresql://postgres:password@localhost:5433/${dbName}`,
         },
@@ -108,8 +103,7 @@ describe('Plugin integration tests', () => {
       },
     })
 
-    // Initialize Payload with migrations
-    payload = await initializePayloadWithMigrations({
+    payload = await getPayload({
       config,
       key: `int-test-${Date.now()}`,
       cron: true,
