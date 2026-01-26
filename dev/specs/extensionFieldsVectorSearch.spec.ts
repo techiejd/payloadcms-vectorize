@@ -4,9 +4,8 @@ import { buildDummyConfig, DIMS, integration, plugin } from './constants.js'
 import {
   createTestDb,
   waitForVectorizationJobs,
-  initializePayloadWithMigrations,
-  createTestMigrationsDir,
 } from './utils.js'
+import { getPayload } from 'payload'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { chunkRichText, chunkText } from 'helpers/chunkers.js'
 import { createVectorSearchHandlers } from '../../src/endpoints/vectorSearch.js'
@@ -17,7 +16,6 @@ describe('extensionFields', () => {
     // Create a new payload instance with extensionFields
     const dbName = 'endpoint_test_extension'
     await createTestDb({ dbName })
-    const { migrationsDir } = createTestMigrationsDir(dbName)
     const defaultKnowledgePool: KnowledgePoolDynamicConfig = {
       collections: {
         posts: {
@@ -95,8 +93,6 @@ describe('extensionFields', () => {
       db: postgresAdapter({
         extensions: ['vector'],
         afterSchemaInit: [integration.afterSchemaInitHook],
-        migrationDir: migrationsDir,
-        push: false,
         pool: {
           connectionString: `postgresql://postgres:password@localhost:5433/${dbName}`,
         },
@@ -110,7 +106,7 @@ describe('extensionFields', () => {
       ],
     })
 
-    const payloadWithExtensions = await initializePayloadWithMigrations({
+    const payloadWithExtensions = await getPayload({
       config: configWithExtensions,
       key: `extension-fields-vector-search-test-${Date.now()}`,
       cron: true,

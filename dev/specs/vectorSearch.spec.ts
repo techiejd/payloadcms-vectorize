@@ -9,9 +9,8 @@ import {
   createMockBulkEmbeddings,
   createTestDb,
   waitForVectorizationJobs,
-  initializePayloadWithMigrations,
-  createTestMigrationsDir,
 } from './utils.js'
+import { getPayload } from 'payload'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { chunkRichText, chunkText } from 'helpers/chunkers.js'
 import { createVectorSearchHandlers } from '../../src/endpoints/vectorSearch.js'
@@ -82,7 +81,6 @@ describe('Search endpoint integration tests', () => {
 
   beforeAll(async () => {
     await createTestDb({ dbName })
-    const { migrationsDir } = createTestMigrationsDir(dbName)
 
     const config = await buildDummyConfig({
       jobs: {
@@ -106,8 +104,6 @@ describe('Search endpoint integration tests', () => {
       db: postgresAdapter({
         extensions: ['vector'],
         afterSchemaInit: [integration.afterSchemaInitHook],
-        migrationDir: migrationsDir,
-        push: false, // Prevent dev mode schema push - use migrations only
         pool: {
           connectionString: `postgresql://postgres:password@localhost:5433/${dbName}`,
         },
@@ -196,8 +192,7 @@ describe('Search endpoint integration tests', () => {
       ],
     })
 
-    // Initialize Payload with migrations
-    payload = await initializePayloadWithMigrations({
+    payload = await getPayload({
       config,
       key: `vector-search-test-${Date.now()}`,
       cron: true,

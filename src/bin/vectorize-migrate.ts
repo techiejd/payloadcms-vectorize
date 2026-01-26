@@ -1,6 +1,6 @@
 import type { SanitizedConfig } from 'payload'
 import { getPayload } from 'payload'
-import { readFileSync, writeFileSync, readdirSync, statSync, existsSync, rmSync } from 'fs'
+import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from 'fs'
 import { join, resolve } from 'path'
 import toSnakeCase from 'to-snake-case'
 
@@ -8,17 +8,17 @@ import { getVectorizedPayload } from '../types.js'
 import type { KnowledgePoolStaticConfig } from '../types.js'
 
 /**
- * Get prior state from existing migrations
+ * Get prior dims state from existing migrations
  */
-function getPriorStateFromMigrations(
+function getPriorDimsFromMigrations(
   migrationsDir: string,
   poolNames: string[],
-): Map<string, { dims: number | null; ivfflatLists: number | null }> {
-  const state = new Map<string, { dims: number | null; ivfflatLists: number | null }>()
+): Map<string, number | null> {
+  const state = new Map<string, number | null>()
 
   // Initialize with null (unknown state)
   for (const poolName of poolNames) {
-    state.set(poolName, { dims: null, ivfflatLists: null })
+    state.set(poolName, null)
   }
 
   if (!existsSync(migrationsDir)) {
@@ -36,58 +36,42 @@ function getPriorStateFromMigrations(
     }))
     .sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
 
-  // Read migration files to find vector config
-  for (const file of migrationFiles) {
+  // Skip the most recent migration when determining prior dims, since it may contain
+  // the pending dims change that we're trying to detect
+  const filesToCheck = migrationFiles.slice(1)
+
+  // Read migration files to find vector dims
+  for (const file of filesToCheck) {
     try {
       const content = readFileSync(file.path, 'utf-8')
-      
+
       // Extract only the UP function content to avoid matching values in DOWN function
       const upFunctionMatch = content.match(
         /export\s+async\s+function\s+up\s*\([^)]*\)[^{]*\{([\s\S]*?)(?=\}\s*(?:export\s+async\s+function\s+down|$))/i,
       )
       const upContent = upFunctionMatch ? upFunctionMatch[1] : content
 
-      // Look for IVFFLAT index creation with lists parameter
+      // Look for dims in vector column definition (pool-specific patterns)
       for (const poolName of poolNames) {
         const tableName = toSnakeCase(poolName)
-        const indexName = `${tableName}_embedding_ivfflat`
 
-        const indexMatch =
-          upContent.match(
-            new RegExp(
-              `db\\.execute\\(sql\\.raw.*?CREATE INDEX.*?"${indexName}".*?WITH\\s*\\(lists\\s*=\\s*(\\d+)\\)`,
-              'is',
-            ),
-          ) ||
-          upContent.match(
-            new RegExp(`CREATE INDEX.*?"${indexName}".*?WITH\\s*\\(lists\\s*=\\s*(\\d+)\\)`, 'is'),
-          ) ||
-          upContent.match(
-            new RegExp(`"${indexName}"[\\s\\S]*?lists\\s*=\\s*(\\d+)`, 'is'),
-          )
-        
-        if (indexMatch && !state.get(poolName)?.ivfflatLists) {
-          const lists = parseInt(indexMatch[1], 10)
-          const current = state.get(poolName) || { dims: null, ivfflatLists: null }
-          state.set(poolName, { ...current, ivfflatLists: lists })
-        }
-
-        // Check for dims in vector column definition (pool-specific patterns)
         const dimsMatch =
           upContent.match(
             new RegExp(`ALTER\\s+TABLE[^;]*?"${tableName}"[^;]*?vector\\((\\d+)\\)`, 'is'),
           ) ||
           upContent.match(
-            new RegExp(`CREATE\\s+TABLE[^;]*?"${tableName}"[^;]*?embedding[^;]*?vector\\((\\d+)\\)`, 'is'),
+            new RegExp(
+              `CREATE\\s+TABLE[^;]*?"${tableName}"[^;]*?embedding[^;]*?vector\\((\\d+)\\)`,
+              'is',
+            ),
           ) ||
           upContent.match(
             new RegExp(`"${tableName}"\\s*\\([^)]*embedding[^)]*vector\\((\\d+)\\)`, 'is'),
           )
-        
-        if (dimsMatch && !state.get(poolName)?.dims) {
+
+        if (dimsMatch && !state.get(poolName)) {
           const dims = parseInt(dimsMatch[1], 10)
-          const current = state.get(poolName) || { dims: null, ivfflatLists: null }
-          state.set(poolName, { ...current, dims })
+          state.set(poolName, dims)
         }
       }
     } catch (err) {
@@ -100,66 +84,49 @@ function getPriorStateFromMigrations(
 }
 
 /**
- * Generate SQL code for IVFFLAT index rebuild
+ * Generate SQL code for destructive dims change (truncate table)
  */
-function generateIvfflatRebuildCode(
+function generateDimsChangeTruncateCode(
   tableName: string,
   schemaName: string,
-  ivfflatLists: number,
-): string {
-  const indexName = `${tableName}_embedding_ivfflat`
-  return `  await db.execute(sql.raw(\`DROP INDEX IF EXISTS "${schemaName}"."${indexName}"\`));
-  await db.execute(sql.raw(\`CREATE INDEX "${indexName}" ON "${schemaName}"."${tableName}" USING ivfflat (embedding vector_cosine_ops) WITH (lists = ${ivfflatLists})\`));`
-}
-
-/**
- * Generate SQL code for column type change
- */
-function generateColumnTypeChangeCode(
-  tableName: string,
-  schemaName: string,
+  oldDims: number,
   newDims: number,
 ): string {
-  return `  // Change column type to new dimensions
-  await db.execute(sql.raw(\`ALTER TABLE "${schemaName}"."${tableName}" ALTER COLUMN embedding TYPE vector(${newDims})\`));`
-}
-
-/**
- * Generate SQL code for destructive dims change
- */
-function generateDimsChangeCode(
-  tableName: string,
-  schemaName: string,
-  newDims: number,
-  newIvfflatLists: number,
-): string {
-  const indexName = `${tableName}_embedding_ivfflat`
-  return `  // WARNING: Changing vector dimensions is destructive and requires re-embedding
-  // Step 1: Drop existing index
-  await db.execute(sql.raw(\`DROP INDEX IF EXISTS "${schemaName}"."${indexName}"\`));
-  // Step 2: Change column type (Payload migration may also generate this, but explicit is safer)
-  await db.execute(sql.raw(\`ALTER TABLE "${schemaName}"."${tableName}" ALTER COLUMN embedding TYPE vector(${newDims})\`));
-  // Step 3: Truncate table (destructive - all embeddings are lost)
+  return `  // payloadcms-vectorize: WARNING - Changing dims from ${oldDims} to ${newDims} is DESTRUCTIVE
+  // All existing embeddings will be deleted. You must re-embed all documents after this migration.
+  // Truncate table (destructive - all embeddings are lost)
   // Use CASCADE to handle foreign key constraints
-  await db.execute(sql.raw(\`TRUNCATE TABLE "${schemaName}"."${tableName}" CASCADE\`));
-  // Step 4: Recreate index with new parameters
-  await db.execute(sql.raw(\`CREATE INDEX "${indexName}" ON "${schemaName}"."${tableName}" USING ivfflat (embedding vector_cosine_ops) WITH (lists = ${newIvfflatLists})\`));`
+  await db.execute(sql.raw(\`TRUNCATE TABLE "${schemaName}"."${tableName}" CASCADE\`));`
 }
 
 /**
- * Patch a migration file with vector-specific SQL
+ * Generate SQL code for down migration (restore old dims column type)
  */
-function patchMigrationFile(
-  migrationPath: string,
-  staticConfigs: Record<string, KnowledgePoolStaticConfig>,
+function generateDimsChangeDownCode(
+  tableName: string,
   schemaName: string,
-  priorState: Map<string, { dims: number | null; ivfflatLists: number | null }>,
+  oldDims: number,
+): string {
+  return `  // payloadcms-vectorize: Revert column type to old dimensions
+  // WARNING: Data was truncated during up migration and cannot be restored.
+  // You will need to re-embed all documents after rolling back.
+  await db.execute(sql.raw(\`ALTER TABLE "${schemaName}"."${tableName}" ALTER COLUMN embedding TYPE vector(${oldDims})\`));`
+}
+
+/**
+ * Patch a migration file with truncate SQL for dims changes
+ */
+function patchMigrationFileForDimsChange(
+  migrationPath: string,
+  tableName: string,
+  schemaName: string,
+  oldDims: number,
+  newDims: number,
 ): void {
   let content = readFileSync(migrationPath, 'utf-8')
 
   // Ensure sql import exists for injected sql.raw usage
-  const sqlImportRegex =
-    /import\s+\{([^}]+)\}\s+from\s+['"]@payloadcms\/db-postgres['"]/
+  const sqlImportRegex = /import\s+\{([^}]+)\}\s+from\s+['"]@payloadcms\/db-postgres['"]/
   const importMatch = content.match(sqlImportRegex)
   if (importMatch) {
     const imports = importMatch[1]
@@ -175,83 +142,9 @@ function patchMigrationFile(
     content = `import { sql } from '@payloadcms/db-postgres'\n${content}`
   }
 
-  // Generate SQL code for each pool
-  const vectorUpCode: string[] = []
-  const vectorDownCode: string[] = []
-
-  for (const [poolName, config] of Object.entries(staticConfigs)) {
-    const tableName = toSnakeCase(poolName)
-    const priorConfig = priorState.get(poolName) || { dims: null, ivfflatLists: null }
-    const dimsChanged = priorConfig.dims !== null && priorConfig.dims !== config.dims
-    const ivfflatListsChanged =
-      priorConfig.ivfflatLists !== null && priorConfig.ivfflatLists !== config.ivfflatLists
-
-    // Check if dims changed (destructive) - handle this first as it includes index operations
-    if (dimsChanged) {
-      vectorUpCode.push(
-        `  // payloadcms-vectorize: WARNING - Changing dims from ${priorConfig.dims} to ${config.dims} is destructive`,
-      )
-      // When dims changes, we need to:
-      // 1. Drop existing index first
-      // 2. Change column type (Payload migration may also generate this)
-      // 3. Truncate table (destructive)
-      // 4. Recreate index with new ivfflatLists
-      vectorUpCode.push(
-        generateDimsChangeCode(tableName, schemaName, config.dims, config.ivfflatLists),
-      )
-      // Down migration: restore to previous state (but can't restore data)
-      vectorDownCode.push(
-        `  // payloadcms-vectorize: Revert dims change (WARNING: data was truncated and cannot be restored)`,
-      )
-      // Restore previous column type and index
-      vectorDownCode.push(
-        generateColumnTypeChangeCode(tableName, schemaName, priorConfig.dims || config.dims),
-      )
-      vectorDownCode.push(
-        generateIvfflatRebuildCode(
-          tableName,
-          schemaName,
-          priorConfig.ivfflatLists || config.ivfflatLists,
-        ),
-      )
-      vectorDownCode.push(`  // WARNING: Original data cannot be restored`)
-    } else if (ivfflatListsChanged) {
-      // Check if ivfflatLists changed (only if dims didn't change, since dims change handles index)
-      vectorUpCode.push(
-        `  // payloadcms-vectorize: Rebuild IVFFLAT index for ${poolName} with lists=${config.ivfflatLists}`,
-      )
-      vectorUpCode.push(generateIvfflatRebuildCode(tableName, schemaName, config.ivfflatLists))
-      // Down migration: rebuild with old lists
-      vectorDownCode.push(
-        `  // payloadcms-vectorize: Revert IVFFLAT index for ${poolName} to lists=${priorConfig.ivfflatLists}`,
-      )
-      vectorDownCode.push(
-        generateIvfflatRebuildCode(
-          tableName,
-          schemaName,
-          priorConfig.ivfflatLists || config.ivfflatLists,
-        ),
-      )
-    } else if (priorConfig.ivfflatLists === null) {
-      // First migration - ensure index exists (only if dims/ivfflatLists didn't change above)
-      // Note: Column is handled by Drizzle schema via afterSchemaInit
-      vectorUpCode.push(`  // payloadcms-vectorize: Initial IVFFLAT index setup for ${poolName}`)
-      vectorUpCode.push(
-        `  // Note: Embedding column is created via Drizzle schema (afterSchemaInit hook)`,
-      )
-      vectorUpCode.push(generateIvfflatRebuildCode(tableName, schemaName, config.ivfflatLists))
-      vectorDownCode.push(`  // payloadcms-vectorize: Drop index on rollback`)
-      const indexName = `${tableName}_embedding_ivfflat`
-      vectorDownCode.push(
-        `  await db.execute(sql.raw(\`DROP INDEX IF EXISTS "${schemaName}"."${indexName}"\`));`,
-      )
-    }
-  }
-
-  if (vectorUpCode.length === 0) {
-    // No changes needed
-    return
-  }
+  // Generate SQL code
+  const truncateCode = generateDimsChangeTruncateCode(tableName, schemaName, oldDims, newDims)
+  const downCode = generateDimsChangeDownCode(tableName, schemaName, oldDims)
 
   // Find the up function and insert code before the closing brace
   const upFunctionMatch = content.match(
@@ -278,7 +171,7 @@ function patchMigrationFile(
   const beforeBrace = content.substring(0, upFunctionStart + lastBraceIndex)
   const afterBrace = content.substring(upFunctionStart + lastBraceIndex)
 
-  const codeToInsert = '\n' + vectorUpCode.join('\n') + '\n'
+  const codeToInsert = '\n' + truncateCode + '\n'
   let newContent = beforeBrace + codeToInsert + afterBrace
 
   // Handle down function
@@ -292,18 +185,9 @@ function patchMigrationFile(
       if (downLastBraceIndex !== -1) {
         const beforeDownBrace = newContent.substring(0, downBodyStart + downLastBraceIndex)
         const afterDownBrace = newContent.substring(downBodyStart + downLastBraceIndex)
-        const downCodeToInsert = '\n' + vectorDownCode.join('\n') + '\n'
+        const downCodeToInsert = '\n' + downCode + '\n'
         newContent = beforeDownBrace + downCodeToInsert + afterDownBrace
       }
-    }
-  } else if (vectorDownCode.length > 0) {
-    // Add down function if it doesn't exist
-    const lastFileBrace = newContent.lastIndexOf('}')
-    if (lastFileBrace !== -1) {
-      const beforeLastBrace = newContent.substring(0, lastFileBrace)
-      const afterLastBrace = newContent.substring(lastFileBrace)
-      const downFunctionCode = `\n\nexport async function down({ payload, req }: { payload: any; req: any }): Promise<void> {\n${vectorDownCode.join('\n')}\n}`
-      newContent = beforeLastBrace + downFunctionCode + afterLastBrace
     }
   }
 
@@ -311,16 +195,17 @@ function patchMigrationFile(
 }
 
 /**
- * Bin script entry point for creating vector migrations
+ * Bin script entry point for patching vector migrations with truncate for dims changes
+ *
+ * NOTE: As of v0.5.3, the IVFFLAT index is created automatically via afterSchemaInitHook
+ * using Drizzle's extraConfig. This script is only needed when changing dims, which
+ * requires truncating the embeddings table (destructive operation).
  */
 export const script = async (config: SanitizedConfig): Promise<void> => {
-  const logPatchedSuccessfully = () =>
-    console.log('[payloadcms-vectorize] Migration patched successfully!')
-
-  // Get Payload instance for db operations and to access static configs via VectorizedPayload
+  // Get Payload instance to access static configs via VectorizedPayload
   const getPayloadOptions = {
     config,
-    // In test environment, use unique key and enable cron for job processing
+    // In test environment, use unique key
     ...(process.env.TEST_ENV ? { key: `vectorize-migrate-${Date.now()}` } : {}),
   }
 
@@ -341,169 +226,111 @@ export const script = async (config: SanitizedConfig): Promise<void> => {
 
   const poolNames = Object.keys(staticConfigs)
   const schemaName = (payload.db as any).schemaName || 'public'
-  
+
   // Get migrations directory
   const dbMigrationDir = (payload.db as any).migrationDir
   const migrationsDir = dbMigrationDir || resolve(process.cwd(), 'src/migrations')
 
-  // Get prior state from migrations
-  const priorState = getPriorStateFromMigrations(migrationsDir, poolNames)
+  // Get prior dims state from migrations
+  const priorDims = getPriorDimsFromMigrations(migrationsDir, poolNames)
 
-  // Check if any changes are needed
-  let hasChanges = false
-  let isFirstMigration = false
-  for (const [poolName, currentConfig] of Object.entries(staticConfigs)) {
-    const prior = priorState.get(poolName) || { dims: null, ivfflatLists: null }
-    
-    // Check if this is the first migration (no IVFFLAT index exists yet)
-    if (prior.ivfflatLists === null) {
-      isFirstMigration = true
-      hasChanges = true
-      break
-    }
-    
-    // Check for actual changes
-    if (
-      prior.dims !== null && prior.dims !== currentConfig.dims ||
-      (prior.ivfflatLists !== null && prior.ivfflatLists !== currentConfig.ivfflatLists)
-    ) {
-      hasChanges = true
-      break
+  // Check if any dims have changed
+  const dimsChanges: Array<{
+    poolName: string
+    tableName: string
+    oldDims: number
+    newDims: number
+  }> = []
+
+  for (const poolName of poolNames) {
+    const currentConfig = staticConfigs[poolName] as KnowledgePoolStaticConfig
+    const priorDimsValue = priorDims.get(poolName)
+    const currentDims = currentConfig.dims
+
+    // Only flag as change if we have a prior value AND it's different
+    if (priorDimsValue !== null && priorDimsValue !== undefined && priorDimsValue !== currentDims) {
+      dimsChanges.push({
+        poolName,
+        tableName: toSnakeCase(poolName),
+        oldDims: priorDimsValue as number,
+        newDims: currentDims,
+      })
     }
   }
 
-  // If no changes detected
-  if (!hasChanges) {
-    console.log('[payloadcms-vectorize] No configuration changes detected.')
+  // If no dims changes detected, show deprecation message
+  if (dimsChanges.length === 0) {
+    console.log(
+      '\n[payloadcms-vectorize] No dims changes detected. ' +
+        'This script is only needed when changing dims (which requires truncating the embeddings table). ',
+    )
     return
   }
-  
-  // Determine if there are actual schema changes (dims change) or just index parameter changes (ivfflatLists)
-  let hasSchemaChanges = false
-  for (const [poolName, currentConfig] of Object.entries(staticConfigs)) {
-    const prior = priorState.get(poolName) || { dims: null, ivfflatLists: null }
-    if (prior.dims !== null && prior.dims !== currentConfig.dims) {
-      hasSchemaChanges = true
-      break
-    }
+
+  // Dims changed - we need to patch the most recent migration with TRUNCATE
+  console.log('\n[payloadcms-vectorize] Detected dims changes:')
+  for (const change of dimsChanges) {
+    console.log(`  - ${change.poolName}: ${change.oldDims} → ${change.newDims}`)
   }
-  
-  if (isFirstMigration) {
-    // Check if there's a very recent migration file (created in last 10 seconds) that we should patch
-    const recentMigrations = existsSync(migrationsDir)
-      ? readdirSync(migrationsDir)
-          .filter(
-            (f) => (f.endsWith('.ts') || f.endsWith('.js')) && f !== 'index.ts' && f !== 'index.js',
-          )
-          .map((f) => ({
-            name: f,
-            path: join(migrationsDir, f),
-            mtime: statSync(join(migrationsDir, f)).mtime,
-          }))
-          .filter((m) => Date.now() - m.mtime.getTime() < 10000) // Created in last 10 seconds
-          .sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
-      : []
-    
-    if (recentMigrations.length > 0) {
-      const recentMigration = recentMigrations[0]
-      // Check if it already has IVFFLAT index code
-      const recentContent = readFileSync(recentMigration.path, 'utf-8')
-      const hasIvfflatCode = recentContent.includes('ivfflat') && (recentContent.includes('drizzle.execute') || recentContent.includes('CREATE INDEX'))
-      
-      if (!hasIvfflatCode) {
-        patchMigrationFile(recentMigration.path, staticConfigs, schemaName, priorState)
-        logPatchedSuccessfully()
-        return
-      }
-    }
+  console.log('')
+
+  // Find the most recent migration file
+  if (!existsSync(migrationsDir)) {
+    throw new Error(
+      `[payloadcms-vectorize] Migrations directory not found: ${migrationsDir}\n` +
+        `Please run 'payload migrate:create' first to create a migration for the dims change.`,
+    )
   }
 
-  // Create migration using Payload's API OR create manually for index-only changes
-  // Note: createMigration may not return the path, so we'll find the newest migration file after creation
-  const migrationsBefore = existsSync(migrationsDir)
-    ? readdirSync(migrationsDir)
-        .filter(
-          (f) => (f.endsWith('.ts') || f.endsWith('.js')) && f !== 'index.ts' && f !== 'index.js',
-        )
-        .map((f) => ({
-          name: f,
-          path: join(migrationsDir, f),
-          mtime: statSync(join(migrationsDir, f)).mtime,
-        }))
-        .sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
-    : []
+  const migrationFiles = readdirSync(migrationsDir)
+    .filter((f) => (f.endsWith('.ts') || f.endsWith('.js')) && f !== 'index.ts' && f !== 'index.js')
+    .map((f) => ({
+      name: f,
+      path: join(migrationsDir, f),
+      mtime: statSync(join(migrationsDir, f)).mtime,
+    }))
+    .sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
 
-  let migrationPath: string
-
-  // If there are schema changes (dims changed), use Payload's createMigration
-  // Otherwise (only ivfflatLists changed), create the migration file manually
-  if (hasSchemaChanges) {
-    await payload.db.createMigration({
-      migrationName: 'vectorize-config',
-      payload,
-      forceAcceptWarning: true,
-    })
-
-    // Find the newest migration file (should be the one just created)
-    const migrationsAfter = existsSync(migrationsDir)
-      ? readdirSync(migrationsDir)
-          .filter(
-            (f) => (f.endsWith('.ts') || f.endsWith('.js')) && f !== 'index.ts' && f !== 'index.js',
-          )
-          .map((f) => ({
-            name: f,
-            path: join(migrationsDir, f),
-            mtime: statSync(join(migrationsDir, f)).mtime,
-          }))
-          .sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
-      : []
-
-    // Find the migration that was just created (newest that wasn't there before)
-    const beforePaths = new Set(migrationsBefore.map((m) => m.path))
-    const newMigrations = migrationsAfter.filter((m) => !beforePaths.has(m.path))
-    const foundPath = newMigrations.length > 0 ? newMigrations[0].path : migrationsAfter[0]?.path
-
-    if (!foundPath) {
-      throw new Error(
-        '[payloadcms-vectorize] Failed to create migration file - no new migration found.',
-      )
-    }
-    migrationPath = foundPath
-  } else {
-    // No schema changes (only ivfflatLists changed) - create migration file manually
-    const now = new Date()
-    const timestamp = [
-      now.getFullYear(),
-      String(now.getMonth() + 1).padStart(2, '0'),
-      String(now.getDate()).padStart(2, '0'),
-      '_',
-      String(now.getHours()).padStart(2, '0'),
-      String(now.getMinutes()).padStart(2, '0'),
-      String(now.getSeconds()).padStart(2, '0'),
-    ].join('')
-    
-    const migrationFileName = `${timestamp}_vectorize_ivfflat_rebuild.ts`
-    migrationPath = join(migrationsDir, migrationFileName)
-    
-    const migrationTemplate = `import { MigrateUpArgs, MigrateDownArgs, sql } from '@payloadcms/db-postgres'
-
-export async function up({ db, payload, req }: MigrateUpArgs): Promise<void> {
-  // Index parameter changes only - no schema changes
-}
-
-export async function down({ db, payload, req }: MigrateDownArgs): Promise<void> {
-  // Revert index parameter changes
-}
-`
-    
-    writeFileSync(migrationPath, migrationTemplate, 'utf-8')
+  if (migrationFiles.length === 0) {
+    throw new Error(
+      `[payloadcms-vectorize] No migration files found in ${migrationsDir}\n` +
+        `Please run 'payload migrate:create' first to create a migration for the dims change.`,
+    )
   }
 
-  // Patch the migration file
-  patchMigrationFile(migrationPath, staticConfigs, schemaName, priorState)
-  logPatchedSuccessfully()
+  const latestMigration = migrationFiles[0]
 
-  // Only exit if not in test environment (when called from tests, just return)
+  // Check if migration already has truncate code
+  const migrationContent = readFileSync(latestMigration.path, 'utf-8')
+  if (
+    migrationContent.includes('TRUNCATE TABLE') &&
+    migrationContent.includes('payloadcms-vectorize')
+  ) {
+    console.log(
+      '[payloadcms-vectorize] Migration already patched with TRUNCATE. No changes needed.',
+    )
+    return
+  }
+
+  // Patch the migration for each dims change
+  for (const change of dimsChanges) {
+    patchMigrationFileForDimsChange(
+      latestMigration.path,
+      change.tableName,
+      schemaName,
+      change.oldDims,
+      change.newDims,
+    )
+  }
+
+  console.log(`[payloadcms-vectorize] Migration patched successfully: ${latestMigration.name}`)
+  console.log('')
+  console.log('⚠️  WARNING: This migration will TRUNCATE your embeddings table(s).')
+  console.log('   All existing embeddings will be deleted.')
+  console.log('   After running the migration, you must re-embed all documents.')
+  console.log('')
+
+  // Only exit if not in test environment
   if (process.env.NODE_ENV !== 'test' && !process.env.VITEST) {
     process.exit(0)
   }

@@ -4,7 +4,8 @@ import { chunkText, chunkRichText } from 'helpers/chunkers.js'
 import type { SerializedEditorState } from '@payloadcms/richtext-lexical/lexical'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { buildDummyConfig, getInitialMarkdownContent, integration, plugin } from './constants.js'
-import { createTestDb, initializePayloadWithMigrations, createTestMigrationsDir } from './utils.js'
+import { createTestDb } from './utils.js'
+import { getPayload } from 'payload'
 
 describe('Queue tests', () => {
   let config: SanitizedConfig
@@ -14,7 +15,6 @@ describe('Queue tests', () => {
   const dbName = 'queue_test'
   beforeAll(async () => {
     await createTestDb({ dbName })
-    const { migrationsDir } = createTestMigrationsDir(dbName)
 
     config = await buildDummyConfig({
       collections: [
@@ -29,8 +29,6 @@ describe('Queue tests', () => {
       db: postgresAdapter({
         extensions: ['vector'],
         afterSchemaInit: [integration.afterSchemaInitHook],
-        migrationDir: migrationsDir,
-        push: false,
         pool: {
           connectionString: `postgresql://postgres:password@localhost:5433/${dbName}`,
         },
@@ -69,9 +67,10 @@ describe('Queue tests', () => {
       ],
     })
 
-    payload = await initializePayloadWithMigrations({
+    payload = await getPayload({
       config,
       key: `queue-test-${Date.now()}`,
+      cron: true,
     })
     markdownContent = await getInitialMarkdownContent(config)
   })
