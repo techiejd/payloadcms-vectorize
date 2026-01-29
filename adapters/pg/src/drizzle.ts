@@ -1,4 +1,4 @@
-import type { KnowledgePoolName } from '../types.js'
+import type { KnowledgePoolName } from 'payloadcms-vectorize'
 import type { Table } from '@payloadcms/db-postgres/drizzle'
 
 // Extend Table to allow dynamic column access (for extension fields)

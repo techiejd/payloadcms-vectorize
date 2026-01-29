@@ -6,7 +6,7 @@ interface SearchResult {
   id: string
   title: string
   content: any
-  similarity: number
+  score: number
   chunkText: string
   fieldPath: string
 }
@@ -99,7 +99,7 @@ export default function SearchPage() {
                   <div className="flex justify-between items-start mb-3">
                     <h3 className="text-lg font-semibold text-gray-900">{result.title}</h3>
                     <span className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded">
-                      {Math.round(result.similarity * 100)}% match
+                      {Math.round(result.score * 100)}% match
                     </span>
                   </div>
 

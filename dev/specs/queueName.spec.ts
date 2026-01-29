@@ -3,9 +3,11 @@ import { beforeAll, describe, expect, test } from 'vitest'
 import { chunkText, chunkRichText } from 'helpers/chunkers.js'
 import type { SerializedEditorState } from '@payloadcms/richtext-lexical/lexical'
 import { postgresAdapter } from '@payloadcms/db-postgres'
-import { buildDummyConfig, getInitialMarkdownContent, integration, plugin } from './constants.js'
+import { buildDummyConfig, getInitialMarkdownContent } from './constants.js'
 import { createTestDb } from './utils.js'
 import { getPayload } from 'payload'
+import payloadcmsVectorize from 'payloadcms-vectorize'
+import { createMockAdapter } from 'helpers/mockAdapter.js'
 
 describe('Queue tests', () => {
   let config: SanitizedConfig
@@ -13,6 +15,7 @@ describe('Queue tests', () => {
   let markdownContent: SerializedEditorState
   const expectedQueueName = 'queueName'
   const dbName = 'queue_test'
+  const adapter = createMockAdapter()
   beforeAll(async () => {
     await createTestDb({ dbName })
 
@@ -27,14 +30,13 @@ describe('Queue tests', () => {
         },
       ],
       db: postgresAdapter({
-        extensions: ['vector'],
-        afterSchemaInit: [integration.afterSchemaInitHook],
         pool: {
           connectionString: `postgresql://postgres:password@localhost:5433/${dbName}`,
         },
       }),
       plugins: [
-        plugin({
+        payloadcmsVectorize({
+          dbAdapter: adapter,
           realtimeQueueName: expectedQueueName,
           knowledgePools: {
             default: {
@@ -49,7 +51,7 @@ describe('Queue tests', () => {
                     }
                     // Process content
                     if (doc.content) {
-                      const contentChunks = await chunkRichText(doc.content, payload)
+                      const contentChunks = await chunkRichText(doc.content, payload.config)
                       chunks.push(...contentChunks.map((chunk) => ({ chunk })))
                     }
                     return chunks

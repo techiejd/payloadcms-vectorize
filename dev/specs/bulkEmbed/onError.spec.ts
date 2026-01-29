@@ -10,6 +10,7 @@ import {
   waitForBulkJobs,
 } from '../utils.js'
 import { makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
+import { createMockAdapter } from 'helpers/mockAdapter.js'
 
 const DIMS = DEFAULT_DIMS
 const dbName = `bulk_onerror_${Date.now()}`
@@ -29,6 +30,7 @@ describe('Bulk embed - onError callback', () => {
     const built = await buildPayloadWithIntegration({
       dbName,
       pluginOpts: {
+        dbAdapter: createMockAdapter(),
         knowledgePools: {
           default: {
             collections: {

@@ -139,10 +139,10 @@ export const createRichTextChunker = async (config: SanitizedConfig) => {
 // Rich text chunker specifically for SerializedEditorState
 export const chunkRichText = async (
   richText: SerializedEditorState,
-  payload: Payload,
+  config: SanitizedConfig,
 ): Promise<string[]> => {
   // Create chunker with payload config and chunk the rich text
-  const chunk = await createRichTextChunker(payload.config)
+  const chunk = await createRichTextChunker(config)
   return await chunk(richText)
 }
 
