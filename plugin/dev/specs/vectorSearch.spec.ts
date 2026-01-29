@@ -1,0 +1,306 @@
+import type { Payload } from 'payload'
+
+import { beforeAll, describe, expect, test } from 'vitest'
+import {
+  makeDummyEmbedDocs,
+  makeDummyEmbedQuery,
+  testEmbeddingVersion,
+} from '@payloadcms-vectorize/dev/embed'
+import { type SerializedEditorState } from '@payloadcms/richtext-lexical/lexical'
+import { buildDummyConfig, DIMS } from './constants.js'
+import { getInitialMarkdownContent } from '@payloadcms-vectorize/dev/constants'
+import {
+  BULK_QUEUE_NAMES,
+  createMockBulkEmbeddings,
+  createTestDb,
+  waitForVectorizationJobs,
+} from './utils.js'
+import { getPayload } from 'payload'
+import { postgresAdapter } from '@payloadcms/db-postgres'
+import { chunkRichText, chunkText } from '@payloadcms-vectorize/dev/chunkers'
+import { createVectorSearchHandlers } from '../../src/endpoints/vectorSearch.js'
+import { createVectorizeIntegration, type KnowledgePoolDynamicConfig } from 'payloadcms-vectorize'
+import {
+  expectValidVectorSearchResults,
+  expectResultsOrderedBySimilarity,
+  expectResultsRespectWhere,
+} from './helpers/vectorSearchExpectations.js'
+
+const embedFn = makeDummyEmbedQuery(DIMS)
+
+// Helper function to perform vector search directly
+async function performVectorSearch(
+  payload: Payload,
+  query: any,
+  knowledgePool: string = 'default',
+  where?: any,
+  limit?: number,
+): Promise<Response> {
+  const knowledgePools: Record<string, KnowledgePoolDynamicConfig> = {
+    default: {
+      collections: {},
+      embeddingConfig: {
+        version: testEmbeddingVersion,
+        queryFn: makeDummyEmbedQuery(DIMS),
+        realTimeIngestionFn: makeDummyEmbedDocs(DIMS),
+      },
+    },
+  }
+  const searchHandler = createVectorSearchHandlers(knowledgePools).requestHandler
+
+  // Create a mock request object
+  const mockRequest = {
+    json: async () => ({
+      query,
+      knowledgePool,
+      ...(where ? { where } : {}),
+      ...(limit ? { limit } : {}),
+    }),
+    payload,
+  } as any
+
+  return await searchHandler(mockRequest)
+}
+
+const integration = createVectorizeIntegration({
+  default: {
+    dims: DIMS,
+    ivfflatLists: 1,
+  },
+  nonSnakeCasePost: {
+    dims: DIMS,
+    ivfflatLists: 1,
+  },
+  'test-non-snake-case-post': {
+    dims: DIMS,
+    ivfflatLists: 1,
+  },
+})
+const plugin = integration.payloadcmsVectorize
+
+describe('Search endpoint integration tests', () => {
+  let payload: Payload
+  let markdownContent: SerializedEditorState
+  const titleAndQuery = 'My query is a title'
+  const dbName = 'endpoint_test'
+
+  beforeAll(async () => {
+    await createTestDb({ dbName })
+
+    const config = await buildDummyConfig({
+      jobs: {
+        tasks: [],
+        autoRun: [
+          {
+            cron: '*/5 * * * * *', // Run every 5 seconds
+            limit: 10,
+          },
+        ],
+      },
+      collections: [
+        {
+          slug: 'posts',
+          fields: [
+            { name: 'title', type: 'text' },
+            { name: 'content', type: 'richText' },
+          ],
+        },
+      ],
+      db: postgresAdapter({
+        extensions: ['vector'],
+        afterSchemaInit: [integration.afterSchemaInitHook],
+        pool: {
+          connectionString: `postgresql://postgres:password@localhost:5433/${dbName}`,
+        },
+      }),
+      plugins: [
+        plugin({
+          knowledgePools: {
+            default: {
+              collections: {
+                posts: {
+                  toKnowledgePool: async (doc, payload) => {
+                    const chunks: Array<{ chunk: string }> = []
+                    // Process title
+                    if (doc.title) {
+                      const titleChunks = chunkText(doc.title)
+                      chunks.push(...titleChunks.map((chunk) => ({ chunk })))
+                    }
+                    // Process content
+                    if (doc.content) {
+                      const contentChunks = await chunkRichText(doc.content, payload)
+                      chunks.push(...contentChunks.map((chunk) => ({ chunk })))
+                    }
+                    return chunks
+                  },
+                },
+              },
+              embeddingConfig: {
+                version: testEmbeddingVersion,
+                queryFn: makeDummyEmbedQuery(DIMS),
+                realTimeIngestionFn: makeDummyEmbedDocs(DIMS),
+              },
+            },
+            nonSnakeCasePost: {
+              collections: {
+                posts: {
+                  toKnowledgePool: async (doc, payload) => {
+                    const chunks: Array<{ chunk: string }> = []
+                    // Process title
+                    if (doc.title) {
+                      const titleChunks = chunkText(doc.title)
+                      chunks.push(...titleChunks.map((chunk) => ({ chunk })))
+                    }
+                    // Process content
+                    if (doc.content) {
+                      const contentChunks = await chunkRichText(doc.content, payload)
+                      chunks.push(...contentChunks.map((chunk) => ({ chunk })))
+                    }
+                    return chunks
+                  },
+                },
+              },
+              embeddingConfig: {
+                version: testEmbeddingVersion,
+                queryFn: makeDummyEmbedQuery(DIMS),
+                realTimeIngestionFn: makeDummyEmbedDocs(DIMS),
+              },
+            },
+            'test-non-snake-case-post': {
+              collections: {
+                posts: {
+                  toKnowledgePool: async (doc, payload) => {
+                    const chunks: Array<{ chunk: string }> = []
+                    // Process title
+                    if (doc.title) {
+                      const titleChunks = chunkText(doc.title)
+                      chunks.push(...titleChunks.map((chunk) => ({ chunk })))
+                    }
+                    // Process content
+                    if (doc.content) {
+                      const contentChunks = await chunkRichText(doc.content, payload)
+                      chunks.push(...contentChunks.map((chunk) => ({ chunk })))
+                    }
+                    return chunks
+                  },
+                },
+              },
+              embeddingConfig: {
+                version: testEmbeddingVersion,
+                queryFn: makeDummyEmbedQuery(DIMS),
+                bulkEmbeddingsFns: createMockBulkEmbeddings({ statusSequence: ['succeeded'] }),
+              },
+            },
+          },
+          bulkQueueNames: BULK_QUEUE_NAMES,
+        }),
+      ],
+    })
+
+    payload = await getPayload({
+      config,
+      key: `vector-search-test-${Date.now()}`,
+      cron: true,
+    })
+    markdownContent = await getInitialMarkdownContent(config)
+  })
+
+  test('querying a title should return the title', async () => {
+    // This should create multiple embeddings for the title and content
+    const post = await payload.create({
+      collection: 'posts',
+      data: {
+        title: titleAndQuery,
+        content: markdownContent as unknown as any,
+      },
+    })
+
+    // Wait for vectorization jobs to complete
+    await waitForVectorizationJobs(payload)
+    const response = await performVectorSearch(payload, titleAndQuery)
+    const json = await response.json()
+
+    expect(json).toHaveProperty('results')
+    expectValidVectorSearchResults(json.results, {
+      checkShape: true,
+      expectedTitle: {
+        title: titleAndQuery,
+        postId: String(post.id),
+        embeddingVersion: testEmbeddingVersion,
+      },
+    })
+  })
+
+  test('search results are ordered by similarity (highest first)', async () => {
+    const response = await performVectorSearch(payload, titleAndQuery)
+    const json = await response.json()
+
+    expectResultsOrderedBySimilarity(json.results)
+  })
+
+  test('search handles empty query gracefully', async () => {
+    const response = await performVectorSearch(payload, '')
+
+    expect(response.status).toBe(400)
+    const error = await response.json()
+    expect(error).toHaveProperty('error')
+    expect(error.error).toContain('Query is required')
+  })
+
+  test('search handles missing query parameter', async () => {
+    const response = await performVectorSearch(payload, undefined)
+
+    expect(response.status).toBe(400)
+    const error = await response.json()
+    expect(error).toHaveProperty('error')
+    expect(error.error).toContain('Query is required')
+  })
+
+  test('search handles non-string query', async () => {
+    const response = await performVectorSearch(payload, 123)
+
+    expect(response.status).toBe(400)
+    const error = await response.json()
+    expect(error).toHaveProperty('error')
+    expect(error.error).toContain('Query is required and must be a string')
+  })
+
+  describe('where', () => {
+    test('filters results by extensionFields using WHERE clause', async () => {
+      const sharedText = 'Shared searchable content'
+
+      // Create two posts with same text but different categories
+      const post1 = await payload.create({
+        collection: 'posts',
+        data: {
+          title: sharedText,
+          content: null,
+        },
+      })
+
+      const post2 = await payload.create({
+        collection: 'posts',
+        data: {
+          title: sharedText,
+          content: null,
+        },
+      })
+
+      // Wait for vectorization jobs to complete
+      await waitForVectorizationJobs(payload)
+
+      // Search without WHERE - should return both
+      const responseAll = await performVectorSearch(payload, sharedText)
+      const jsonAll = await responseAll.json()
+
+      expect(jsonAll.results.length).toBeGreaterThanOrEqual(2)
+
+      // Search with WHERE clause filtering by docId - should return only one
+      const responseFiltered = await performVectorSearch(payload, sharedText, 'default', {
+        docId: { equals: String(post1.id) },
+      })
+      const jsonFiltered = await responseFiltered.json()
+      expectResultsRespectWhere(jsonFiltered.results, (r) => r.docId === String(post1.id))
+    })
+  })
+})

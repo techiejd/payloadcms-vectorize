@@ -50,7 +50,7 @@ yarn-error.log*
 /playwright/.cache/
 
 # Secrets
-*/secret
+secret/
 
 # Cursor
 .cursor/

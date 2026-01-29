@@ -1,0 +1,11 @@
+{
+  "name": "@payloadcms-vectorize/dev",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": "./*.ts"
+  },
+  "scripts": {
+    "test": "vitest run chunkers.spec.ts"
+  }
+}
