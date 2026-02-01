@@ -14,18 +14,23 @@ import { getPayload } from 'payload'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { chunkRichText, chunkText } from 'helpers/chunkers.js'
 import { createVectorSearchHandlers } from '../../src/endpoints/vectorSearch.js'
-import { createVectorizeIntegration, type KnowledgePoolDynamicConfig } from 'payloadcms-vectorize'
+import payloadcmsVectorize, {
+  DbAdapter,
+  type KnowledgePoolDynamicConfig,
+} from 'payloadcms-vectorize'
 import {
   expectValidVectorSearchResults,
-  expectResultsOrderedBySimilarity,
+  expectResultsOrderedByScore,
   expectResultsRespectWhere,
 } from './helpers/vectorSearchExpectations.js'
+import { createMockAdapter } from 'helpers/mockAdapter.js'
 
 const embedFn = makeDummyEmbedQuery(DIMS)
 
 // Helper function to perform vector search directly
 async function performVectorSearch(
   payload: Payload,
+  adapter: DbAdapter,
   query: any,
   knowledgePool: string = 'default',
   where?: any,
@@ -41,7 +46,7 @@ async function performVectorSearch(
       },
     },
   }
-  const searchHandler = createVectorSearchHandlers(knowledgePools).requestHandler
+  const searchHandler = createVectorSearchHandlers(knowledgePools, adapter).requestHandler
 
   // Create a mock request object
   const mockRequest = {
@@ -57,30 +62,16 @@ async function performVectorSearch(
   return await searchHandler(mockRequest)
 }
 
-const integration = createVectorizeIntegration({
-  default: {
-    dims: DIMS,
-    ivfflatLists: 1,
-  },
-  nonSnakeCasePost: {
-    dims: DIMS,
-    ivfflatLists: 1,
-  },
-  'test-non-snake-case-post': {
-    dims: DIMS,
-    ivfflatLists: 1,
-  },
-})
-const plugin = integration.payloadcmsVectorize
-
 describe('Search endpoint integration tests', () => {
   let payload: Payload
+  let adapter: DbAdapter
   let markdownContent: SerializedEditorState
   const titleAndQuery = 'My query is a title'
   const dbName = 'endpoint_test'
 
   beforeAll(async () => {
     await createTestDb({ dbName })
+    adapter = createMockAdapter()
 
     const config = await buildDummyConfig({
       jobs: {
@@ -102,14 +93,13 @@ describe('Search endpoint integration tests', () => {
         },
       ],
       db: postgresAdapter({
-        extensions: ['vector'],
-        afterSchemaInit: [integration.afterSchemaInitHook],
         pool: {
           connectionString: `postgresql://postgres:password@localhost:5433/${dbName}`,
         },
       }),
       plugins: [
-        plugin({
+        payloadcmsVectorize({
+          dbAdapter: adapter,
           knowledgePools: {
             default: {
               collections: {
@@ -123,7 +113,7 @@ describe('Search endpoint integration tests', () => {
                     }
                     // Process content
                     if (doc.content) {
-                      const contentChunks = await chunkRichText(doc.content, payload)
+                      const contentChunks = await chunkRichText(doc.content, payload.config)
                       chunks.push(...contentChunks.map((chunk) => ({ chunk })))
                     }
                     return chunks
@@ -148,7 +138,7 @@ describe('Search endpoint integration tests', () => {
                     }
                     // Process content
                     if (doc.content) {
-                      const contentChunks = await chunkRichText(doc.content, payload)
+                      const contentChunks = await chunkRichText(doc.content, payload.config)
                       chunks.push(...contentChunks.map((chunk) => ({ chunk })))
                     }
                     return chunks
@@ -173,7 +163,7 @@ describe('Search endpoint integration tests', () => {
                     }
                     // Process content
                     if (doc.content) {
-                      const contentChunks = await chunkRichText(doc.content, payload)
+                      const contentChunks = await chunkRichText(doc.content, payload.config)
                       chunks.push(...contentChunks.map((chunk) => ({ chunk })))
                     }
                     return chunks
@@ -212,7 +202,7 @@ describe('Search endpoint integration tests', () => {
 
     // Wait for vectorization jobs to complete
     await waitForVectorizationJobs(payload)
-    const response = await performVectorSearch(payload, titleAndQuery)
+    const response = await performVectorSearch(payload, adapter, titleAndQuery)
     const json = await response.json()
 
     expect(json).toHaveProperty('results')
@@ -226,15 +216,15 @@ describe('Search endpoint integration tests', () => {
     })
   })
 
-  test('search results are ordered by similarity (highest first)', async () => {
-    const response = await performVectorSearch(payload, titleAndQuery)
+  test('search results are ordered by score (highest first)', async () => {
+    const response = await performVectorSearch(payload, adapter, titleAndQuery)
     const json = await response.json()
 
-    expectResultsOrderedBySimilarity(json.results)
+    expectResultsOrderedByScore(json.results)
   })
 
   test('search handles empty query gracefully', async () => {
-    const response = await performVectorSearch(payload, '')
+    const response = await performVectorSearch(payload, adapter, '')
 
     expect(response.status).toBe(400)
     const error = await response.json()
@@ -243,7 +233,7 @@ describe('Search endpoint integration tests', () => {
   })
 
   test('search handles missing query parameter', async () => {
-    const response = await performVectorSearch(payload, undefined)
+    const response = await performVectorSearch(payload, adapter, undefined)
 
     expect(response.status).toBe(400)
     const error = await response.json()
@@ -252,7 +242,7 @@ describe('Search endpoint integration tests', () => {
   })
 
   test('search handles non-string query', async () => {
-    const response = await performVectorSearch(payload, 123)
+    const response = await performVectorSearch(payload, adapter, 123)
 
     expect(response.status).toBe(400)
     const error = await response.json()
@@ -285,13 +275,13 @@ describe('Search endpoint integration tests', () => {
       await waitForVectorizationJobs(payload)
 
       // Search without WHERE - should return both
-      const responseAll = await performVectorSearch(payload, sharedText)
+      const responseAll = await performVectorSearch(payload, adapter, sharedText)
       const jsonAll = await responseAll.json()
 
       expect(jsonAll.results.length).toBeGreaterThanOrEqual(2)
 
       // Search with WHERE clause filtering by docId - should return only one
-      const responseFiltered = await performVectorSearch(payload, sharedText, 'default', {
+      const responseFiltered = await performVectorSearch(payload, adapter, sharedText, 'default', {
         docId: { equals: String(post1.id) },
       })
       const jsonFiltered = await responseFiltered.json()

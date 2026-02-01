@@ -2,12 +2,15 @@ import type { Payload, SanitizedConfig } from 'payload'
 
 import { buildConfig } from 'payload'
 import { beforeAll, describe, expect, test } from 'vitest'
-import { createVectorizeIntegration } from 'payloadcms-vectorize'
 import { lexicalEditor } from '@payloadcms/richtext-lexical'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { createTestDb } from './utils.js'
 import { getPayload } from 'payload'
+import { createPostgresVectorIntegration } from '../../src/index.js'
+import payloadcmsVectorize from 'payloadcms-vectorize'
 import type { PostgresPayload } from '../../src/types.js'
+
+const createVectorizeIntegration = createPostgresVectorIntegration
 
 const DIMS_POOL1 = 8
 const DIMS_POOL2 = 16
@@ -31,29 +34,6 @@ describe('Multiple knowledge pools', () => {
       },
     })
 
-    const multiPoolPluginOptions = {
-      knowledgePools: {
-        pool1: {
-          collections: {},
-          embeddingConfig: {
-            version: 'test-pool1',
-            queryFn: async () => new Array(DIMS_POOL1).fill(0),
-            realTimeIngestionFn: async (texts: string[]) =>
-              texts.map(() => new Array(DIMS_POOL1).fill(0)),
-          },
-        },
-        pool2: {
-          collections: {},
-          embeddingConfig: {
-            version: 'test-pool2',
-            queryFn: async () => new Array(DIMS_POOL2).fill(0),
-            realTimeIngestionFn: async (texts: string[]) =>
-              texts.map(() => new Array(DIMS_POOL2).fill(0)),
-          },
-        },
-      },
-    }
-
     config = await buildConfig({
       secret: process.env.PAYLOAD_SECRET || 'test-secret',
       collections: [],
@@ -65,7 +45,31 @@ describe('Multiple knowledge pools', () => {
           connectionString: `postgresql://postgres:password@localhost:5433/${dbName}`,
         },
       }),
-      plugins: [multiPoolIntegration.payloadcmsVectorize(multiPoolPluginOptions)],
+      plugins: [
+        payloadcmsVectorize({
+          dbAdapter: multiPoolIntegration.adapter,
+          knowledgePools: {
+            pool1: {
+              collections: {},
+              embeddingConfig: {
+                version: 'test-pool1',
+                queryFn: async () => new Array(DIMS_POOL1).fill(0),
+                realTimeIngestionFn: async (texts: string[]) =>
+                  texts.map(() => new Array(DIMS_POOL1).fill(0)),
+              },
+            },
+            pool2: {
+              collections: {},
+              embeddingConfig: {
+                version: 'test-pool2',
+                queryFn: async () => new Array(DIMS_POOL2).fill(0),
+                realTimeIngestionFn: async (texts: string[]) =>
+                  texts.map(() => new Array(DIMS_POOL2).fill(0)),
+              },
+            },
+          },
+        }),
+      ],
     })
 
     payload = await getPayload({

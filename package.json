@@ -1,6 +1,6 @@
 {
   "name": "payloadcms-vectorize",
-  "version": "0.5.3",
+  "version": "0.6.0-beta",
   "description": "A plugin to vectorize collections for RAG in Payload 3.0",
   "license": "MIT",
   "type": "module",
@@ -40,7 +40,8 @@
     "test:teardown": "docker-compose -f dev/docker-compose.test.yml down",
     "test": "pnpm test:int && pnpm test:e2e",
     "test:e2e": "playwright test",
-    "test:int": "cross-env DOTENV_CONFIG_PATH=dev/.env.test NODE_OPTIONS='--require=dotenv/config --import=tsx' vitest"
+    "test:int": "cross-env DOTENV_CONFIG_PATH=dev/.env.test NODE_OPTIONS='--require=dotenv/config --import=tsx' vitest",
+    "test:adapters:pg": "cross-env DOTENV_CONFIG_PATH=dev/.env.test NODE_OPTIONS='--require=dotenv/config --import=tsx' vitest --config adapters/pg/vitest.config.js"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",

@@ -3,37 +3,28 @@ import type { Payload } from 'payload'
 import { beforeAll, describe, expect, test } from 'vitest'
 import { getVectorizedPayload, VectorizedPayload } from '../../src/types.js'
 import { buildDummyConfig, DIMS, getInitialMarkdownContent } from './constants.js'
-import {
-  createTestDb,
-  waitForVectorizationJobs,
-} from './utils.js'
+import { createTestDb, waitForVectorizationJobs } from './utils.js'
 import { getPayload } from 'payload'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
 import { chunkRichText, chunkText } from 'helpers/chunkers.js'
-import { createVectorizeIntegration } from 'payloadcms-vectorize'
+import payloadcmsVectorize from 'payloadcms-vectorize'
 import { type SerializedEditorState } from '@payloadcms/richtext-lexical/lexical'
 import {
   expectValidVectorSearchResults,
-  expectResultsOrderedBySimilarity,
+  expectResultsOrderedByScore,
   expectResultsRespectLimit,
   expectResultsRespectWhere,
   expectResultsContainTitle,
 } from './helpers/vectorSearchExpectations.js'
-
-const integration = createVectorizeIntegration({
-  default: {
-    dims: DIMS,
-    ivfflatLists: 1,
-  },
-})
-const plugin = integration.payloadcmsVectorize
+import { createMockAdapter } from 'helpers/mockAdapter.js'
 
 describe('VectorizedPayload', () => {
   let payload: Payload
   let markdownContent: SerializedEditorState
   const titleAndQuery = 'VectorizedPayload Test Title'
   const dbName = 'vectorized_payload_test'
+  const adapter = createMockAdapter()
 
   beforeAll(async () => {
     await createTestDb({ dbName })
@@ -58,14 +49,13 @@ describe('VectorizedPayload', () => {
         },
       ],
       db: postgresAdapter({
-        extensions: ['vector'],
-        afterSchemaInit: [integration.afterSchemaInitHook],
         pool: {
           connectionString: `postgresql://postgres:password@localhost:5433/${dbName}`,
         },
       }),
       plugins: [
-        plugin({
+        payloadcmsVectorize({
+          dbAdapter: adapter,
           knowledgePools: {
             default: {
               collections: {
@@ -77,7 +67,7 @@ describe('VectorizedPayload', () => {
                       chunks.push(...titleChunks.map((chunk) => ({ chunk })))
                     }
                     if (doc.content) {
-                      const contentChunks = await chunkRichText(doc.content, payload)
+                      const contentChunks = await chunkRichText(doc.content, payload.config)
                       chunks.push(...contentChunks.map((chunk) => ({ chunk })))
                     }
                     return chunks
@@ -133,13 +123,13 @@ describe('VectorizedPayload', () => {
     })
 
     test('payload has search method', () => {
-      const vectorizedPayload = getVectorizedPayload<'default'>(payload)
+      const vectorizedPayload = getVectorizedPayload(payload)
       expect(vectorizedPayload).not.toBeNull()
       expect(typeof vectorizedPayload!.search).toBe('function')
     })
 
     test('search returns an array of VectorSearchResult', async () => {
-      const vectorizedPayload = getVectorizedPayload<'default'>(payload)!
+      const vectorizedPayload = getVectorizedPayload(payload)!
 
       const results = await vectorizedPayload.search({
         query: titleAndQuery,
@@ -150,8 +140,8 @@ describe('VectorizedPayload', () => {
       expectValidVectorSearchResults(results, { checkShape: true })
     })
 
-    test('search results are ordered by similarity (highest first)', async () => {
-      const vectorizedPayload = getVectorizedPayload<'default'>(payload)!
+    test('search results are ordered by score (highest first)', async () => {
+      const vectorizedPayload = getVectorizedPayload(payload)!
 
       const results = await vectorizedPayload.search({
         query: titleAndQuery,
@@ -159,11 +149,11 @@ describe('VectorizedPayload', () => {
         limit: 10,
       })
 
-      expectResultsOrderedBySimilarity(results)
+      expectResultsOrderedByScore(results)
     })
 
     test('search respects limit parameter', async () => {
-      const vectorizedPayload = getVectorizedPayload<'default'>(payload)!
+      const vectorizedPayload = getVectorizedPayload(payload)!
 
       const results = await vectorizedPayload.search({
         query: titleAndQuery,
@@ -175,7 +165,7 @@ describe('VectorizedPayload', () => {
     })
 
     test('search respects where clause', async () => {
-      const vectorizedPayload = getVectorizedPayload<'default'>(payload)!
+      const vectorizedPayload = getVectorizedPayload(payload)!
 
       const results = await vectorizedPayload.search({
         query: titleAndQuery,
@@ -190,7 +180,7 @@ describe('VectorizedPayload', () => {
     })
 
     test('querying a title should return the title as top result', async () => {
-      const vectorizedPayload = getVectorizedPayload<'default'>(payload)!
+      const vectorizedPayload = getVectorizedPayload(payload)!
 
       const results = await vectorizedPayload.search({
         query: titleAndQuery,
@@ -253,7 +243,7 @@ describe('VectorizedPayload', () => {
     })
 
     test('bulkEmbed throws error when bulk embedding not configured', async () => {
-      const vectorizedPayload = getVectorizedPayload<'default'>(payload)!
+      const vectorizedPayload = getVectorizedPayload(payload)!
 
       // This pool doesn't have bulkEmbeddingsFns configured
       await expect(vectorizedPayload.bulkEmbed({ knowledgePool: 'default' })).rejects.toThrow(
@@ -278,6 +268,19 @@ describe('VectorizedPayload', () => {
       if ('error' in result) {
         expect(result.error).toContain('not found')
       }
+    })
+  })
+  describe('getAdapterCustom method', () => {
+    test('payload has getAdapterCustom method', () => {
+      const vectorizedPayload = getVectorizedPayload(payload)
+      expect(vectorizedPayload).not.toBeNull()
+      expect(typeof vectorizedPayload!.getDbAdapterCustom).toBe('function')
+    })
+
+    test('getAdapterCustom returns the adapter custom', () => {
+      const vectorizedPayload = getVectorizedPayload(payload)
+      expect(vectorizedPayload).not.toBeNull()
+      expect(vectorizedPayload!.getDbAdapterCustom()).toBeDefined()
     })
   })
 })

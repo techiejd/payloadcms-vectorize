@@ -12,6 +12,7 @@ import {
 import { makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
 import { getVectorizedPayload } from 'payloadcms-vectorize'
 import { expectGoodResult } from '../utils.vitest.js'
+import { createMockAdapter } from 'helpers/mockAdapter.js'
 
 const DIMS = DEFAULT_DIMS
 const dbName = `bulk_partial_failure_nofail_${Date.now()}`
@@ -41,6 +42,7 @@ describe('Bulk embed - partial failures', () => {
     const built = await buildPayloadWithIntegration({
       dbName,
       pluginOpts: {
+        dbAdapter: createMockAdapter(),
         knowledgePools: {
           default: {
             collections: {

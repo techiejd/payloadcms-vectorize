@@ -148,6 +148,22 @@ importers:
         specifier: ^0.0.8
         version: 0.0.8
 
+  adapters/pg:
+    dependencies:
+      '@payloadcms/db-postgres':
+        specifier: '>=3.0.0 <4.0.0'
+        version: 3.69.0(@libsql/client@0.14.0)(@opentelemetry/api@1.9.0)(payload@3.69.0(graphql@16.12.0)(typescript@5.7.3))
+      payload:
+        specifier: '>=3.0.0 <4.0.0'
+        version: 3.69.0(graphql@16.12.0)(typescript@5.7.3)
+      to-snake-case:
+        specifier: 1.0.0
+        version: 1.0.0
+    devDependencies:
+      payloadcms-vectorize:
+        specifier: workspace:*
+        version: link:../..
+
 packages:
 
   '@ai-sdk/gateway@2.0.24':

@@ -1,12 +1,10 @@
 import { Payload, TaskConfig, TaskHandlerResult } from 'payload'
 import {
-  isPostgresPayload,
-  PostgresPayload,
   KnowledgePoolName,
   KnowledgePoolDynamicConfig,
   ToKnowledgePoolFn,
+  DbAdapter,
 } from '../types.js'
-import toSnakeCase from 'to-snake-case'
 
 type VectorizeTaskInput = {
   doc: Record<string, any>
@@ -23,7 +21,9 @@ type VectorizeTaskInputOutput = {
 
 export const createVectorizeTask = ({
   knowledgePools,
+  adapter,
 }: {
+  adapter: DbAdapter
   knowledgePools: Record<KnowledgePoolName, KnowledgePoolDynamicConfig>
 }) => {
   /**
@@ -51,6 +51,7 @@ export const createVectorizeTask = ({
           doc: input.doc,
           collection: input.collection,
         },
+        adapter,
       })
       return {
         output: {
@@ -70,8 +71,9 @@ async function runVectorizeTask(args: {
     doc: Record<string, any>
     collection: string
   }
+  adapter: DbAdapter
 }) {
-  const { payload, poolName, dynamicConfig, job } = args
+  const { payload, poolName, dynamicConfig, job, adapter } = args
   const embeddingVersion = dynamicConfig.embeddingConfig.version
   const sourceDoc = job.doc
   const collection = job.collection
@@ -82,17 +84,6 @@ async function runVectorizeTask(args: {
     )
   }
   const toKnowledgePoolFn: ToKnowledgePoolFn = collectionConfig.toKnowledgePool
-
-  const isPostgres = isPostgresPayload(payload)
-  if (!isPostgres) {
-    throw new Error('[payloadcms-vectorize] Only works with Postgres')
-  }
-  const runSQL = async (sql: string, params?: any[]) => {
-    const postgresPayload = payload as PostgresPayload
-    if (postgresPayload.db.pool?.query) return postgresPayload.db.pool.query(sql, params)
-    if (postgresPayload.db.drizzle?.execute) return postgresPayload.db.drizzle.execute(sql)
-    throw new Error('[payloadcms-vectorize] Failed to persist vector column')
-  }
 
   // Delete all existing embeddings for this document before creating new ones
   // This ensures we replace old embeddings (potentially with a different embeddingVersion)
@@ -156,21 +147,8 @@ async function runVectorizeTask(args: {
       })
 
       const id = String(created.id)
-      const literal = `[${Array.from(vector).join(',')}]`
-      const postgresPayload = payload as PostgresPayload
-      const schemaName = postgresPayload.db.schemaName || 'public'
-      // Drizzle converts camelCase collection slugs to snake_case table names
-      const sql =
-        `UPDATE "${schemaName}"."${toSnakeCase(poolName)}" SET embedding = $1 WHERE id = $2` as string
-      try {
-        await runSQL(sql, [literal, id])
-      } catch (e) {
-        const errorMessage = (e as Error).message || (e as any).toString()
-        payload.logger.error(
-          `[payloadcms-vectorize] Failed to persist vector column: ${errorMessage}`,
-        )
-        throw new Error(`[payloadcms-vectorize] Failed to persist vector column: ${e}`)
-      }
+
+      await adapter.storeEmbedding(payload, poolName, id, vector)
     }),
   )
 }

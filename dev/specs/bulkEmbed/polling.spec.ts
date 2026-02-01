@@ -12,6 +12,7 @@ import {
 import { getVectorizedPayload } from 'payloadcms-vectorize'
 import { makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
 import { expectGoodResult } from '../utils.vitest.js'
+import { createMockAdapter } from 'helpers/mockAdapter.js'
 
 const DIMS = DEFAULT_DIMS
 const dbName = `bulk_polling_${Date.now()}`
@@ -24,6 +25,7 @@ describe('Bulk embed - polling requeue', () => {
     const built = await buildPayloadWithIntegration({
       dbName,
       pluginOpts: {
+        dbAdapter: createMockAdapter(),
         knowledgePools: {
           default: {
             collections: {

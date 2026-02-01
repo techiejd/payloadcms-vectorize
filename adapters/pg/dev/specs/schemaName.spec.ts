@@ -1,20 +1,16 @@
 import type { Payload } from 'payload'
 
 import { postgresAdapter } from '@payloadcms/db-postgres'
-import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
+import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from './helpers/embed.js'
 import { Client } from 'pg'
 import { beforeAll, describe, expect, test } from 'vitest'
 
 import type { PostgresPayload } from '../../src/types.js'
 
 import { buildDummyConfig, DIMS, integration, plugin } from './constants.js'
-import {
-  createTestDb,
-  waitForVectorizationJobs,
-} from './utils.js'
+import { createTestDb, waitForVectorizationJobs } from './utils.js'
 import { getPayload } from 'payload'
-import { createVectorSearchHandlers } from '../../src/endpoints/vectorSearch.js'
-import type { KnowledgePoolDynamicConfig } from 'payloadcms-vectorize'
+import { getVectorizedPayload } from 'payloadcms-vectorize'
 const CUSTOM_SCHEMA = 'custom'
 
 describe('Custom schemaName support', () => {
@@ -173,38 +169,21 @@ describe('Custom schemaName support', () => {
     // Wait for vectorization jobs to complete
     await waitForVectorizationJobs(payload)
 
-    // Perform vector search using the search handler
-    const knowledgePools: Record<string, KnowledgePoolDynamicConfig> = {
-      default: {
-        collections: {},
-        embeddingConfig: {
-          version: testEmbeddingVersion,
-          queryFn: makeDummyEmbedQuery(DIMS),
-          realTimeIngestionFn: makeDummyEmbedDocs(DIMS),
-        },
-      },
-    }
-    const searchHandler = createVectorSearchHandlers(knowledgePools).requestHandler
+    // Perform vector search using VectorizedPayload API
+    const vectorizedPayload = getVectorizedPayload(payload)
+    expect(vectorizedPayload).not.toBeNull()
 
-    const mockRequest = {
-      json: async () => ({
-        query: 'Test Post Title',
-        knowledgePool: 'default',
-      }),
-      payload,
-    } as any
-
-    const response = await searchHandler(mockRequest)
-    const json = await response.json()
+    const results = await vectorizedPayload!.search({
+      query: 'Test Post Title',
+      knowledgePool: 'default',
+    })
 
     // Verify search works and returns results from custom schema
-    expect(response.status).toBe(200)
-    expect(json).toHaveProperty('results')
-    expect(Array.isArray(json.results)).toBe(true)
-    expect(json.results.length).toBeGreaterThan(0)
+    expect(Array.isArray(results)).toBe(true)
+    expect(results.length).toBeGreaterThan(0)
 
     // Verify the results match what we created
-    expect(json.results).toEqual(
+    expect(results).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           sourceCollection: 'posts',

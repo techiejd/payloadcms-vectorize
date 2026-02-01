@@ -16,13 +16,7 @@ import {
 import { BULK_EMBEDDINGS_RUNS_SLUG } from '../collections/bulkEmbeddingsRuns.js'
 import { BULK_EMBEDDINGS_INPUT_METADATA_SLUG } from '../collections/bulkEmbeddingInputMetadata.js'
 import { BULK_EMBEDDINGS_BATCHES_SLUG } from '../collections/bulkEmbeddingsBatches.js'
-import {
-  isPostgresPayload,
-  PostgresPayload,
-  BulkEmbeddingInput,
-  FailedChunkData,
-} from '../types.js'
-import toSnakeCase from 'to-snake-case'
+import { BulkEmbeddingInput, DbAdapter, FailedChunkData } from '../types.js'
 
 type PrepareBulkEmbeddingTaskInput = {
   runId: string
@@ -211,9 +205,11 @@ export const createPrepareBulkEmbeddingTask = ({
 export const createPollOrCompleteBulkEmbeddingTask = ({
   knowledgePools,
   pollOrCompleteQueueName,
+  adapter,
 }: {
   knowledgePools: Record<KnowledgePoolName, KnowledgePoolDynamicConfig>
   pollOrCompleteQueueName?: string
+  adapter: DbAdapter
 }): TaskConfig<PollOrCompleteBulkEmbeddingTaskInputOutput> => {
   const task: TaskConfig<PollOrCompleteBulkEmbeddingTaskInputOutput> = {
     slug: 'payloadcms-vectorize:poll-or-complete-bulk-embedding',
@@ -311,6 +307,7 @@ export const createPollOrCompleteBulkEmbeddingTask = ({
             poolName,
             batch,
             callbacks,
+            adapter,
           })
 
           // Update batch status and counts
@@ -750,6 +747,7 @@ async function pollAndCompleteSingleBatch(args: {
       onChunk: (chunk: BulkEmbeddingOutput) => Promise<void>
     }) => Promise<{ status: string; error?: string }>
   }
+  adapter: DbAdapter
 }): Promise<{
   status: string
   error?: string
@@ -757,7 +755,7 @@ async function pollAndCompleteSingleBatch(args: {
   failedCount: number
   failedChunkData: FailedChunkData[]
 }> {
-  const { payload, runId, poolName, batch, callbacks } = args
+  const { payload, runId, poolName, batch, callbacks, adapter } = args
 
   let succeededCount = 0
   let failedCount = 0
@@ -866,12 +864,12 @@ async function pollAndCompleteSingleBatch(args: {
         } as any,
       })
 
-      await persistVectorColumn({
+      await adapter.storeEmbedding(
         payload,
-        poolName: toSnakeCase(poolName),
-        vector: embeddingArray,
-        id: String((created as any)?.id ?? ''),
-      })
+        poolName,
+        String((created as any)?.id ?? ''),
+        embeddingArray,
+      )
 
       succeededCount++
     },
@@ -883,34 +881,6 @@ async function pollAndCompleteSingleBatch(args: {
     succeededCount,
     failedCount,
     failedChunkData,
-  }
-}
-
-async function persistVectorColumn(args: {
-  payload: Payload
-  poolName: KnowledgePoolName
-  vector: number[] | Float32Array
-  id: string
-}) {
-  const { payload, poolName, vector, id } = args
-  if (!isPostgresPayload(payload)) {
-    throw new Error('[payloadcms-vectorize] Bulk embeddings require the Postgres adapter')
-  }
-  const postgresPayload = payload as PostgresPayload
-  const schemaName = postgresPayload.db.schemaName || 'public'
-  const literal = `[${Array.from(vector).join(',')}]`
-  const sql = `UPDATE "${schemaName}"."${toSnakeCase(poolName)}" SET embedding = $1 WHERE id = $2`
-  const runSQL = async (statement: string, params?: any[]) => {
-    if (postgresPayload.db.pool?.query) return postgresPayload.db.pool.query(statement, params)
-    if (postgresPayload.db.drizzle?.execute) return postgresPayload.db.drizzle.execute(statement)
-    throw new Error('[payloadcms-vectorize] Failed to persist vector column')
-  }
-  try {
-    await runSQL(sql, [literal, id])
-  } catch (e) {
-    const errorMessage = (e as Error).message || (e as any).toString()
-    payload.logger.error(`[payloadcms-vectorize] Failed to persist vector column: ${errorMessage}`)
-    throw e
   }
 }
 
