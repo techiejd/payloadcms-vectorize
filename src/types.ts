@@ -326,4 +326,15 @@ export type DbAdapter = {
     id: string,
     embedding: number[] | Float32Array,
   ) => Promise<void>
+  /**
+   * Delete embeddings for a source document
+   * Called when a document is deleted or re-indexed
+   * The adapter should delete all vectors associated with this document
+   */
+  deleteEmbeddings?: (
+    payload: Payload,
+    poolName: KnowledgePoolName,
+    sourceCollection: string,
+    docId: string,
+  ) => Promise<void>
 }

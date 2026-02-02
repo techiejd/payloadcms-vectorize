@@ -1,14 +1,15 @@
-import { Payload, TaskConfig, TaskHandlerResult } from 'payload'
-import {
-  KnowledgePoolName,
-  KnowledgePoolDynamicConfig,
-  ToKnowledgePoolFn,
+import type { Payload, TaskConfig, TaskHandlerResult } from 'payload'
+
+import type {
   DbAdapter,
+  KnowledgePoolDynamicConfig,
+  KnowledgePoolName,
+  ToKnowledgePoolFn,
 } from '../types.js'
 
 type VectorizeTaskInput = {
-  doc: Record<string, any>
   collection: string
+  doc: Record<string, any>
   knowledgePool: KnowledgePoolName
 }
 type VectorizeTaskOutput = {
@@ -20,8 +21,8 @@ type VectorizeTaskInputOutput = {
 }
 
 export const createVectorizeTask = ({
-  knowledgePools,
   adapter,
+  knowledgePools,
 }: {
   adapter: DbAdapter
   knowledgePools: Record<KnowledgePoolName, KnowledgePoolDynamicConfig>
@@ -33,8 +34,12 @@ export const createVectorizeTask = ({
   const processVectorizationTask: TaskConfig<VectorizeTaskInputOutput> = {
     slug: 'payloadcms-vectorize:vectorize',
     handler: async ({ input, req }): Promise<TaskHandlerResult<VectorizeTaskInputOutput>> => {
-      if (!input.collection) throw new Error('[payloadcms-vectorize] collection is required')
-      if (!input.knowledgePool) throw new Error('[payloadcms-vectorize] knowledgePool is required')
+      if (!input.collection) {
+        throw new Error('[payloadcms-vectorize] collection is required')
+      }
+      if (!input.knowledgePool) {
+        throw new Error('[payloadcms-vectorize] knowledgePool is required')
+      }
 
       const dynamicConfig = knowledgePools[input.knowledgePool]
       if (!dynamicConfig) {
@@ -44,14 +49,14 @@ export const createVectorizeTask = ({
       }
 
       await runVectorizeTask({
-        payload: req.payload,
-        poolName: input.knowledgePool,
+        adapter,
         dynamicConfig,
         job: {
-          doc: input.doc,
           collection: input.collection,
+          doc: input.doc,
         },
-        adapter,
+        payload: req.payload,
+        poolName: input.knowledgePool,
       })
       return {
         output: {
@@ -64,16 +69,16 @@ export const createVectorizeTask = ({
 }
 
 async function runVectorizeTask(args: {
-  payload: Payload
-  poolName: KnowledgePoolName
+  adapter: DbAdapter
   dynamicConfig: KnowledgePoolDynamicConfig
   job: {
-    doc: Record<string, any>
     collection: string
+    doc: Record<string, any>
   }
-  adapter: DbAdapter
+  payload: Payload
+  poolName: KnowledgePoolName
 }) {
-  const { payload, poolName, dynamicConfig, job, adapter } = args
+  const { adapter, dynamicConfig, job, payload, poolName } = args
   const embeddingVersion = dynamicConfig.embeddingConfig.version
   const sourceDoc = job.doc
   const collection = job.collection
@@ -98,6 +103,11 @@ async function runVectorizeTask(args: {
     },
   })
 
+  // Also call adapter's delete if available (for adapters that store vectors separately)
+  if (adapter.deleteEmbeddings) {
+    await adapter.deleteEmbeddings(payload, poolName, collection, String(sourceDoc.id))
+  }
+
   // Get chunks from toKnowledgePoolFn
   const chunkData = await toKnowledgePoolFn(sourceDoc, payload)
 
@@ -109,8 +119,12 @@ async function runVectorizeTask(args: {
 
   const invalidEntries = chunkData
     .map((entry, idx) => {
-      if (!entry || typeof entry !== 'object') return idx
-      if (typeof entry.chunk !== 'string') return idx
+      if (!entry || typeof entry !== 'object') {
+        return idx
+      }
+      if (typeof entry.chunk !== 'string') {
+        return idx
+      }
       return null
     })
     .filter((idx): idx is number => idx !== null)
@@ -136,11 +150,11 @@ async function runVectorizeTask(args: {
       const created = await payload.create({
         collection: poolName,
         data: {
-          sourceCollection: collection,
-          docId: String(sourceDoc.id),
           chunkIndex: index,
           chunkText: chunk,
+          docId: String(sourceDoc.id),
           embeddingVersion,
+          sourceCollection: collection,
           ...extensionFields,
           embedding: Array.isArray(vector) ? vector : Array.from(vector),
         },
