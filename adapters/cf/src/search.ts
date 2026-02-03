@@ -11,8 +11,8 @@ export default async (
   limit: number = 10,
   where?: Where,
 ): Promise<Array<VectorSearchResult>> => {
-  // Get Cloudflare bindings from context
-  const vectorizeBinding = (payload?.context as any)?.vectorize
+  // Get Cloudflare binding from config
+  const vectorizeBinding = (payload?.config?.custom as any)?._vectorizeBinding
   if (!vectorizeBinding) {
     throw new Error('[@payloadcms-vectorize/cf] Cloudflare Vectorize binding not found')
   }

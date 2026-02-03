@@ -40,43 +40,26 @@ export const createCloudflareVectorizeIntegration = (
         custom: {
           _cfVectorizeAdapter: true,
           _poolConfigs: config,
+          _vectorizeBinding: bindings.vectorize,
         },
       }
     },
 
-    // Store bindings in request context for embed and search functions
     search: async (payload, queryEmbedding, poolName, limit, where) => {
-      // Inject bindings into context
-      if (!payload.context) {
-        payload.context = {}
-      }
-      payload.context.vectorize = bindings.vectorize
-
       return search(payload, queryEmbedding, poolName, limit, where)
     },
 
     storeEmbedding: async (payload, poolName, id, embedding) => {
-      // Inject bindings into context
-      if (!payload.context) {
-        payload.context = {}
-      }
-      payload.context.vectorize = bindings.vectorize
-
       return embed(payload, poolName, id, embedding)
     },
 
     deleteEmbeddings: async (payload, poolName, sourceCollection, docId) => {
-      // Inject bindings into context
-      if (!payload.context) {
-        payload.context = {}
-      }
-      payload.context.vectorize = bindings.vectorize
-
       // Delete all embeddings for this document from Cloudflare Vectorize
       // First, query to find all matching IDs
       const vectorizeBinding = bindings.vectorize
+      const dims = config[poolName]?.dims || 384
       try {
-        const results = await vectorizeBinding.query(new Array(384).fill(0), {
+        const results = await vectorizeBinding.query(new Array(dims).fill(0), {
           topK: 10000,
           returnMetadata: true,
           where: {

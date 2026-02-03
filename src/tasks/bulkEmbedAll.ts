@@ -843,6 +843,11 @@ async function pollAndCompleteSingleBatch(args: {
               ],
             },
           })
+
+          // Also call adapter's delete if available
+          if (adapter.deleteEmbeddings) {
+            await adapter.deleteEmbeddings(payload, poolName, meta.sourceCollection, String(meta.docId))
+          }
         }
       }
 

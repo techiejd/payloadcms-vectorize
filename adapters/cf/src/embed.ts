@@ -10,8 +10,8 @@ export default async (
   id: string,
   embedding: number[] | Float32Array,
 ) => {
-  // Get Cloudflare bindings from context or environment
-  const vectorizeBinding = (payload?.context as any)?.vectorize
+  // Get Cloudflare binding from config
+  const vectorizeBinding = (payload?.config?.custom as any)?._vectorizeBinding
   if (!vectorizeBinding) {
     throw new Error('[@payloadcms-vectorize/cf] Cloudflare Vectorize binding not found')
   }
@@ -20,7 +20,6 @@ export default async (
     const vector = Array.isArray(embedding) ? embedding : Array.from(embedding)
 
     // Upsert the vector in Cloudflare Vectorize
-    // The vector will be stored with the document ID as its ID
     await vectorizeBinding.upsert([
       {
         id,

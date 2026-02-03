@@ -216,6 +216,8 @@ export default (pluginOptions: PayloadcmsVectorizeConfig) =>
 
       collectionToEmbedQueue.set(collectionSlug, embedQueue)
 
+      const adapter = pluginOptions.dbAdapter
+
       collection.hooks = {
         ...(collection.hooks || {}),
         afterChange: [
@@ -243,6 +245,11 @@ export default (pluginOptions: PayloadcmsVectorizeConfig) =>
                     ],
                   },
                 })
+
+                // Also call adapter's delete if available
+                if (adapter.deleteEmbeddings) {
+                  await adapter.deleteEmbeddings(payload, pool, collectionSlug, String(id))
+                }
               } catch (e) {
                 payload?.logger?.warn?.(
                   `[payloadcms-vectorize] Failed to delete from knowledge pool ${pool}`,
