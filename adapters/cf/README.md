@@ -33,16 +33,14 @@ import { createCloudflareVectorizeIntegration } from '@payloadcms-vectorize/cf'
 import payloadcmsVectorize from 'payloadcms-vectorize'
 
 // Create the integration
-const integration = createCloudflareVectorizeIntegration(
-  {
+const integration = createCloudflareVectorizeIntegration({
+  config: {
     default: {
       dims: 384, // Vector dimensions (must match your embedding model and Vectorize index)
     },
   },
-  {
-    vectorize: env.VECTORIZE, // Cloudflare Vectorize binding
-  },
-)
+  binding: env.VECTORIZE, // Cloudflare Vectorize binding
+})
 
 export default buildConfig({
   // ... your existing config
@@ -75,20 +73,18 @@ export default buildConfig({
 
 ## Configuration
 
-The `createCloudflareVectorizeIntegration` function accepts a configuration object where each key is a knowledge pool name:
+The `createCloudflareVectorizeIntegration` function accepts a configuration object with `config` and `binding` properties:
 
 ```typescript
-const integration = createCloudflareVectorizeIntegration(
-  {
+const integration = createCloudflareVectorizeIntegration({
+  config: {
     poolName: {
       dims: number, // Required: Vector dimensions
     },
     // ... additional pools
   },
-  {
-    vectorize: binding, // Cloudflare Vectorize binding
-  },
-)
+  binding: vectorizeBinding, // Required: Cloudflare Vectorize binding
+})
 ```
 
 ### Configuration Options
@@ -116,8 +112,8 @@ const integration = createCloudflareVectorizeIntegration(
 You can configure multiple knowledge pools with different dimensions:
 
 ```typescript
-const integration = createCloudflareVectorizeIntegration(
-  {
+const integration = createCloudflareVectorizeIntegration({
+  config: {
     documents: {
       dims: 1536,
     },
@@ -125,10 +121,8 @@ const integration = createCloudflareVectorizeIntegration(
       dims: 512,
     },
   },
-  {
-    vectorize: env.VECTORIZE,
-  },
-)
+  binding: env.VECTORIZE,
+})
 
 export default buildConfig({
   // ...

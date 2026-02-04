@@ -1,46 +1,54 @@
 import type { DbAdapter } from 'payloadcms-vectorize'
-import type { CloudflareVectorizeBindings, KnowledgePoolsConfig } from './types'
+import type { CloudflareVectorizeBinding, KnowledgePoolsConfig } from './types'
 import embed from './embed'
 import search from './search'
 
 /**
+ * Configuration for Cloudflare Vectorize integration
+ */
+interface CloudflareVectorizeConfig {
+  /** Knowledge pools configuration with their dimensions */
+  config: KnowledgePoolsConfig
+  /** Cloudflare Vectorize binding for vector storage */
+  binding: CloudflareVectorizeBinding
+}
+
+/**
  * Create a Cloudflare Vectorize integration for payloadcms-vectorize
  *
- * @param config Configuration for knowledge pools
- * @param bindings Cloudflare bindings (Vectorize)
+ * @param options Configuration object with knowledge pools and Vectorize binding
  * @returns Object containing the DbAdapter instance
  *
  * @example
  * ```typescript
  * import { createCloudflareVectorizeIntegration } from '@payloadcms-vectorize/cf'
  *
- * const { adapter } = createCloudflareVectorizeIntegration(
- *   {
- *     mainKnowledgePool: {
+ * const { adapter } = createCloudflareVectorizeIntegration({
+ *   config: {
+ *     default: {
  *       dims: 384,
  *     },
  *   },
- *   {
- *     vectorize: env.VECTORIZE,
- *   }
- * )
+ *   binding: env.VECTORIZE,
+ * })
  * ```
  */
 export const createCloudflareVectorizeIntegration = (
-  config: KnowledgePoolsConfig,
-  bindings: CloudflareVectorizeBindings,
+  options: CloudflareVectorizeConfig,
 ): { adapter: DbAdapter } => {
-  if (!bindings.vectorize) {
+  if (!options.binding) {
     throw new Error('[@payloadcms-vectorize/cf] Cloudflare Vectorize binding is required')
   }
+
+  const poolConfig = options.config
 
   const adapter: DbAdapter = {
     getConfigExtension: () => {
       return {
         custom: {
           _cfVectorizeAdapter: true,
-          _poolConfigs: config,
-          _vectorizeBinding: bindings.vectorize,
+          _poolConfigs: poolConfig,
+          _vectorizeBinding: options.binding,
         },
       }
     },
@@ -56,8 +64,8 @@ export const createCloudflareVectorizeIntegration = (
     deleteEmbeddings: async (payload, poolName, sourceCollection, docId) => {
       // Delete all embeddings for this document from Cloudflare Vectorize
       // First, query to find all matching IDs
-      const vectorizeBinding = bindings.vectorize
-      const dims = config[poolName]?.dims || 384
+      const vectorizeBinding = options.binding
+      const dims = poolConfig[poolName]?.dims || 384
       try {
         const results = await vectorizeBinding.query(new Array(dims).fill(0), {
           topK: 10000,
@@ -88,5 +96,5 @@ export const createCloudflareVectorizeIntegration = (
   return { adapter }
 }
 
-export type { CloudflareVectorizeBindings, KnowledgePoolsConfig }
+export type { CloudflareVectorizeBinding, KnowledgePoolsConfig }
 export type { KnowledgePoolsConfig as KnowledgePoolConfig }

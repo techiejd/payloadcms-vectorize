@@ -14,16 +14,6 @@ export interface CloudflareVectorizePoolConfig {
 export type KnowledgePoolsConfig = Record<string, CloudflareVectorizePoolConfig>
 
 /**
- * Cloudflare bindings and configuration
+ * Cloudflare Vectorize binding for vector storage
  */
-export interface CloudflareVectorizeBindings {
-  /** Cloudflare Vectorize binding for vector storage */
-  vectorize: any
-}
-
-/**
- * Type guard to check if payload is a Cloudflare Worker context
- */
-export function isCloudflarePayload(payload: BasePayload): boolean {
-  return typeof payload?.context?.cf !== 'undefined'
-}
+export type CloudflareVectorizeBinding = any

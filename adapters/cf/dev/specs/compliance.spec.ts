@@ -113,16 +113,14 @@ describe('Cloudflare Adapter Compliance Tests', () => {
 
     mockVectorize = createMockVectorizeBinding()
 
-    const { adapter: cfAdapter } = createCloudflareVectorizeIntegration(
-      {
+    const { adapter: cfAdapter } = createCloudflareVectorizeIntegration({
+      config: {
         default: {
           dims: DIMS,
         },
       },
-      {
-        vectorize: mockVectorize as any,
-      },
-    )
+      binding: mockVectorize as any,
+    })
     adapter = cfAdapter
 
     config = await buildConfig({

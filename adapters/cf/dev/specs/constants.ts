@@ -74,16 +74,14 @@ export function createMockVectorizeBinding() {
 
 const mockVectorize = createMockVectorizeBinding()
 
-const integrationResult = createCloudflareVectorizeIntegration(
-  {
+const integrationResult = createCloudflareVectorizeIntegration({
+  config: {
     default: {
       dims: DIMS,
     },
   },
-  {
-    vectorize: mockVectorize as any,
-  },
-)
+  binding: mockVectorize as any,
+})
 
 export const integration = integrationResult
 

@@ -1,4 +1,5 @@
 import { Payload } from 'payload'
+import { getVectorizedPayload } from 'payloadcms-vectorize'
 
 /**
  * Store an embedding vector in Cloudflare Vectorize
@@ -11,7 +12,7 @@ export default async (
   embedding: number[] | Float32Array,
 ) => {
   // Get Cloudflare binding from config
-  const vectorizeBinding = (payload?.config?.custom as any)?._vectorizeBinding
+  const vectorizeBinding = getVectorizedPayload(payload).getDbAdapterCustom()._vectorizeBinding
   if (!vectorizeBinding) {
     throw new Error('[@payloadcms-vectorize/cf] Cloudflare Vectorize binding not found')
   }
