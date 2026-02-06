@@ -1,0 +1,27 @@
+{
+  "name": "@payloadcms-vectorize/cf",
+  "version": "0.6.0-beta",
+  "description": "Cloudflare Vectorize adapter for payloadcms-vectorize",
+  "license": "MIT",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "peerDependencies": {
+    "payload": ">=3.0.0 <4.0.0",
+    "payloadcms-vectorize": ">=0.6.0-beta <1.0.0"
+  },
+  "devDependencies": {
+    "payloadcms-vectorize": "workspace:*"
+  },
+  "engines": {
+    "node": "^18.20.2 || >=20.9.0",
+    "pnpm": "^9 || ^10"
+  },
+  "publishConfig": {
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
+  }
+}

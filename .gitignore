@@ -20,6 +20,8 @@ node_modules/
 # production
 /build
 /dist
+/adapters/pg/dist
+/adapters/cf/dist
 
 # misc
 .DS_Store
