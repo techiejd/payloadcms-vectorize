@@ -185,3 +185,18 @@ jobs:
           DIMS: 8
           IVFFLATLISTS: 1
           TEST_ENV: 1
+
+  test:
+    runs-on: ubuntu-latest
+    needs: [test_int, test_adapters_pg, test_adapters_cf, test_e2e]
+    if: always()
+    steps:
+      - name: Check required jobs
+        run: |
+          if [ "${{ needs.test_int.result }}" != "success" ] || \
+             [ "${{ needs.test_adapters_pg.result }}" != "success" ] || \
+             [ "${{ needs.test_adapters_cf.result }}" != "success" ] || \
+             [ "${{ needs.test_e2e.result }}" != "success" ]; then
+            echo "One or more required jobs failed"
+            exit 1
+          fi
