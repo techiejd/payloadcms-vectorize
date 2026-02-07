@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, develop, split_db_adapter]
+    branches: [main, develop]
   pull_request:
     branches: [main, split_db_adapter]
 
