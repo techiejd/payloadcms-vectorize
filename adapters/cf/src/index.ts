@@ -68,8 +68,8 @@ export const createCloudflareVectorizeIntegration = (
       const dims = poolConfig[poolName]?.dims || 384
       try {
         const results = await vectorizeBinding.query(new Array(dims).fill(0), {
-          topK: 10000,
-          returnMetadata: true,
+          topK: 100,
+          returnMetadata: 'indexed',
           where: {
             and: [
               { key: 'sourceCollection', value: sourceCollection },
@@ -81,7 +81,7 @@ export const createCloudflareVectorizeIntegration = (
         const idsToDelete = (results.matches || []).map((match: any) => match.id)
 
         if (idsToDelete.length > 0) {
-          await vectorizeBinding.delete(idsToDelete)
+          await vectorizeBinding.deleteByIds(idsToDelete)
         }
       } catch (error) {
         const errorMessage = (error as Error).message || (error as any).toString()
