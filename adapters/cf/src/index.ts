@@ -1,7 +1,7 @@
 import type { DbAdapter } from 'payloadcms-vectorize'
-import type { CloudflareVectorizeBinding, KnowledgePoolsConfig } from './types'
-import embed from './embed'
-import search from './search'
+import type { CloudflareVectorizeBinding, KnowledgePoolsConfig } from './types.js'
+import embed from './embed.js'
+import search from './search.js'
 
 /**
  * Configuration for Cloudflare Vectorize integration

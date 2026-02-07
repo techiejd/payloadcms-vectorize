@@ -116,7 +116,7 @@ describe('Postgres Adapter Compliance Tests', () => {
     })
   })
 
-  describe('embed()', () => {
+  describe('storeEmbedding()', () => {
     test('persists embedding without error (number[])', async () => {
       const embedding = Array(DIMS)
         .fill(0)

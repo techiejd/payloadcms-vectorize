@@ -116,7 +116,7 @@ export const runAdapterComplianceTests = (getContext: AdapterTestContextFactory)
       })
     })
 
-    describe('embed()', () => {
+    describe('storeEmbedding()', () => {
       test('persists embedding without error (number[])', async () => {
         const embedding = generateRandomEmbedding(ctx.dims)
 

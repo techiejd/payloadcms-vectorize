@@ -5,7 +5,7 @@ import { join, resolve } from 'path'
 import toSnakeCase from 'to-snake-case'
 
 import { getVectorizedPayload } from 'payloadcms-vectorize'
-import { KnowledgePoolsConfig } from './types'
+import { KnowledgePoolsConfig } from './types.js'
 
 /**
  * Get prior dims state from existing migrations

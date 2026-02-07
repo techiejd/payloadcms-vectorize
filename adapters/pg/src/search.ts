@@ -18,7 +18,7 @@ import {
 import { BasePayload, Where } from 'payload'
 import { KnowledgePoolName, VectorSearchResult } from 'payloadcms-vectorize'
 import toSnakeCase from 'to-snake-case'
-import { getEmbeddingsTable } from './drizzle'
+import { getEmbeddingsTable } from './drizzle.js'
 
 export default async (
   payload: BasePayload,

@@ -1,4 +1,4 @@
-import { KnowledgePoolsConfig } from './types'
+import { KnowledgePoolsConfig } from './types.js'
 import type { PostgresAdapterArgs } from '@payloadcms/db-postgres'
 import { clearEmbeddingsTables, registerEmbeddingsTable } from './drizzle.js'
 import { customType, index } from '@payloadcms/db-postgres/drizzle/pg-core'
@@ -6,8 +6,8 @@ import toSnakeCase from 'to-snake-case'
 import type { DbAdapter } from 'payloadcms-vectorize'
 import { fileURLToPath } from 'url'
 import { dirname, resolve } from 'path'
-import embed from './embed'
-import search from './search'
+import embed from './embed.js'
+import search from './search.js'
 
 export type { KnowledgePoolsConfig as KnowledgePoolConfig }
 
@@ -86,7 +86,7 @@ export const createPostgresVectorIntegration = (
       }
     },
     search,
-    embed,
+    storeEmbedding: embed,
   }
 
   return { afterSchemaInitHook, adapter }

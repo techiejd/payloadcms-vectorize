@@ -14,7 +14,9 @@ All notable changes to this project will be documented in this file.
 ### Added
 
 - **`@payloadcms-vectorize/pg` package**: PostgreSQL adapter for pgvector, extracted from the core plugin.
+- **`@payloadcms-vectorize/cf` package**: Cloudflare Vectorize adapter for edge-native vector search.
 - **`DbAdapter` interface**: New interface for implementing custom database adapters. See `adapters/README.md`.
+- **`deleteEmbeddings` on `DbAdapter`**: Adapters can now delete vectors when a document is deleted or re-indexed. Implemented in both the `pg` and `cf` adapters.
 - **Adapter documentation**: Added `adapters/README.md` explaining how to create custom adapters.
 
 ### Migration

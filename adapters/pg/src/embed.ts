@@ -1,5 +1,5 @@
 import { Payload } from 'payload'
-import { isPostgresPayload, PostgresPayload } from './types'
+import { isPostgresPayload, PostgresPayload } from './types.js'
 import toSnakeCase from 'to-snake-case'
 
 export default async (
