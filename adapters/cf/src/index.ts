@@ -78,13 +78,13 @@ export const createCloudflareVectorizeIntegration = (
           },
         })
 
-        const idsToDelete = (results.matches || []).map((match: any) => match.id)
+        const idsToDelete = (results.matches || []).map((match) => match.id)
 
         if (idsToDelete.length > 0) {
           await vectorizeBinding.deleteByIds(idsToDelete)
         }
       } catch (error) {
-        const errorMessage = (error as Error).message || (error as any).toString()
+        const errorMessage = error instanceof Error ? error.message : String(error)
         payload.logger.error(
           `[@payloadcms-vectorize/cf] Failed to delete embeddings: ${errorMessage}`,
         )

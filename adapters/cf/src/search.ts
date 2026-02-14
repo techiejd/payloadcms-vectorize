@@ -1,5 +1,6 @@
-import { BasePayload, Where } from 'payload'
+import { BasePayload, CollectionSlug, Where } from 'payload'
 import { KnowledgePoolName, VectorSearchResult, getVectorizedPayload } from 'payloadcms-vectorize'
+import type { CloudflareVectorizeBinding } from './types.js'
 
 /**
  * Search for similar vectors in Cloudflare Vectorize
@@ -12,18 +13,14 @@ export default async (
   where?: Where,
 ): Promise<Array<VectorSearchResult>> => {
   // Get Cloudflare binding from config
-  const vectorizeBinding = getVectorizedPayload(payload)?.getDbAdapterCustom()?._vectorizeBinding
+  const vectorizeBinding = getVectorizedPayload(payload)?.getDbAdapterCustom()?._vectorizeBinding as
+    | CloudflareVectorizeBinding
+    | undefined
   if (!vectorizeBinding) {
     throw new Error('[@payloadcms-vectorize/cf] Cloudflare Vectorize binding not found')
   }
 
   try {
-    // Get collection config
-    const collectionConfig = payload.collections[poolName]?.config
-    if (!collectionConfig) {
-      throw new Error(`Collection ${poolName} not found`)
-    }
-
     // Query Cloudflare Vectorize
     // The query returns the top-k most similar vectors
     const results = await vectorizeBinding.query(queryEmbedding, {
@@ -41,19 +38,20 @@ export default async (
     for (const match of results.matches) {
       try {
         const doc = await payload.findByID({
-          collection: poolName as any,
+          collection: poolName as CollectionSlug,
           id: match.id,
         })
 
-        if (doc && (!where || matchesWhere(doc, where))) {
+        if (doc && (!where || matchesWhere(doc as Record<string, unknown>, where))) {
           // Extract fields excluding internal ones
-          const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...docFields } = doc as any
+          const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...docFields } =
+            doc as Record<string, unknown>
 
           searchResults.push({
             id: match.id,
             score: match.score || 0,
             ...docFields, // Includes sourceCollection, docId, chunkText, embeddingVersion, extension fields
-          })
+          } as VectorSearchResult)
         }
       } catch (_e) {
         // Document not found or error fetching, skip
@@ -62,17 +60,17 @@ export default async (
 
     return searchResults
   } catch (e) {
-    const errorMessage = (e as Error).message || (e as any).toString()
+    const errorMessage = e instanceof Error ? e.message : String(e)
     payload.logger.error(`[@payloadcms-vectorize/cf] Search failed: ${errorMessage}`)
     throw new Error(`[@payloadcms-vectorize/cf] Search failed: ${errorMessage}`)
   }
 }
 
 /**
- * Simple WHERE clause matcher for basic filtering
+ * Simple WHERE clause matcher for basic filtering.
  * Supports: equals, in, exists, and, or
  */
-function matchesWhere(doc: Record<string, any>, where: Where): boolean {
+function matchesWhere(doc: Record<string, unknown>, where: Where): boolean {
   if (!where || Object.keys(where).length === 0) return true
 
   // Handle 'and' operator

@@ -1,4 +1,4 @@
-import type { CollectionSlug, Payload, Field, Where, Config, BasePayload } from 'payload'
+import type { CollectionSlug, Payload, Field, Where, Config, BasePayload, TypeWithID } from 'payload'
 
 /** Result from bulkEmbed method */
 export type BulkEmbedResult =
@@ -70,7 +70,7 @@ export type VectorizedPayload = {
  * Returns null if the payload instance doesn't have vectorize extensions
  */
 export function getVectorizedPayload(payload: Payload): VectorizedPayload | null {
-  const custom = (payload.config as any)?.custom
+  const custom = payload.config?.custom
   const vectorizedPayloadFactory = custom?.createVectorizedPayloadObject
   if (vectorizedPayloadFactory && typeof vectorizedPayloadFactory === 'function') {
     return vectorizedPayloadFactory(payload) as VectorizedPayload
@@ -306,6 +306,59 @@ export interface VectorSearchQuery {
   where?: Where
   /** Optional limit for number of results (default: 10) */
   limit?: number
+}
+
+// ==========================================
+// Document types for internal collections
+// ==========================================
+
+/** Document shape for bulk embedding runs collection */
+export interface BulkEmbeddingRunDoc extends TypeWithID {
+  pool: string
+  embeddingVersion: string
+  status: BulkEmbeddingRunStatus
+  totalBatches?: number
+  inputs?: number
+  succeeded?: number
+  failed?: number
+  submittedAt?: string
+  completedAt?: string
+  error?: string
+  failedChunkData?: FailedChunkData[]
+  createdAt: string
+  updatedAt: string
+}
+
+/** Document shape for bulk embedding batches collection */
+export interface BulkEmbeddingBatchDoc extends TypeWithID {
+  run: number | string
+  batchIndex: number
+  providerBatchId: string
+  status: BulkEmbeddingRunStatus
+  inputCount: number
+  succeededCount?: number
+  failedCount?: number
+  submittedAt?: string
+  completedAt?: string
+  error?: string
+  retriedBatch?: number | string
+  createdAt: string
+  updatedAt: string
+}
+
+/** Document shape for bulk embedding input metadata collection */
+export interface BulkEmbeddingInputMetadataDoc extends TypeWithID {
+  run: number | string
+  batch: number | string
+  inputId: string
+  text: string
+  sourceCollection: string
+  docId: string
+  chunkIndex: number
+  embeddingVersion: string
+  extensionFields?: Record<string, unknown>
+  createdAt: string
+  updatedAt: string
 }
 
 export type DbAdapter = {

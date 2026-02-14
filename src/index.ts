@@ -1,4 +1,4 @@
-import type { Config, Payload, PayloadRequest } from 'payload'
+import type { CollectionSlug, Config, Payload, PayloadRequest } from 'payload'
 
 import { createEmbeddingsCollection } from './collections/embeddings.js'
 import type {
@@ -180,7 +180,7 @@ export default (pluginOptions: PayloadcmsVectorizeConfig) =>
 
     const collectionToEmbedQueue = new Map<
       string,
-      (doc: any, payload: Payload, req?: PayloadRequest) => Promise<void>
+      (doc: Record<string, unknown>, payload: Payload, req?: PayloadRequest) => Promise<void>
     >()
 
     // Extend configured collections with hooks
@@ -190,7 +190,7 @@ export default (pluginOptions: PayloadcmsVectorizeConfig) =>
         throw new Error(`[payloadcms-vectorize] Collection ${collectionSlug} not found`)
       }
 
-      const embedQueue = async (doc: any, payload: Payload, req?: PayloadRequest) => {
+      const embedQueue = async (doc: Record<string, unknown>, payload: Payload, req?: PayloadRequest) => {
         // Queue vectorization jobs for ALL knowledge pools containing this collection
         for (const { pool, dynamic } of pools) {
           const collectionConfig = dynamic.collections[collectionSlug]
@@ -221,7 +221,7 @@ export default (pluginOptions: PayloadcmsVectorizeConfig) =>
       collection.hooks = {
         ...(collection.hooks || {}),
         afterChange: [
-          ...((collection.hooks?.afterChange as any[]) || []),
+          ...(collection.hooks?.afterChange || []),
           async (args) => {
             const { doc, req } = args
             const payload = req.payload
@@ -229,15 +229,15 @@ export default (pluginOptions: PayloadcmsVectorizeConfig) =>
           },
         ],
         afterDelete: [
-          ...((collection.hooks?.afterDelete as any[]) || []),
-          async ({ id, payload: pld, req }: any) => {
-            const payload = (pld as any) || (req as any)?.payload
+          ...(collection.hooks?.afterDelete || []),
+          async ({ id, req }) => {
+            const payload = req.payload
 
             // Delete from ALL knowledge pools containing this collection
             for (const { pool } of pools) {
               try {
                 await payload.delete({
-                  collection: pool,
+                  collection: pool as CollectionSlug,
                   where: {
                     and: [
                       { sourceCollection: { equals: collectionSlug } },
@@ -252,8 +252,7 @@ export default (pluginOptions: PayloadcmsVectorizeConfig) =>
                 }
               } catch (e) {
                 payload?.logger?.warn?.(
-                  `[payloadcms-vectorize] Failed to delete from knowledge pool ${pool}`,
-                  e as Error,
+                  `[payloadcms-vectorize] Failed to delete from knowledge pool ${pool}: ${e instanceof Error ? e.message : String(e)}`,
                 )
               }
             }
@@ -272,8 +271,7 @@ export default (pluginOptions: PayloadcmsVectorizeConfig) =>
               })
             } catch (e) {
               payload?.logger?.warn?.(
-                `[payloadcms-vectorize] Failed to delete bulk embedding metadata for ${collectionSlug}:${id}`,
-                e as Error,
+                `[payloadcms-vectorize] Failed to delete bulk embedding metadata for ${collectionSlug}:${id}: ${e instanceof Error ? e.message : String(e)}`,
               )
             }
           },
@@ -342,14 +340,14 @@ export default (pluginOptions: PayloadcmsVectorizeConfig) =>
               }
             | {
                 collection: string
-                doc: Record<string, any>
+                doc: Record<string, unknown>
               },
         ) => {
           const collection = params.collection
-          let doc: Record<string, any>
+          let doc: Record<string, unknown>
           if ('docId' in params && params.docId) {
             doc = await payload.findByID({
-              collection: collection as any,
+              collection: collection as CollectionSlug,
               id: params.docId,
             })
           } else if ('doc' in params && params.doc) {
