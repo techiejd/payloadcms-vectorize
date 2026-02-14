@@ -59,7 +59,7 @@ function createMockCloudflareBinding() {
       }
     }),
 
-    delete: vi.fn(async (ids: string[]) => {
+    deleteByIds: vi.fn(async (ids: string[]) => {
       for (const id of ids) {
         storage.delete(id)
       }
@@ -79,6 +79,20 @@ function createMockCloudflareBinding() {
   }
 }
 
+function createMockPayloadForEmbed(mockBinding: any) {
+  return {
+    config: {
+      custom: {
+        createVectorizedPayloadObject: () => ({
+          getDbAdapterCustom: () => ({ _vectorizeBinding: mockBinding }),
+        }),
+      },
+    },
+    create: vi.fn().mockResolvedValue({ id: 'mapping-1' }),
+    logger: { error: vi.fn() },
+  } as any
+}
+
 describe('createCloudflareVectorizeIntegration', () => {
   describe('validation', () => {
     test('should throw if vectorize binding is missing', () => {
@@ -91,7 +105,7 @@ describe('createCloudflareVectorizeIntegration', () => {
     })
 
     test('should create integration with valid config', () => {
-      const mockVectorize = { query: vi.fn(), upsert: vi.fn(), delete: vi.fn() }
+      const mockVectorize = { query: vi.fn(), upsert: vi.fn(), deleteByIds: vi.fn() }
 
       const integration = createCloudflareVectorizeIntegration({
         config: { default: { dims: 384 } },
@@ -110,7 +124,7 @@ describe('createCloudflareVectorizeIntegration', () => {
   describe('getConfigExtension', () => {
     test('should return config with pool configurations', () => {
       const poolConfigs = { mainPool: { dims: 384 }, secondaryPool: { dims: 768 } }
-      const mockVectorize = { query: vi.fn() }
+      const mockVectorize = { query: vi.fn(), upsert: vi.fn(), deleteByIds: vi.fn() }
 
       const { adapter } = createCloudflareVectorizeIntegration({
         config: poolConfigs,
@@ -120,6 +134,20 @@ describe('createCloudflareVectorizeIntegration', () => {
 
       expect(extension.custom?._cfVectorizeAdapter).toBe(true)
       expect(extension.custom?._poolConfigs).toEqual(poolConfigs)
+    })
+
+    test('should return collections with cfMappings', () => {
+      const mockVectorize = { query: vi.fn(), upsert: vi.fn(), deleteByIds: vi.fn() }
+
+      const { adapter } = createCloudflareVectorizeIntegration({
+        config: { default: { dims: 384 } },
+        binding: mockVectorize,
+      })
+      const extension = adapter.getConfigExtension({} as any)
+
+      expect(extension.collections).toBeDefined()
+      expect(extension.collections!['vector-cf-mappings']).toBeDefined()
+      expect(extension.collections!['vector-cf-mappings'].slug).toBe('vector-cf-mappings')
     })
   })
 
@@ -132,9 +160,16 @@ describe('createCloudflareVectorizeIntegration', () => {
       })
 
       const embedding = new Float32Array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8])
-      const mockPayload = { context: {} } as any
+      const mockPayload = createMockPayloadForEmbed(mockBinding)
 
-      await adapter.storeEmbedding(mockPayload, 'default', 'test-id', embedding)
+      await adapter.storeEmbedding(
+        mockPayload,
+        'default',
+        'test-collection',
+        'doc-1',
+        'test-id',
+        embedding,
+      )
 
       expect(mockBinding.upsert).toHaveBeenCalledWith([
         {
@@ -144,69 +179,121 @@ describe('createCloudflareVectorizeIntegration', () => {
       ])
     })
 
-    test('should inject vectorize binding into context', async () => {
+    test('should create a mapping row', async () => {
       const mockBinding = createMockCloudflareBinding()
       const { adapter } = createCloudflareVectorizeIntegration({
         config: { default: { dims: 8 } },
         binding: mockBinding as any,
       })
 
-      const mockPayload = { context: {} } as any
+      const mockPayload = createMockPayloadForEmbed(mockBinding)
       const embedding = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
 
-      await adapter.storeEmbedding(mockPayload, 'default', 'test-id', embedding)
+      await adapter.storeEmbedding(
+        mockPayload,
+        'default',
+        'test-collection',
+        'doc-1',
+        'test-id',
+        embedding,
+      )
 
-      expect(mockPayload.context.vectorize).toBe(mockBinding)
+      expect(mockPayload.create).toHaveBeenCalledWith({
+        collection: 'vector-cf-mappings',
+        data: {
+          vectorId: 'test-id',
+          poolName: 'default',
+          sourceCollection: 'test-collection',
+          docId: 'doc-1',
+        },
+      })
     })
   })
 
   describe('deleteEmbeddings', () => {
-    test('should query with correct where clause', async () => {
+    test('should look up mappings with correct where clause', async () => {
       const mockBinding = createMockCloudflareBinding()
       const { adapter } = createCloudflareVectorizeIntegration({
         config: { default: { dims: 8 } },
         binding: mockBinding as any,
       })
 
-      const mockPayload = { context: {}, logger: { error: vi.fn() } } as any
+      const mockPayload = {
+        find: vi.fn().mockResolvedValue({ docs: [], hasNextPage: false }),
+        delete: vi.fn().mockResolvedValue({}),
+        logger: { error: vi.fn() },
+      } as any
 
       await adapter.deleteEmbeddings?.(mockPayload, 'default', 'test-collection', 'doc-123')
 
-      expect(mockBinding.query).toHaveBeenCalled()
-      const queryCall = mockBinding.query.mock.calls[0]
-      const options = queryCall[1]
-
-      expect(options.where?.and).toEqual([
-        { key: 'sourceCollection', value: 'test-collection' },
-        { key: 'docId', value: 'doc-123' },
-      ])
+      expect(mockPayload.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          collection: 'vector-cf-mappings',
+          where: {
+            and: [
+              { poolName: { equals: 'default' } },
+              { sourceCollection: { equals: 'test-collection' } },
+              { docId: { equals: 'doc-123' } },
+            ],
+          },
+        }),
+      )
     })
 
-    test('should delete matching vectors', async () => {
+    test('should delete matching vectors via mappings', async () => {
       const mockBinding = createMockCloudflareBinding()
       const { adapter } = createCloudflareVectorizeIntegration({
         config: { default: { dims: 8 } },
         binding: mockBinding as any,
       })
 
-      // Manually add some vectors to the mock storage
-      const storage = mockBinding.__getStorage()
-      storage.set('vec-1', {
-        id: 'vec-1',
-        values: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
-        metadata: { sourceCollection: 'test-collection', docId: 'doc-123' },
-      })
-      storage.set('vec-2', {
-        id: 'vec-2',
-        values: [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
-        metadata: { sourceCollection: 'test-collection', docId: 'doc-123' },
-      })
-
-      const mockPayload = { context: {}, logger: { error: vi.fn() } } as any
+      const mockPayload = {
+        find: vi.fn().mockResolvedValue({
+          docs: [
+            { id: 'map-1', vectorId: 'vec-1' },
+            { id: 'map-2', vectorId: 'vec-2' },
+          ],
+          hasNextPage: false,
+        }),
+        delete: vi.fn().mockResolvedValue({}),
+        logger: { error: vi.fn() },
+      } as any
 
       await adapter.deleteEmbeddings?.(mockPayload, 'default', 'test-collection', 'doc-123')
 
-      expect(mockBinding.delete).toHaveBeenCalledWith(['vec-1', 'vec-2'])
+      expect(mockBinding.deleteByIds).toHaveBeenCalledWith(['vec-1', 'vec-2'])
+    })
+
+    test('should clean up mapping rows after deleting vectors', async () => {
+      const mockBinding = createMockCloudflareBinding()
+      const { adapter } = createCloudflareVectorizeIntegration({
+        config: { default: { dims: 8 } },
+        binding: mockBinding as any,
+      })
+
+      const mockPayload = {
+        find: vi.fn().mockResolvedValue({
+          docs: [{ id: 'map-1', vectorId: 'vec-1' }],
+          hasNextPage: false,
+        }),
+        delete: vi.fn().mockResolvedValue({}),
+        logger: { error: vi.fn() },
+      } as any
+
+      await adapter.deleteEmbeddings?.(mockPayload, 'default', 'test-collection', 'doc-123')
+
+      expect(mockPayload.delete).toHaveBeenCalledWith(
+        expect.objectContaining({
+          collection: 'vector-cf-mappings',
+          where: {
+            and: [
+              { poolName: { equals: 'default' } },
+              { sourceCollection: { equals: 'test-collection' } },
+              { docId: { equals: 'doc-123' } },
+            ],
+          },
+        }),
+      )
     })
 
     test('should handle empty results gracefully', async () => {
@@ -216,24 +303,26 @@ describe('createCloudflareVectorizeIntegration', () => {
         binding: mockBinding as any,
       })
 
-      const mockPayload = { context: {}, logger: { error: vi.fn() } } as any
+      const mockPayload = {
+        find: vi.fn().mockResolvedValue({ docs: [], hasNextPage: false }),
+        delete: vi.fn().mockResolvedValue({}),
+        logger: { error: vi.fn() },
+      } as any
 
       await adapter.deleteEmbeddings?.(mockPayload, 'default', 'test-collection', 'doc-123')
 
-      expect(mockBinding.delete).not.toHaveBeenCalled()
+      expect(mockBinding.deleteByIds).not.toHaveBeenCalled()
     })
 
-    test('should handle query errors', async () => {
+    test('should handle errors', async () => {
       const mockBinding = createMockCloudflareBinding()
-      mockBinding.query = vi.fn().mockRejectedValue(new Error('Query failed'))
-
       const { adapter } = createCloudflareVectorizeIntegration({
         config: { default: { dims: 8 } },
         binding: mockBinding as any,
       })
 
       const mockPayload = {
-        context: {},
+        find: vi.fn().mockRejectedValue(new Error('Query failed')),
         logger: { error: vi.fn() },
       } as any
 

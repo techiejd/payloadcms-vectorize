@@ -1,5 +1,7 @@
+import type { CollectionSlug } from 'payload'
 import type { DbAdapter } from 'payloadcms-vectorize'
 import type { CloudflareVectorizeBinding, KnowledgePoolsConfig } from './types.js'
+import cfMappingsCollection, { CF_MAPPINGS_SLUG } from './collections/cfMappings.js'
 import embed from './embed.js'
 import search from './search.js'
 
@@ -45,6 +47,9 @@ export const createCloudflareVectorizeIntegration = (
   const adapter: DbAdapter = {
     getConfigExtension: () => {
       return {
+        collections: {
+          [CF_MAPPINGS_SLUG]: cfMappingsCollection,
+        },
         custom: {
           _cfVectorizeAdapter: true,
           _poolConfigs: poolConfig,
@@ -57,32 +62,56 @@ export const createCloudflareVectorizeIntegration = (
       return search(payload, queryEmbedding, poolName, limit, where)
     },
 
-    storeEmbedding: async (payload, poolName, id, embedding) => {
-      return embed(payload, poolName, id, embedding)
+    storeEmbedding: async (payload, poolName, sourceCollection, sourceDocId, id, embedding) => {
+      return embed(payload, poolName, sourceCollection, sourceDocId, id, embedding)
     },
 
     deleteEmbeddings: async (payload, poolName, sourceCollection, docId) => {
-      // Delete all embeddings for this document from Cloudflare Vectorize
-      // First, query to find all matching IDs
       const vectorizeBinding = options.binding
-      const dims = poolConfig[poolName]?.dims || 384
+
       try {
-        const results = await vectorizeBinding.query(new Array(dims).fill(0), {
-          topK: 100,
-          returnMetadata: 'indexed',
+        // Paginate through all mapping rows for this document+pool
+        const allVectorIds: string[] = []
+        let page = 1
+        let hasNextPage = true
+
+        while (hasNextPage) {
+          const mappings = await payload.find({
+            collection: CF_MAPPINGS_SLUG as CollectionSlug,
+            where: {
+              and: [
+                { poolName: { equals: poolName } },
+                { sourceCollection: { equals: sourceCollection } },
+                { docId: { equals: docId } },
+              ],
+            },
+            page,
+          })
+
+          for (const mapping of mappings.docs) {
+            allVectorIds.push((mapping as Record<string, unknown>).vectorId as string)
+          }
+
+          hasNextPage = mappings.hasNextPage
+          page++
+        }
+
+        if (allVectorIds.length === 0) {
+          return
+        }
+        // Delete vectors from Cloudflare Vectorize
+        await vectorizeBinding.deleteByIds(allVectorIds)
+        // Delete mapping rows
+        await payload.delete({
+          collection: CF_MAPPINGS_SLUG as CollectionSlug,
           where: {
             and: [
-              { key: 'sourceCollection', value: sourceCollection },
-              { key: 'docId', value: docId },
+              { poolName: { equals: poolName } },
+              { sourceCollection: { equals: sourceCollection } },
+              { docId: { equals: docId } },
             ],
           },
         })
-
-        const idsToDelete = (results.matches || []).map((match) => match.id)
-
-        if (idsToDelete.length > 0) {
-          await vectorizeBinding.deleteByIds(idsToDelete)
-        }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error)
         payload.logger.error(
@@ -96,5 +125,6 @@ export const createCloudflareVectorizeIntegration = (
   return { adapter }
 }
 
+export { CF_MAPPINGS_SLUG } from './collections/cfMappings.js'
 export type { CloudflareVectorizeBinding, KnowledgePoolsConfig }
 export type { KnowledgePoolsConfig as KnowledgePoolConfig }

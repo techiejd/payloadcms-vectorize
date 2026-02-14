@@ -51,6 +51,8 @@ export const createMockAdapter = (options: MockAdapterOptions = {}): DbAdapter =
     storeEmbedding: async (
       _payload: Payload,
       poolName: KnowledgePoolName,
+      _sourceCollection: string,
+      _sourceDocId: string,
       id: string,
       embedding: number[] | Float32Array,
     ): Promise<void> => {

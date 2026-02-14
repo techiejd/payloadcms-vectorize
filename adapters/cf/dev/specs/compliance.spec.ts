@@ -73,7 +73,7 @@ function createMockVectorizeBinding() {
       }
     }),
 
-    delete: vi.fn(async (ids: string[]) => {
+    deleteByIds: vi.fn(async (ids: string[]) => {
       for (const id of ids) {
         storage.delete(id)
       }
@@ -177,6 +177,14 @@ describe('Cloudflare Adapter Compliance Tests', () => {
       expect(extension.custom!._poolConfigs.default).toBeDefined()
       expect(extension.custom!._poolConfigs.default.dims).toBe(DIMS)
     })
+
+    test('collections property contains cfMappings collection', () => {
+      const extension = adapter.getConfigExtension({} as any)
+
+      expect(extension.collections).toBeDefined()
+      expect(extension.collections!['vector-cf-mappings']).toBeDefined()
+      expect(extension.collections!['vector-cf-mappings'].slug).toBe('vector-cf-mappings')
+    })
   })
 
   describe('storeEmbedding()', () => {
@@ -185,12 +193,14 @@ describe('Cloudflare Adapter Compliance Tests', () => {
         .fill(0)
         .map(() => Math.random())
 
+      const sourceDocId = `test-embed-1-${Date.now()}`
+
       // Create a document first
       const doc = await payload.create({
         collection: 'default' as any,
         data: {
           sourceCollection: 'test-collection',
-          docId: `test-embed-1-${Date.now()}`,
+          docId: sourceDocId,
           chunkIndex: 0,
           chunkText: 'test text for embedding',
           embeddingVersion: 'v1-test',
@@ -198,7 +208,14 @@ describe('Cloudflare Adapter Compliance Tests', () => {
       })
 
       await expect(
-        adapter.storeEmbedding(payload, 'default', String(doc.id), embedding),
+        adapter.storeEmbedding(
+          payload,
+          'default',
+          'test-collection',
+          sourceDocId,
+          String(doc.id),
+          embedding,
+        ),
       ).resolves.not.toThrow()
 
       expect(mockVectorize.upsert).toHaveBeenCalled()
@@ -211,11 +228,13 @@ describe('Cloudflare Adapter Compliance Tests', () => {
           .map(() => Math.random()),
       )
 
+      const sourceDocId = `test-embed-2-${Date.now()}`
+
       const doc = await payload.create({
         collection: 'default' as any,
         data: {
           sourceCollection: 'test-collection',
-          docId: `test-embed-2-${Date.now()}`,
+          docId: sourceDocId,
           chunkIndex: 0,
           chunkText: 'test text for Float32Array',
           embeddingVersion: 'v1-test',
@@ -223,7 +242,14 @@ describe('Cloudflare Adapter Compliance Tests', () => {
       })
 
       await expect(
-        adapter.storeEmbedding(payload, 'default', String(doc.id), embedding),
+        adapter.storeEmbedding(
+          payload,
+          'default',
+          'test-collection',
+          sourceDocId,
+          String(doc.id),
+          embedding,
+        ),
       ).resolves.not.toThrow()
 
       expect(mockVectorize.upsert).toHaveBeenCalled()
@@ -232,23 +258,32 @@ describe('Cloudflare Adapter Compliance Tests', () => {
     test('stores embedding in Vectorize with correct ID', async () => {
       const embedding = Array(DIMS).fill(0.5)
 
+      const sourceDocId = `test-embed-id-${Date.now()}`
+
       const doc = await payload.create({
         collection: 'default' as any,
         data: {
           sourceCollection: 'test-collection',
-          docId: `test-embed-id-${Date.now()}`,
+          docId: sourceDocId,
           chunkIndex: 0,
           chunkText: 'test text',
           embeddingVersion: 'v1-test',
         },
       })
 
-      const docId = String(doc.id)
-      await adapter.storeEmbedding(payload, 'default', docId, embedding)
+      const embeddingId = String(doc.id)
+      await adapter.storeEmbedding(
+        payload,
+        'default',
+        'test-collection',
+        sourceDocId,
+        embeddingId,
+        embedding,
+      )
 
       const storage = mockVectorize.__getStorage()
-      expect(storage.has(docId)).toBe(true)
-      expect(storage.get(docId)?.values).toEqual(embedding)
+      expect(storage.has(embeddingId)).toBe(true)
+      expect(storage.get(embeddingId)?.values).toEqual(embedding)
     })
   })
 
@@ -263,19 +298,28 @@ describe('Cloudflare Adapter Compliance Tests', () => {
         .fill(0.5)
         .map((v) => v + Math.random() * 0.05)
 
+      const sourceDocId = `test-search-similar-${Date.now()}`
+
       // Create and embed a document
       const similarDoc = await payload.create({
         collection: 'default' as any,
         data: {
           sourceCollection: 'test-collection',
-          docId: `test-search-similar-${Date.now()}`,
+          docId: sourceDocId,
           chunkIndex: 0,
           chunkText: 'similar document for search test',
           embeddingVersion: 'v1-test',
         },
       })
       similarDocId = String(similarDoc.id)
-      await adapter.storeEmbedding(payload, 'default', similarDocId, similarEmbedding)
+      await adapter.storeEmbedding(
+        payload,
+        'default',
+        'test-collection',
+        sourceDocId,
+        similarDocId,
+        similarEmbedding,
+      )
     })
 
     test('returns an array of results', async () => {
@@ -328,33 +372,55 @@ describe('Cloudflare Adapter Compliance Tests', () => {
   })
 
   describe('deleteEmbeddings()', () => {
-    test('removes embeddings from Vectorize', async () => {
+    test('removes embeddings from Vectorize via mapping', async () => {
       const embedding = Array(DIMS).fill(0.7)
+
+      const sourceDocId = `doc-to-delete-${Date.now()}`
 
       // Create and embed a document
       const doc = await payload.create({
         collection: 'default' as any,
         data: {
           sourceCollection: 'delete-test',
-          docId: `doc-to-delete-${Date.now()}`,
+          docId: sourceDocId,
           chunkIndex: 0,
           chunkText: 'document to delete',
           embeddingVersion: 'v1-test',
         },
       })
 
-      const docId = String(doc.id)
-      await adapter.storeEmbedding(payload, 'default', docId, embedding)
+      const embeddingId = String(doc.id)
+      await adapter.storeEmbedding(
+        payload,
+        'default',
+        'delete-test',
+        sourceDocId,
+        embeddingId,
+        embedding,
+      )
 
-      // Verify it's stored
+      // Verify it's stored in Vectorize
       const storage = mockVectorize.__getStorage()
-      expect(storage.has(docId)).toBe(true)
+      expect(storage.has(embeddingId)).toBe(true)
 
       // Delete it
-      await adapter.deleteEmbeddings?.(payload, 'default', 'delete-test', docId)
+      await adapter.deleteEmbeddings?.(payload, 'default', 'delete-test', sourceDocId)
 
-      // Verify it's gone
-      expect(mockVectorize.delete).toHaveBeenCalledWith([docId])
+      // Verify deleteByIds was called with the correct vector ID
+      expect(mockVectorize.deleteByIds).toHaveBeenCalledWith([embeddingId])
+
+      // Verify mapping rows are cleaned up
+      const remainingMappings = await payload.find({
+        collection: 'vector-cf-mappings' as any,
+        where: {
+          and: [
+            { poolName: { equals: 'default' } },
+            { sourceCollection: { equals: 'delete-test' } },
+            { docId: { equals: sourceDocId } },
+          ],
+        },
+      })
+      expect(remainingMappings.totalDocs).toBe(0)
     })
 
     test('handles non-existent embeddings gracefully', async () => {

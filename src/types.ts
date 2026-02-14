@@ -1,4 +1,13 @@
-import type { CollectionSlug, Payload, Field, Where, Config, BasePayload, TypeWithID } from 'payload'
+import type {
+  CollectionConfig,
+  CollectionSlug,
+  Payload,
+  Field,
+  Where,
+  Config,
+  BasePayload,
+  TypeWithID,
+} from 'payload'
 
 /** Result from bulkEmbed method */
 export type BulkEmbedResult =
@@ -365,6 +374,7 @@ export type DbAdapter = {
   getConfigExtension: (payloadCmsConfig: Config) => {
     bins?: { key: string; scriptPath: string }[]
     custom?: Record<string, any>
+    collections?: Record<string, CollectionConfig>
   }
   search: (
     payload: BasePayload,
@@ -376,7 +386,9 @@ export type DbAdapter = {
   storeEmbedding: (
     payload: Payload,
     poolName: KnowledgePoolName,
-    id: string,
+    sourceCollection: string,
+    sourceDocId: string,
+    embeddingId: string,
     embedding: number[] | Float32Array,
   ) => Promise<void>
   /**

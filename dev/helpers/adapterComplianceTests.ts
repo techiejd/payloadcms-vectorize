@@ -119,13 +119,14 @@ export const runAdapterComplianceTests = (getContext: AdapterTestContextFactory)
     describe('storeEmbedding()', () => {
       test('persists embedding without error (number[])', async () => {
         const embedding = generateRandomEmbedding(ctx.dims)
+        const sourceDocId = `test-embed-1-${Date.now()}`
 
         // Create a document first
         const doc = await ctx.payload.create({
           collection: ctx.poolName as any,
           data: {
             sourceCollection: 'test-collection',
-            docId: `test-embed-1-${Date.now()}`,
+            docId: sourceDocId,
             chunkIndex: 0,
             chunkText: 'test text for embedding',
             embeddingVersion: 'v1-test',
@@ -133,18 +134,20 @@ export const runAdapterComplianceTests = (getContext: AdapterTestContextFactory)
         })
 
         await expect(
-          ctx.adapter.storeEmbedding(ctx.payload, ctx.poolName, String(doc.id), embedding),
+          ctx.adapter.storeEmbedding(ctx.payload, ctx.poolName, 'test-collection', sourceDocId, String(doc.id), embedding),
         ).resolves.not.toThrow()
       })
 
       test('persists embedding without error (Float32Array)', async () => {
         const embedding = new Float32Array(generateRandomEmbedding(ctx.dims))
 
+        const sourceDocId = `test-embed-2-${Date.now()}`
+
         const doc = await ctx.payload.create({
           collection: ctx.poolName as any,
           data: {
             sourceCollection: 'test-collection',
-            docId: `test-embed-2-${Date.now()}`,
+            docId: sourceDocId,
             chunkIndex: 0,
             chunkText: 'test text for Float32Array',
             embeddingVersion: 'v1-test',
@@ -152,7 +155,7 @@ export const runAdapterComplianceTests = (getContext: AdapterTestContextFactory)
         })
 
         await expect(
-          ctx.adapter.storeEmbedding(ctx.payload, ctx.poolName, String(doc.id), embedding),
+          ctx.adapter.storeEmbedding(ctx.payload, ctx.poolName, 'test-collection', sourceDocId, String(doc.id), embedding),
         ).resolves.not.toThrow()
       })
     })
@@ -169,25 +172,27 @@ export const runAdapterComplianceTests = (getContext: AdapterTestContextFactory)
         const differentEmbedding = generateDifferentEmbedding(ctx.dims)
 
         // Create similar document
+        const similarSourceDocId = `test-search-similar-${Date.now()}`
         const similarDoc = await ctx.payload.create({
           collection: ctx.poolName as any,
           data: {
             sourceCollection: 'test-collection',
-            docId: `test-search-similar-${Date.now()}`,
+            docId: similarSourceDocId,
             chunkIndex: 0,
             chunkText: 'similar document',
             embeddingVersion: 'v1-test',
           },
         })
         similarDocId = String(similarDoc.id)
-        await ctx.adapter.storeEmbedding(ctx.payload, ctx.poolName, similarDocId, similarEmbedding)
+        await ctx.adapter.storeEmbedding(ctx.payload, ctx.poolName, 'test-collection', similarSourceDocId, similarDocId, similarEmbedding)
 
         // Create different document
+        const differentSourceDocId = `test-search-different-${Date.now()}`
         const differentDoc = await ctx.payload.create({
           collection: ctx.poolName as any,
           data: {
             sourceCollection: 'test-collection',
-            docId: `test-search-different-${Date.now()}`,
+            docId: differentSourceDocId,
             chunkIndex: 0,
             chunkText: 'different document',
             embeddingVersion: 'v1-test',
@@ -197,6 +202,8 @@ export const runAdapterComplianceTests = (getContext: AdapterTestContextFactory)
         await ctx.adapter.storeEmbedding(
           ctx.payload,
           ctx.poolName,
+          'test-collection',
+          differentSourceDocId,
           differentDocId,
           differentEmbedding,
         )
