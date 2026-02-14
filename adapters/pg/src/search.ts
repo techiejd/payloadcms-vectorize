@@ -15,7 +15,7 @@ import {
   isNull,
   isNotNull,
 } from '@payloadcms/db-postgres/drizzle'
-import { BasePayload, Where } from 'payload'
+import { BasePayload, Where, SanitizedCollectionConfig, FlattenedField } from 'payload'
 import { KnowledgePoolName, VectorSearchResult } from 'payloadcms-vectorize'
 import toSnakeCase from 'to-snake-case'
 import { getEmbeddingsTable } from './drizzle.js'
@@ -131,10 +131,19 @@ export default async (
 }
 
 /**
- * Convert Payload WHERE clause to Drizzle conditions
- * Simplified version inspired by Payload's buildQuery
+ * Drizzle table — dynamically registered, so typed loosely.
+ * We use `any` here because Drizzle column types (SQLWrapper, Column) are
+ * not directly expressible for tables that are registered at runtime.
  */
-function convertWhereToDrizzle(where: Where, table: any, fields: any[]): any {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type DrizzleTable = Record<string, any>
+
+/**
+ * Convert Payload WHERE clause to Drizzle conditions.
+ * Returns a drizzle SQL condition, null (empty/no-op), or undefined (invalid).
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function convertWhereToDrizzle(where: Where, table: DrizzleTable, fields: FlattenedField[]): any {
   if (!where || typeof where !== 'object') {
     return undefined
   }
@@ -160,14 +169,13 @@ function convertWhereToDrizzle(where: Where, table: any, fields: any[]): any {
   }
 
   // Handle field conditions - collect all field conditions and combine with AND
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fieldConditions: any[] = []
   for (const [fieldName, condition] of Object.entries(where)) {
     if (fieldName === 'and' || fieldName === 'or') continue
 
-    // Get the column from the table
-    // Drizzle tables have columns as direct properties
-    // Try camelCase first, then snake_case as fallback
-    // Use 'in' operator to check existence, then access the property
+    // Get the column from the table (try camelCase first, then snake_case)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let column: any = undefined
     if (fieldName in table) {
       column = table[fieldName]
@@ -191,7 +199,7 @@ function convertWhereToDrizzle(where: Where, table: any, fields: any[]): any {
       continue
     }
 
-    const cond = condition as Record<string, any>
+    const cond = condition as Record<string, unknown>
 
     // Handle equals
     if ('equals' in cond) {
@@ -273,32 +281,33 @@ function convertWhereToDrizzle(where: Where, table: any, fields: any[]): any {
   return and(...fieldConditions)
 }
 
-function mapRowsToResults(rows: any[], collectionConfig: any): Array<VectorSearchResult> {
+function mapRowsToResults(
+  rows: Record<string, unknown>[],
+  collectionConfig: SanitizedCollectionConfig,
+): Array<VectorSearchResult> {
   // Collect names of fields that are typed as number on the collection
   const numberFields = new Set<string>()
-  if (collectionConfig?.fields) {
-    for (const field of collectionConfig.fields) {
-      if (typeof field === 'object' && 'name' in field && field.type === 'number') {
-        numberFields.add(field.name as string)
-      }
+  for (const field of collectionConfig.fields) {
+    if (typeof field === 'object' && 'name' in field && field.type === 'number') {
+      numberFields.add(field.name)
     }
   }
 
-  return rows.map((row: any) => {
+  return rows.map((row) => {
     // Drizzle returns columns with the names we selected (camelCase)
     // Handle both camelCase and snake_case for robustness
     const rawDocId = row.docId ?? row.doc_id
     const rawChunkIndex = row.chunkIndex ?? row.chunk_index
     const rawScore = row.score
 
-    const result: any = {
+    const result = {
       ...row,
       id: String(row.id),
       docId: String(rawDocId),
       score: typeof rawScore === 'number' ? rawScore : parseFloat(String(rawScore)),
       chunkIndex:
         typeof rawChunkIndex === 'number' ? rawChunkIndex : parseInt(String(rawChunkIndex), 10),
-    }
+    } as VectorSearchResult
 
     // Ensure any number fields from the schema are numbers in the result
     for (const fieldName of numberFields) {

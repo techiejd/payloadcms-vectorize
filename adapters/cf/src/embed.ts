@@ -1,9 +1,9 @@
 import { Payload } from 'payload'
 import { getVectorizedPayload } from 'payloadcms-vectorize'
+import type { CloudflareVectorizeBinding } from './types.js'
 
 /**
  * Store an embedding vector in Cloudflare Vectorize
- * Also creates a Payload document for the metadata
  */
 export default async (
   payload: Payload,
@@ -12,7 +12,9 @@ export default async (
   embedding: number[] | Float32Array,
 ) => {
   // Get Cloudflare binding from config
-  const vectorizeBinding = getVectorizedPayload(payload)?.getDbAdapterCustom()?._vectorizeBinding
+  const vectorizeBinding = getVectorizedPayload(payload)?.getDbAdapterCustom()?._vectorizeBinding as
+    | CloudflareVectorizeBinding
+    | undefined
   if (!vectorizeBinding) {
     throw new Error('[@payloadcms-vectorize/cf] Cloudflare Vectorize binding not found')
   }
@@ -28,7 +30,7 @@ export default async (
       },
     ])
   } catch (e) {
-    const errorMessage = (e as Error).message || (e as any).toString()
+    const errorMessage = e instanceof Error ? e.message : String(e)
     payload.logger.error(`[@payloadcms-vectorize/cf] Failed to store embedding: ${errorMessage}`)
     throw new Error(`[@payloadcms-vectorize/cf] Failed to store embedding: ${errorMessage}`)
   }
