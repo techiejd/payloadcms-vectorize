@@ -6,6 +6,9 @@ import type {
   KnowledgePoolName,
   ToKnowledgePoolFn,
 } from '../types.js'
+import { TASK_SLUG_VECTORIZE } from '../constants.js'
+import { validateChunkData } from '../utils/validateChunkData.js'
+import { deleteDocumentEmbeddings } from '../utils/deleteDocumentEmbeddings.js'
 
 type VectorizeTaskInput = {
   collection: string
@@ -32,7 +35,7 @@ export const createVectorizeTask = ({
    * @description Scheduled task that vectorizes on data change.
    */
   const processVectorizationTask: TaskConfig<VectorizeTaskInputOutput> = {
-    slug: 'payloadcms-vectorize:vectorize',
+    slug: TASK_SLUG_VECTORIZE,
     handler: async ({ input, req }): Promise<TaskHandlerResult<VectorizeTaskInputOutput>> => {
       if (!input.collection) {
         throw new Error('[payloadcms-vectorize] collection is required')
@@ -93,51 +96,18 @@ async function runVectorizeTask(args: {
   // Delete all existing embeddings for this document before creating new ones
   // This ensures we replace old embeddings (potentially with a different embeddingVersion)
   // and prevents duplicates when a document is updated
-  await payload.delete({
-    collection: poolName,
-    where: {
-      and: [
-        { sourceCollection: { equals: collection } },
-        { docId: { equals: String(sourceDoc.id) } },
-      ],
-    },
+  await deleteDocumentEmbeddings({
+    payload,
+    poolName,
+    collection,
+    docId: String(sourceDoc.id),
+    adapter,
   })
-
-  // Also call adapter's delete if available (for adapters that store vectors separately)
-  if (adapter.deleteEmbeddings) {
-    await adapter.deleteEmbeddings(payload, poolName, collection, String(sourceDoc.id))
-  }
 
   // Get chunks from toKnowledgePoolFn
   const chunkData = await toKnowledgePoolFn(sourceDoc, payload)
 
-  if (!Array.isArray(chunkData)) {
-    throw new Error(
-      `[payloadcms-vectorize] toKnowledgePool for collection "${collection}" must return an array of entries with a required "chunk" string`,
-    )
-  }
-
-  const invalidEntries = chunkData
-    .map((entry, idx) => {
-      if (!entry || typeof entry !== 'object') {
-        return idx
-      }
-      if (typeof entry.chunk !== 'string') {
-        return idx
-      }
-      return null
-    })
-    .filter((idx): idx is number => idx !== null)
-
-  if (invalidEntries.length > 0) {
-    throw new Error(
-      `[payloadcms-vectorize] toKnowledgePool returned ${invalidEntries.length} invalid entr${
-        invalidEntries.length === 1 ? 'y' : 'ies'
-      } for document ${sourceDoc.id} in collection "${collection}". Each entry must be an object with a "chunk" string. Invalid indices: ${invalidEntries.join(
-        ', ',
-      )}`,
-    )
-  }
+  validateChunkData(chunkData, String(sourceDoc.id), collection)
 
   // Extract chunk texts for embedding
   const chunkTexts = chunkData.map((item) => item.chunk)

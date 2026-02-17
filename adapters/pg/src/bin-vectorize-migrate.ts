@@ -7,6 +7,17 @@ import toSnakeCase from 'to-snake-case'
 import { getVectorizedPayload } from 'payloadcms-vectorize'
 import { KnowledgePoolsConfig } from './types.js'
 
+function listMigrationFiles(migrationsDir: string) {
+  return readdirSync(migrationsDir)
+    .filter((f) => (f.endsWith('.ts') || f.endsWith('.js')) && f !== 'index.ts' && f !== 'index.js')
+    .map((f) => ({
+      name: f,
+      path: join(migrationsDir, f),
+      mtime: statSync(join(migrationsDir, f)).mtime,
+    }))
+    .sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
+}
+
 /**
  * Get prior dims state from existing migrations
  */
@@ -26,15 +37,7 @@ function getPriorDimsFromMigrations(
   }
 
   // Find all migration files and read them in reverse order (newest first)
-  // Exclude index.ts/index.js as those are not migration files
-  const migrationFiles = readdirSync(migrationsDir)
-    .filter((f) => (f.endsWith('.ts') || f.endsWith('.js')) && f !== 'index.ts' && f !== 'index.js')
-    .map((f) => ({
-      name: f,
-      path: join(migrationsDir, f),
-      mtime: statSync(join(migrationsDir, f)).mtime,
-    }))
-    .sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
+  const migrationFiles = listMigrationFiles(migrationsDir)
 
   // Skip the most recent migration when determining prior dims, since it may contain
   // the pending dims change that we're trying to detect
@@ -289,14 +292,7 @@ export const script = async (config: SanitizedConfig): Promise<void> => {
     )
   }
 
-  const migrationFiles = readdirSync(migrationsDir)
-    .filter((f) => (f.endsWith('.ts') || f.endsWith('.js')) && f !== 'index.ts' && f !== 'index.js')
-    .map((f) => ({
-      name: f,
-      path: join(migrationsDir, f),
-      mtime: statSync(join(migrationsDir, f)).mtime,
-    }))
-    .sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
+  const migrationFiles = listMigrationFiles(migrationsDir)
 
   if (migrationFiles.length === 0) {
     throw new Error(

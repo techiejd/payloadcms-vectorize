@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, test, afterAll, vi } from 'vitest'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { buildConfig, getPayload } from 'payload'
 import { createPostgresVectorIntegration } from '../../src/index.js'
-import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from './helpers/embed.js'
+import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from '@shared-test/helpers/embed'
 import { createTestDb } from './utils.js'
 import { DIMS } from './constants.js'
 

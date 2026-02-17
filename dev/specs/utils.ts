@@ -6,7 +6,11 @@ import { mkdirSync, rmSync } from 'fs'
 import { join } from 'path'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { lexicalEditor } from '@payloadcms/richtext-lexical'
-import payloadcmsVectorize from 'payloadcms-vectorize'
+import payloadcmsVectorize, {
+  TASK_SLUG_VECTORIZE,
+  TASK_SLUG_PREPARE_BULK_EMBEDDING,
+  TASK_SLUG_POLL_OR_COMPLETE_BULK_EMBEDDING,
+} from 'payloadcms-vectorize'
 import { BULK_EMBEDDINGS_RUNS_SLUG } from '../../src/collections/bulkEmbeddingsRuns.js'
 import { BULK_EMBEDDINGS_INPUT_METADATA_SLUG } from '../../src/collections/bulkEmbeddingInputMetadata.js'
 import { BULK_EMBEDDINGS_BATCHES_SLUG } from '../../src/collections/bulkEmbeddingsBatches.js'
@@ -89,16 +93,13 @@ async function waitForTasks(
 }
 
 export async function waitForVectorizationJobs(payload: Payload, maxWaitMs = 10000) {
-  await waitForTasks(payload, ['payloadcms-vectorize:vectorize'], maxWaitMs)
+  await waitForTasks(payload, [TASK_SLUG_VECTORIZE], maxWaitMs)
 }
 
 export async function waitForBulkJobs(payload: Payload, maxWaitMs = 10000) {
   await waitForTasks(
     payload,
-    [
-      'payloadcms-vectorize:prepare-bulk-embedding',
-      'payloadcms-vectorize:poll-or-complete-bulk-embedding',
-    ],
+    [TASK_SLUG_PREPARE_BULK_EMBEDDING, TASK_SLUG_POLL_OR_COMPLETE_BULK_EMBEDDING],
     maxWaitMs,
   )
 }

@@ -12,6 +12,8 @@ import type {
   DbAdapter,
 } from './types.js'
 import { createVectorizeTask } from './tasks/vectorize.js'
+import { TASK_SLUG_VECTORIZE } from './constants.js'
+import { deleteDocumentEmbeddings } from './utils/deleteDocumentEmbeddings.js'
 import { createVectorSearchHandlers } from './endpoints/vectorSearch.js'
 import {
   createBulkEmbeddingsRunsCollection,
@@ -72,6 +74,14 @@ export type {
 } from './types.js'
 
 export { getVectorizedPayload } from './types.js'
+
+export {
+  TASK_SLUG_VECTORIZE,
+  TASK_SLUG_PREPARE_BULK_EMBEDDING,
+  TASK_SLUG_POLL_OR_COMPLETE_BULK_EMBEDDING,
+} from './constants.js'
+export { validateChunkData } from './utils/validateChunkData.js'
+export { deleteDocumentEmbeddings } from './utils/deleteDocumentEmbeddings.js'
 
 // ==================
 // Plugin entry point
@@ -201,8 +211,8 @@ export default (pluginOptions: PayloadcmsVectorizeConfig) =>
           // If no realTimeIngestionFn, nothing happens on doc change
           // User must trigger bulk embedding manually
 
-          await payload.jobs.queue<'payloadcms-vectorize:vectorize'>({
-            task: 'payloadcms-vectorize:vectorize',
+          await payload.jobs.queue<typeof TASK_SLUG_VECTORIZE>({
+            task: TASK_SLUG_VECTORIZE,
             input: {
               doc,
               collection: collectionSlug,
@@ -236,20 +246,13 @@ export default (pluginOptions: PayloadcmsVectorizeConfig) =>
             // Delete from ALL knowledge pools containing this collection
             for (const { pool } of pools) {
               try {
-                await payload.delete({
-                  collection: pool as CollectionSlug,
-                  where: {
-                    and: [
-                      { sourceCollection: { equals: collectionSlug } },
-                      { docId: { equals: String(id) } },
-                    ],
-                  },
+                await deleteDocumentEmbeddings({
+                  payload,
+                  poolName: pool,
+                  collection: collectionSlug,
+                  docId: String(id),
+                  adapter,
                 })
-
-                // Also call adapter's delete if available
-                if (adapter.deleteEmbeddings) {
-                  await adapter.deleteEmbeddings(payload, pool, collectionSlug, String(id))
-                }
               } catch (e) {
                 payload?.logger?.warn?.(
                   `[payloadcms-vectorize] Failed to delete from knowledge pool ${pool}: ${e instanceof Error ? e.message : String(e)}`,
