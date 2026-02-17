@@ -5,6 +5,8 @@ import toSnakeCase from 'to-snake-case'
 export default async (
   payload: Payload,
   poolName: string,
+  _sourceCollection: string,
+  _sourceDocId: string,
   id: string,
   embedding: number[] | Float32Array,
 ) => {

@@ -32,30 +32,38 @@ export default async (
       return []
     }
 
-    // Fetch full documents from Payload for metadata
-    const searchResults: VectorSearchResult[] = []
+    // Batch-fetch all matched documents, paginating through results
+    const matchIds = results.matches.map((m) => m.id)
+    const scoreById = new Map(results.matches.map((m) => [m.id, m.score || 0]))
 
-    for (const match of results.matches) {
-      try {
-        const doc = await payload.findByID({
-          collection: poolName as CollectionSlug,
-          id: match.id,
-        })
-
-        if (doc && (!where || matchesWhere(doc as Record<string, unknown>, where))) {
-          // Extract fields excluding internal ones
-          const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...docFields } =
-            doc as Record<string, unknown>
-
-          searchResults.push({
-            id: match.id,
-            score: match.score || 0,
-            ...docFields, // Includes sourceCollection, docId, chunkText, embeddingVersion, extension fields
-          } as VectorSearchResult)
-        }
-      } catch (_e) {
-        // Document not found or error fetching, skip
+    const docsById = new Map<string, Record<string, unknown>>()
+    let page = 1
+    let hasNextPage = true
+    while (hasNextPage) {
+      const found = await payload.find({
+        collection: poolName as CollectionSlug,
+        where: { id: { in: matchIds } },
+        page,
+      })
+      for (const doc of found.docs as Record<string, unknown>[]) {
+        docsById.set(String(doc.id), doc)
       }
+      hasNextPage = found.hasNextPage
+      page++
+    }
+
+    // Build results preserving the original similarity-score order
+    const searchResults: VectorSearchResult[] = []
+    for (const matchId of matchIds) {
+      const doc = docsById.get(matchId)
+      if (!doc || (where && !matchesWhere(doc, where))) continue
+
+      const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...docFields } = doc
+      searchResults.push({
+        id: matchId,
+        score: scoreById.get(matchId) || 0,
+        ...docFields,
+      } as VectorSearchResult)
     }
 
     return searchResults

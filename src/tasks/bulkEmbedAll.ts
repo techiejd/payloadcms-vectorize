@@ -884,6 +884,8 @@ async function pollAndCompleteSingleBatch(args: {
       await adapter.storeEmbedding(
         payload,
         poolName,
+        meta.sourceCollection,
+        String(meta.docId),
         String(created.id),
         embeddingArray,
       )

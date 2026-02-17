@@ -162,7 +162,7 @@ async function runVectorizeTask(args: {
 
       const id = String(created.id)
 
-      await adapter.storeEmbedding(payload, poolName, id, vector)
+      await adapter.storeEmbedding(payload, poolName, collection, String(sourceDoc.id), id, vector)
     }),
   )
 }

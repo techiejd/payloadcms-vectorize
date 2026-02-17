@@ -393,6 +393,15 @@ export default (pluginOptions: PayloadcmsVectorizeConfig) =>
       config.bin = [...(config.bin || []), ...configExtension.bins]
     }
 
+    // Register adapter-provided collections
+    if (configExtension?.collections) {
+      for (const [_slug, collectionConfig] of Object.entries(configExtension.collections)) {
+        if (!config.collections!.find((c) => c.slug === collectionConfig.slug)) {
+          config.collections!.push(collectionConfig)
+        }
+      }
+    }
+
     return config
   }
 

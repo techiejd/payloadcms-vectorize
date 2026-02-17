@@ -57,7 +57,7 @@ export function createMockVectorizeBinding() {
       }
     },
 
-    delete: async (ids: string[]) => {
+    deleteByIds: async (ids: string[]) => {
       for (const id of ids) {
         storage.delete(id)
       }
