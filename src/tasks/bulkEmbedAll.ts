@@ -384,11 +384,6 @@ export const createPollOrCompleteBulkEmbeddingTask = ({
           (status) => status === 'succeeded',
         )
 
-        // Check if any batches are failed (not just canceled) - we keep metadata for potential retries
-        const hasFailedBatches = Array.from(batchStatuses.values()).some(
-          (status) => status === 'failed',
-        )
-
         await payload.update({
           id: input.runId,
           collection: BULK_EMBEDDINGS_RUNS_SLUG,

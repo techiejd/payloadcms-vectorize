@@ -2,8 +2,6 @@
 import type { Payload, SanitizedConfig } from 'payload'
 import { buildConfig, getPayload } from 'payload'
 import { Client } from 'pg'
-import { mkdirSync, rmSync } from 'fs'
-import { join } from 'path'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { lexicalEditor } from '@payloadcms/richtext-lexical'
 import payloadcmsVectorize, {
@@ -45,25 +43,6 @@ export const createTestDb = async ({ dbName }: { dbName: string }) => {
   }
   //await client.query(`DROP DATABASE "${dbName}"`)
   await client.end()
-}
-
-/**
- * Create a unique migration directory for a test.
- * Returns the path and a cleanup function.
- */
-export function createTestMigrationsDir(dbName: string): {
-  migrationsDir: string
-  cleanup: () => void
-} {
-  const migrationsDir = join(process.cwd(), 'dev', `test-migrations-${dbName}`)
-  // Clean up any existing migration directory
-  rmSync(migrationsDir, { recursive: true, force: true })
-  mkdirSync(migrationsDir, { recursive: true })
-
-  return {
-    migrationsDir,
-    cleanup: () => rmSync(migrationsDir, { recursive: true, force: true }),
-  }
 }
 
 async function waitForTasks(
@@ -298,20 +277,3 @@ export const clearAllCollections = async (pl: Payload) => {
   await safeDelete('payload-jobs')
 }
 
-export async function createSucceededBaselineRun(
-  payload: Payload,
-  {
-    version,
-    completedAt = new Date().toISOString(),
-  }: { version?: string; completedAt?: string } = {},
-) {
-  return (payload as any).create({
-    collection: BULK_EMBEDDINGS_RUNS_SLUG,
-    data: {
-      pool: 'default',
-      embeddingVersion: version ?? '',
-      status: 'succeeded',
-      completedAt,
-    },
-  })
-}
