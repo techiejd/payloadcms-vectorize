@@ -1,6 +1,6 @@
 {
   "name": "payloadcms-vectorize",
-  "version": "0.6.0-beta.2",
+  "version": "0.6.0-beta.3",
   "description": "A plugin to vectorize collections for RAG in Payload 3.0",
   "license": "MIT",
   "type": "module",
