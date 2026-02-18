@@ -280,16 +280,6 @@ export type PayloadcmsVectorizeConfig = {
   disabled?: boolean
 }
 
-// Job task argument types
-export type VectorizeTaskArgs = {
-  payload: any
-  pluginOptions: PayloadcmsVectorizeConfig
-  doc: Record<string, any>
-  collection: string
-  knowledgePool: KnowledgePoolName
-  toKnowledgePoolFn: ToKnowledgePoolFn
-}
-
 export interface VectorSearchResult {
   id: string
   /** Relevance score (higher = more relevant). Range depends on adapter implementation. */
@@ -300,10 +290,6 @@ export interface VectorSearchResult {
   chunkText: string // The original text that was vectorized
   embeddingVersion: string // The version of the embedding model used
   [key: string]: any // Extension fields and other dynamic fields
-}
-
-export interface VectorSearchResponse {
-  results: VectorSearchResult[]
 }
 
 export interface VectorSearchQuery {

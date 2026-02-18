@@ -183,15 +183,12 @@ export const chunkText = (text: string): string[] => {
   const sentences = text.match(/[^.!?]+[.!?](?:\s+|$)|[^.!?]+$/g) || []
   const chunks = []
   let currentChunk = ''
-  let numSentences = 0
   for (const sentence of sentences) {
     if (currentChunk.length + sentence.length >= maxChars) {
       chunks.push(currentChunk)
       currentChunk = sentence
-      numSentences = 0
     } else {
       currentChunk += sentence
-      numSentences++
     }
   }
   if (currentChunk) {
