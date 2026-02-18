@@ -1,6 +1,5 @@
 import { CollectionSlug, Payload } from 'payload'
-import { getVectorizedPayload } from 'payloadcms-vectorize'
-import type { CloudflareVectorizeBinding } from './types.js'
+import { getVectorizeBinding } from './types.js'
 import { CF_MAPPINGS_SLUG } from './collections/cfMappings.js'
 
 /**
@@ -14,12 +13,7 @@ export default async (
   id: string,
   embedding: number[] | Float32Array,
 ) => {
-  // Get Cloudflare binding from config
-  const vectorizeBinding = getVectorizedPayload(payload)?.getDbAdapterCustom()
-    ?._vectorizeBinding as CloudflareVectorizeBinding | undefined
-  if (!vectorizeBinding) {
-    throw new Error('[@payloadcms-vectorize/cf] Cloudflare Vectorize binding not found')
-  }
+  const vectorizeBinding = getVectorizeBinding(payload)
 
   try {
     const vector = Array.isArray(embedding) ? embedding : Array.from(embedding)

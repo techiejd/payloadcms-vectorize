@@ -1,5 +1,6 @@
 import type { CollectionSlug } from 'payload'
 import type { DbAdapter } from 'payloadcms-vectorize'
+import { getVectorizeBinding } from './types.js'
 import type { CloudflareVectorizeBinding, KnowledgePoolsConfig } from './types.js'
 import cfMappingsCollection, { CF_MAPPINGS_SLUG } from './collections/cfMappings.js'
 import embed from './embed.js'
@@ -58,16 +59,12 @@ export const createCloudflareVectorizeIntegration = (
       }
     },
 
-    search: async (payload, queryEmbedding, poolName, limit, where) => {
-      return search(payload, queryEmbedding, poolName, limit, where)
-    },
+    search,
 
-    storeEmbedding: async (payload, poolName, sourceCollection, sourceDocId, id, embedding) => {
-      return embed(payload, poolName, sourceCollection, sourceDocId, id, embedding)
-    },
+    storeEmbedding: embed,
 
     deleteEmbeddings: async (payload, poolName, sourceCollection, docId) => {
-      const vectorizeBinding = options.binding
+      const vectorizeBinding = getVectorizeBinding(payload)
 
       try {
         // Paginate through all mapping rows for this document+pool

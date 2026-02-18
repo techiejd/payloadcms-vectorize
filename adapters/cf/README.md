@@ -205,6 +205,10 @@ export const embedQuery = async (text: string): Promise<number[]> => {
 }
 ```
 
+## Known Limitations
+
+- **Search `limit` with `where` filtering:** When a `where` clause is provided, filtering is applied after fetching results from Cloudflare Vectorize. This means you may receive fewer results than the requested `limit` even when more matching vectors exist.
+
 ## License
 
 MIT

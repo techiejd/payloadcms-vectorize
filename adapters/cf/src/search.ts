@@ -1,6 +1,6 @@
 import { BasePayload, CollectionSlug, Where } from 'payload'
-import { KnowledgePoolName, VectorSearchResult, getVectorizedPayload } from 'payloadcms-vectorize'
-import type { CloudflareVectorizeBinding } from './types.js'
+import { KnowledgePoolName, VectorSearchResult } from 'payloadcms-vectorize'
+import { getVectorizeBinding } from './types.js'
 
 /**
  * Search for similar vectors in Cloudflare Vectorize
@@ -12,13 +12,7 @@ export default async (
   limit: number = 10,
   where?: Where,
 ): Promise<Array<VectorSearchResult>> => {
-  // Get Cloudflare binding from config
-  const vectorizeBinding = getVectorizedPayload(payload)?.getDbAdapterCustom()?._vectorizeBinding as
-    | CloudflareVectorizeBinding
-    | undefined
-  if (!vectorizeBinding) {
-    throw new Error('[@payloadcms-vectorize/cf] Cloudflare Vectorize binding not found')
-  }
+  const vectorizeBinding = getVectorizeBinding(payload)
 
   try {
     // Query Cloudflare Vectorize
