@@ -23,6 +23,12 @@ import {
 import { BULK_EMBEDDINGS_RUNS_SLUG } from '../collections/bulkEmbeddingsRuns.js'
 import { BULK_EMBEDDINGS_INPUT_METADATA_SLUG } from '../collections/bulkEmbeddingInputMetadata.js'
 import { BULK_EMBEDDINGS_BATCHES_SLUG } from '../collections/bulkEmbeddingsBatches.js'
+import {
+  TASK_SLUG_PREPARE_BULK_EMBEDDING,
+  TASK_SLUG_POLL_OR_COMPLETE_BULK_EMBEDDING,
+} from '../constants.js'
+import { validateChunkData } from '../utils/validateChunkData.js'
+import { deleteDocumentEmbeddings } from '../utils/deleteDocumentEmbeddings.js'
 
 type PrepareBulkEmbeddingTaskInput = {
   runId: string
@@ -95,7 +101,7 @@ export const createPrepareBulkEmbeddingTask = ({
   pollOrCompleteQueueName?: string
 }): TaskConfig<PrepareBulkEmbeddingTaskInputOutput> => {
   const task: TaskConfig<PrepareBulkEmbeddingTaskInputOutput> = {
-    slug: 'payloadcms-vectorize:prepare-bulk-embedding',
+    slug: TASK_SLUG_PREPARE_BULK_EMBEDDING,
     handler: async ({
       input,
       req,
@@ -192,8 +198,8 @@ export const createPrepareBulkEmbeddingTask = ({
       })
 
       // Queue the poll task to monitor all batches
-      await payload.jobs.queue<'payloadcms-vectorize:poll-or-complete-bulk-embedding'>({
-        task: 'payloadcms-vectorize:poll-or-complete-bulk-embedding',
+      await payload.jobs.queue<typeof TASK_SLUG_POLL_OR_COMPLETE_BULK_EMBEDDING>({
+        task: TASK_SLUG_POLL_OR_COMPLETE_BULK_EMBEDDING,
         input: { runId: input.runId },
         req,
         ...(pollOrCompleteQueueName ? { queue: pollOrCompleteQueueName } : {}),
@@ -218,7 +224,7 @@ export const createPollOrCompleteBulkEmbeddingTask = ({
   adapter: DbAdapter
 }): TaskConfig<PollOrCompleteBulkEmbeddingTaskInputOutput> => {
   const task: TaskConfig<PollOrCompleteBulkEmbeddingTaskInputOutput> = {
-    slug: 'payloadcms-vectorize:poll-or-complete-bulk-embedding',
+    slug: TASK_SLUG_POLL_OR_COMPLETE_BULK_EMBEDDING,
     handler: async ({
       input,
       req,
@@ -433,8 +439,8 @@ export const createPollOrCompleteBulkEmbeddingTask = ({
 
       // If still running, requeue this task
       if (anyRunning) {
-        await payload.jobs.queue<'payloadcms-vectorize:poll-or-complete-bulk-embedding'>({
-          task: 'payloadcms-vectorize:poll-or-complete-bulk-embedding',
+        await payload.jobs.queue<typeof TASK_SLUG_POLL_OR_COMPLETE_BULK_EMBEDDING>({
+          task: TASK_SLUG_POLL_OR_COMPLETE_BULK_EMBEDDING,
           input: { runId: input.runId },
           req,
           ...(pollOrCompleteQueueName ? { queue: pollOrCompleteQueueName } : {}),
@@ -571,24 +577,7 @@ async function streamAndBatchMissingEmbeddings(args: {
 
           const chunkData = await toKnowledgePool(doc, payload)
 
-          // Validate chunks (same validation as real-time ingestion)
-          const invalidEntries = chunkData
-            .map((entry, idx) => {
-              if (!entry || typeof entry !== 'object') return idx
-              if (typeof entry.chunk !== 'string') return idx
-              return null
-            })
-            .filter((idx): idx is number => idx !== null)
-
-          if (invalidEntries.length > 0) {
-            throw new Error(
-              `[payloadcms-vectorize] toKnowledgePool returned ${invalidEntries.length} invalid entr${
-                invalidEntries.length === 1 ? 'y' : 'ies'
-              } for document ${doc.id} in collection "${collectionSlug}". Each entry must be an object with a "chunk" string. Invalid indices: ${invalidEntries.join(
-                ', ',
-              )}`,
-            )
-          }
+          validateChunkData(chunkData, String(doc.id), collectionSlug)
 
           // Yield valid chunks
           for (let idx = 0; idx < chunkData.length; idx++) {
@@ -840,26 +829,13 @@ async function pollAndCompleteSingleBatch(args: {
 
         // Only delete if no embeddings exist for this version (they're from an old version)
         if (!hasCurrentEmbedding) {
-          // Delete existing embeddings for this document (from old version)
-          await payload.delete({
-            collection: poolName as CollectionSlug,
-            where: {
-              and: [
-                { sourceCollection: { equals: meta.sourceCollection } },
-                { docId: { equals: String(meta.docId) } },
-              ],
-            },
+          await deleteDocumentEmbeddings({
+            payload,
+            poolName,
+            collection: meta.sourceCollection,
+            docId: String(meta.docId),
+            adapter,
           })
-
-          // Also call adapter's delete if available
-          if (adapter.deleteEmbeddings) {
-            await adapter.deleteEmbeddings(
-              payload,
-              poolName,
-              meta.sourceCollection,
-              String(meta.docId),
-            )
-          }
         }
       }
 

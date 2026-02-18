@@ -146,6 +146,37 @@ export const chunkRichText = async (
   return await chunk(richText)
 }
 
+/**
+ * Simplified rich text chunker for adapter tests that don't need Lexical parsing.
+ * Extracts text content from SerializedEditorState by walking the node tree.
+ */
+export const chunkRichTextSimple = async (
+  richText: SerializedEditorState,
+): Promise<string[]> => {
+  const root = richText?.root
+  if (!root || !root.children) {
+    return []
+  }
+
+  const chunks: string[] = []
+  for (const node of (root as any).children) {
+    const text = extractText(node)
+    if (text) {
+      chunks.push(text)
+    }
+  }
+  return chunks
+}
+
+function extractText(node: any): string {
+  if (!node) return ''
+  if (node.text) return node.text
+  if (node.children && Array.isArray(node.children)) {
+    return node.children.map(extractText).join(' ')
+  }
+  return ''
+}
+
 // Simple text chunker
 export const chunkText = (text: string): string[] => {
   const maxChars = 1000

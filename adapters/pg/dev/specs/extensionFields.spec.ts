@@ -5,8 +5,8 @@ import { buildDummyConfig, integration, plugin } from './constants.js'
 import { createTestDb, waitForVectorizationJobs } from './utils.js'
 import { getPayload } from 'payload'
 import { PostgresPayload } from '../../src/types.js'
-import { chunkText, chunkRichText } from './helpers/chunkers.js'
-import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from './helpers/embed.js'
+import { chunkText, chunkRichTextSimple as chunkRichText } from '@shared-test/helpers/chunkers'
+import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from '@shared-test/helpers/embed'
 import { DIMS } from './constants.js'
 
 describe('Extension fields integration tests', () => {

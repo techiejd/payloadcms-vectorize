@@ -3,9 +3,10 @@ import { buildConfig } from 'payload'
 import { lexicalEditor } from '@payloadcms/richtext-lexical'
 import { createPostgresVectorIntegration } from '../../src/index.js'
 import payloadcmsVectorize from 'payloadcms-vectorize'
-import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from './helpers/embed.js'
 
-export const DIMS = 8
+import { DIMS } from '@shared-test/constants'
+export { DIMS } from '@shared-test/constants'
+export { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from '@shared-test/helpers/embed'
 
 const integrationResult = createPostgresVectorIntegration({
   default: {

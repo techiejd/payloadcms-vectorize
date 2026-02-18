@@ -1,3 +1,19 @@
+import type { BasePayload } from 'payload'
+import { getVectorizedPayload } from 'payloadcms-vectorize'
+
+/**
+ * Retrieve the Cloudflare Vectorize binding from a Payload instance.
+ * Throws if the binding is not found.
+ */
+export function getVectorizeBinding(payload: BasePayload): CloudflareVectorizeBinding {
+  const binding = getVectorizedPayload(payload)?.getDbAdapterCustom()
+    ?._vectorizeBinding as CloudflareVectorizeBinding | undefined
+  if (!binding) {
+    throw new Error('[@payloadcms-vectorize/cf] Cloudflare Vectorize binding not found')
+  }
+  return binding
+}
+
 /**
  * Configuration for a knowledge pool in Cloudflare Vectorize
  */

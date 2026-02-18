@@ -16,6 +16,14 @@ export default defineConfig(() => {
         ignoreConfigErrors: true,
       }),
     ],
+    resolve: {
+      alias: {
+        '@shared-test/utils': path.resolve(dirname, '../../dev/specs/utils.ts'),
+        '@shared-test/helpers/chunkers': path.resolve(dirname, '../../dev/helpers/chunkers.ts'),
+        '@shared-test/helpers/embed': path.resolve(dirname, '../../dev/helpers/embed.ts'),
+        '@shared-test/constants': path.resolve(dirname, '../../dev/specs/constants.ts'),
+      },
+    },
     test: {
       environment: 'node',
       hookTimeout: 30_000,

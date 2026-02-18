@@ -1,7 +1,7 @@
 import type { Payload } from 'payload'
 
 import { postgresAdapter } from '@payloadcms/db-postgres'
-import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from './helpers/embed.js'
+import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from '@shared-test/helpers/embed'
 import { Client } from 'pg'
 import { beforeAll, describe, expect, test } from 'vitest'
 
