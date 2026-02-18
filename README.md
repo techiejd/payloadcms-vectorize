@@ -1,29 +1,43 @@
 # PayloadCMS Vectorize
 
-A Payload CMS plugin that adds vector search capabilities to your collections using PostgreSQL's pgvector extension. Perfect for building RAG (Retrieval-Augmented Generation) applications and semantic search features.
+A Payload CMS plugin that adds vector search capabilities to your collections. Perfect for building RAG (Retrieval-Augmented Generation) applications and semantic search features.
 
 ## Features
 
 - 🔍 **Semantic Search**: Vectorize any collection for intelligent content discovery
 - 🚀 **Realtime**: Documents are automatically vectorized when created or updated in realtime, and vectors are deleted as soon as the document is deleted.
-- 🧵 **Bulk embedding**: Run “Embed all” batches that backfill only documents missing the current `embeddingVersion` since the last bulk run in order to save money.
-- 📊 **PostgreSQL Integration**: Built on pgvector for high-performance vector operations
+- 🧵 **Bulk embedding**: Run "Embed all" batches that backfill only documents missing the current `embeddingVersion` since the last bulk run in order to save money.
+- 🔌 **Database Adapters**: Pluggable architecture supporting different database backends
 - ⚡ **Background Processing**: Uses Payload's job system for non-blocking vectorization
 - 🎯 **Flexible Chunking**: Drive chunk creation yourself with `toKnowledgePool` functions so you can combine any fields or content types
 - 🧩 **Extensible Schema**: Attach custom `extensionFields` to the embeddings collection and persist values per chunk and use for querying.
 - 🌐 **REST API**: Built-in vector-search endpoint with Payload-style `where` filtering and configurable limits
-- 🏊 **Multiple Knowledge Pools**: Separate knowledge pools with independent configurations (dims, ivfflatLists, embedding functions) and needs.
+- 🏊 **Multiple Knowledge Pools**: Separate knowledge pools with independent configurations and needs.
+
+## Database Adapters
+
+This plugin requires a database adapter for vector storage. Available adapters:
+
+| Adapter | Package | Database | Documentation |
+|---------|---------|----------|---------------|
+| PostgreSQL | `@payloadcms-vectorize/pg` | PostgreSQL with pgvector | [README](./adapters/pg/README.md) |
+
+See [adapters/README.md](./adapters/README.md) for information on creating custom adapters.
 
 ## Prerequisites
 
 - Payload CMS 3.x (tested on 3.69.0, previously tested on 3.37.0)
-- PostgreSQL with pgvector extension
+- A supported database with vector capabilities (see adapters above)
 - Node.js 18+
 
 ## Installation
 
 ```bash
+# Install the core plugin
 pnpm add payloadcms-vectorize
+
+# Install a database adapter (e.g., PostgreSQL)
+pnpm add @payloadcms-vectorize/pg
 ```
 
 ## Quick Start
@@ -38,23 +52,20 @@ pnpm add payloadcms-vectorize
 
 [![Bulk embedding](https://img.youtube.com/vi/oIcqu08k1Ok/0.jpg)](https://youtu.be/oIcqu08k1Ok)
 
-### 0. Have pgvector permissions
+### 1. Set Up Your Database Adapter
 
-The plugin expects `vector` extension to be configured (`db: postgresAdapter({extensions: ['vector'],...})`) when Payload initializes. Your PostgreSQL database user must have permission to create extensions. If your user doesn't have these permissions, someone with permissions may need to manually create the extension once:
+First, configure your database adapter. See the adapter-specific documentation:
 
-```sql
-CREATE EXTENSION IF NOT EXISTS vector;
-```
+- **PostgreSQL**: See [@payloadcms-vectorize/pg README](./adapters/pg/README.md) for pgvector setup, schema initialization, and migration handling.
 
-**Note:** Most managed PostgreSQL services (like AWS RDS, Supabase, etc.) require superuser privileges or specific extension permissions. If you encounter permission errors, contact your database administrator or check your service's documentation.
-
-### 1. Configure the Plugin
+### 2. Configure the Plugin
 
 ```typescript
 import { buildConfig } from 'payload'
 import type { Payload } from 'payload'
 import { postgresAdapter } from '@payloadcms/db-postgres'
-import { createVectorizeIntegration } from 'payloadcms-vectorize'
+import { createPostgresVectorIntegration } from '@payloadcms-vectorize/pg'
+import payloadcmsVectorize from 'payloadcms-vectorize'
 import type { ToKnowledgePoolFn } from 'payloadcms-vectorize'
 
 // Configure your embedding functions
@@ -102,26 +113,25 @@ const postsToKnowledgePool: ToKnowledgePoolFn = async (doc, payload) => {
   return entries
 }
 
-// Create the integration with static configs (dims, ivfflatLists)
-const { afterSchemaInitHook, payloadcmsVectorize } = createVectorizeIntegration({
-  // Note limitation: Changing these values requires a migration.
+// Create the database adapter integration
+// See adapter documentation for configuration options
+const integration = createPostgresVectorIntegration({
   mainKnowledgePool: {
-    dims: 1536, // Vector dimensions
-    ivfflatLists: 100, // IVFFLAT index parameter
+    dims: 1536,        // Vector dimensions
+    ivfflatLists: 100, // Index parameter
   },
 })
 
 export default buildConfig({
   // ... your existing config
   db: postgresAdapter({
-    // configure the 'vector' extension.
     extensions: ['vector'],
-    // afterSchemaInitHook adds 'vector' to your schema
-    afterSchemaInit: [afterSchemaInitHook],
+    afterSchemaInit: [integration.afterSchemaInitHook],
     // ... your database config
   }),
   plugins: [
     payloadcmsVectorize({
+      dbAdapter: integration.adapter,
       knowledgePools: {
         mainKnowledgePool: {
           collections: {
@@ -177,33 +187,13 @@ pnpm run generate:importmap
 - **For production builds**: You MUST run `pnpm run generate:importmap` BEFORE running `pnpm build`, otherwise custom components won't be found during the build process.
 - **If client components don't appear**: Try manually generating the import map: `pnpm run generate:importmap`
 
-**⚠️ Important:** Run this command:
+### 3. Run Migrations
 
-- After initial plugin setup
-- If the "Embed all" button doesn't appear in the admin UI
+See your database adapter's documentation for migration instructions:
 
-The import map tells Payload how to resolve component paths (like `'payloadcms-vectorize/client#EmbedAllButton'`) to actual React components. Without it, client components referenced in your collection configs won't render.
+- **PostgreSQL**: See [@payloadcms-vectorize/pg README](./adapters/pg/README.md#migrations)
 
-### 2. Initial Migration Setup
-
-After configuring the plugin, create and apply your initial migration. The IVFFLAT indexes are created automatically via the `afterSchemaInitHook` using Drizzle's `extraConfig`.
-
-**For new setups:**
-
-1. Create your initial Payload migration (this will include both embedding columns and IVFFLAT indexes via Drizzle schema):
-
-   ```bash
-   pnpm payload migrate:create --name initial
-   ```
-
-2. Review and apply the migration:
-   ```bash
-   pnpm payload migrate
-   ```
-
-**Note:** Both the embedding columns and IVFFLAT indexes are created automatically by Drizzle via the `afterSchemaInitHook`. No additional CLI steps are required for initial setup or when changing `ivfflatLists`. However, if you change `dims` after initial setup, you must run `pnpm payload vectorize:migrate` to add the required TRUNCATE statement to your migration (see "Changing dims" section below). There is no need to run `vectorize:migrate` on the first migration.
-
-### 3. Search Your Content
+### 4. Search Your Content
 
 The plugin automatically creates a `/api/vector-search` endpoint:
 
@@ -222,7 +212,7 @@ const response = await fetch('/api/vector-search', {
 })
 
 const { results } = await response.json()
-// Each result contains: id, similarity, sourceCollection, docId, chunkIndex, chunkText,
+// Each result contains: id, score, sourceCollection, docId, chunkIndex, chunkText,
 // embeddingVersion, and any extensionFields you attached (e.g., category, priority).
 ```
 
@@ -262,12 +252,12 @@ if (vectorizedPayload) {
 
 ### Knowledge Pool Config
 
-Knowledge pools are configured in two steps. The static configs define the database schema (migration required), while dynamic configs define runtime behavior (no migration required).
+Knowledge pools are configured in two steps:
 
-**1. Static Config** (passed to `createVectorizeIntegration`):
+**1. Static Config** (passed to your database adapter's integration factory):
 
-- `dims`: `number` - Vector dimensions for pgvector column
-- `ivfflatLists`: `number` - IVFFLAT index parameter
+Static configuration options vary by database adapter. See your adapter's documentation for available options:
+- **PostgreSQL**: `dims`, `ivfflatLists` - See [@payloadcms-vectorize/pg README](./adapters/pg/README.md#static-configuration)
 
 The embeddings collection name will be the same as the knowledge pool name.
 
@@ -464,64 +454,11 @@ jobs: {
 }
 ```
 
-## Changing Static Config (ivfflatLists or dims) & Migrations
+## Changing Static Config & Migrations
 
-**⚠️ Important:** Changing `dims` is **DESTRUCTIVE** - it requires re-embedding all your data. Changing `ivfflatLists` rebuilds the index (non-destructive but may take time).
+Static configuration changes (like vector dimensions) may require migrations. See your database adapter's documentation for specific instructions:
 
-When you change static config values (`dims` or `ivfflatLists`):
-
-1. **Update your static config** in `payload.config.ts`:
-
-   ```typescript
-   const { afterSchemaInitHook, payloadcmsVectorize } = createVectorizeIntegration({
-     mainKnowledgePool: {
-       dims: 1536, // Changed from previous value
-       ivfflatLists: 200, // Changed from previous value
-     },
-   })
-   ```
-
-2. **Create a migration**:
-
-   ```bash
-   pnpm payload migrate:create --name migration_name
-   ```
-
-   Drizzle will automatically generate the index rebuild SQL.
-
-3. **Changing `dims`(Destructive, Optional)**:
-
-Skip this step if you did not change the `dims`.
-
-Changing `dims` requires truncating the embeddings table because existing vectors are incompatible with the new dimensions. You must use the `vectorize:migrate` CLI to add the TRUNCATE statement:
-
-```bash
-pnpm payload vectorize:migrate
-```
-
-The CLI will:
-
-- Detect the dims change
-- Patch the migration with TRUNCATE TABLE (with CASCADE)
-- Add appropriate down migration to restore the old column type
-
-4. **Review the migration file** in `src/migrations/`
-
-5. **Apply the migration**:
-
-   ```bash
-   pnpm payload migrate
-   ```
-
-6. **If `dims` changed**: Re-embed all your documents using the bulk embed feature.
-
-**Schema name qualification:**
-
-The CLI automatically uses the `schemaName` from your Postgres adapter configuration. If you use a custom schema (e.g., `postgresAdapter({ schemaName: 'custom' })`), all SQL in the migration will be properly qualified with that schema name.
-
-**Idempotency:**
-
-Running `pnpm payload vectorize:migrate` multiple times with no config changes will not create duplicate migrations. The CLI detects when no changes are needed and exits early.
+- **PostgreSQL**: See [@payloadcms-vectorize/pg README](./adapters/pg/README.md#migrations)
 
 ### Endpoints
 
@@ -649,14 +586,6 @@ Because you control the output, you can mix different field types, discard empty
 - If any entry is malformed, the vectorize job fails with `hasError = true` and an error message listing invalid indices.
 - To retry after fixing your `toKnowledgePool` logic, clear `hasError` and `completedAt` (and set `processing` to `false` if needed) on the failed `payload-jobs` row. The queue runner will pick it up on the next interval.
 
-## PostgreSQL Custom Schema Support
-
-The plugin reads the `schemaName` configuration from your Postgres adapter within the Payload config.
-
-When you configure a custom schema via `postgresAdapter({ schemaName: 'custom' })`, all plugin SQL queries (for vector columns, indexes, and embeddings) are qualified with that schema name. This is useful for multi-tenant setups or when content tables live in a dedicated schema.
-
-Where schemaName is not specified within the postgresAdapter in the Payload config, the plugin falls back to `public` as is default adapter behaviour.
-
 ## Example
 
 ### Using with Voyage AI
@@ -694,7 +623,7 @@ You can see more examples in `dev/helpers/embed.ts`
 
 **POST** `/api/vector-search`
 
-Search for similar content using vector similarity.
+Search for similar content using vector search.
 
 **Request Body:**
 
@@ -724,7 +653,7 @@ Search for similar content using vector similarity.
   "results": [
     {
       "id": "embedding_id",
-      "similarity": 0.85,
+      "score": 0.85,
       "sourceCollection": "posts",
       "docId": "post_id",
       "chunkIndex": 0,
@@ -1019,13 +948,14 @@ The more detailed your issue, the better I can understand and address your needs
 
 Thank you for the stars! The following updates have been completed:
 
-- **Multiple Knowledge Pools**: You can create separate knowledge pools with independent configurations (dims, ivfflatLists, embedding functions) and needs. Each pool operates independently, allowing you to organize your vectorized content by domain, use case, or any other criteria that makes sense for your application.
+- **Multiple Knowledge Pools**: You can create separate knowledge pools with independent configurations and embedding functions. Each pool operates independently, allowing you to organize your vectorized content by domain, use case, or any other criteria that makes sense for your application.
+- **Database Adapter Architecture**: Pluggable adapter system allowing support for different database backends.
 - **More expressive queries**: Added ability to change query limit, search on certain collections or certain fields
 - **Bulk embed all**: Batch backfills with admin button, provider callbacks, and run tracking.
 
 The following features are planned for future releases based on community interest and stars:
 
-- **MongoDB support**: Extend vector search capabilities to MongoDB databases
+- **MongoDB adapter**: Add a `@payloadcms-vectorize/mongodb` adapter for MongoDB Atlas Vector Search
 - **Vercel support**: Optimized deployment and configuration for Vercel hosting
 
 **Want to see these features sooner?** Star this repository and open issues for the features you need most!

@@ -2,28 +2,30 @@
 import type { Payload, SanitizedConfig } from 'payload'
 import { buildConfig, getPayload } from 'payload'
 import { Client } from 'pg'
-import { mkdirSync, rmSync } from 'fs'
-import { join } from 'path'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { lexicalEditor } from '@payloadcms/richtext-lexical'
-import { createVectorizeIntegration } from 'payloadcms-vectorize'
+import payloadcmsVectorize, {
+  TASK_SLUG_VECTORIZE,
+  TASK_SLUG_PREPARE_BULK_EMBEDDING,
+  TASK_SLUG_POLL_OR_COMPLETE_BULK_EMBEDDING,
+} from 'payloadcms-vectorize'
 import { BULK_EMBEDDINGS_RUNS_SLUG } from '../../src/collections/bulkEmbeddingsRuns.js'
 import { BULK_EMBEDDINGS_INPUT_METADATA_SLUG } from '../../src/collections/bulkEmbeddingInputMetadata.js'
 import { BULK_EMBEDDINGS_BATCHES_SLUG } from '../../src/collections/bulkEmbeddingsBatches.js'
 import { makeDummyEmbedDocs } from '../helpers/embed.js'
-import { script as vectorizeMigrateScript } from '../../src/bin/vectorize-migrate.js'
 import type {
   BulkEmbeddingsFns,
   BulkEmbeddingInput,
   BulkEmbeddingRunStatus,
-} from '../../src/types.js'
+  PayloadcmsVectorizeConfig,
+} from 'payloadcms-vectorize'
 
 export const createTestDb = async ({ dbName }: { dbName: string }) => {
   const adminUri =
     process.env.DATABASE_ADMIN_URI || 'postgresql://postgres:password@localhost:5433/postgres' // connect to 'postgres'
   const client = new Client({ connectionString: adminUri })
   await client.connect()
-  
+
   /*
   // Drop and recreate the database to ensure a clean state
   // First, terminate any existing connections to the database
@@ -33,7 +35,7 @@ export const createTestDb = async ({ dbName }: { dbName: string }) => {
     WHERE pg_stat_activity.datname = $1
       AND pid <> pg_backend_pid()
   `, [dbName])*/
-  
+
   const exists = await client.query('SELECT 1 FROM pg_database WHERE datname = $1', [dbName])
   if (exists.rowCount === 0) {
     await client.query(`CREATE DATABASE ${dbName}`)
@@ -41,74 +43,6 @@ export const createTestDb = async ({ dbName }: { dbName: string }) => {
   }
   //await client.query(`DROP DATABASE "${dbName}"`)
   await client.end()
-}
-
-/**
- * Initialize Payload with migrations applied.
- * This handles the full migration setup:
- * 1. Get payload instance
- * 2. Create initial migration
- * 3. Run vectorize:migrate to patch with IVFFLAT index
- * 4. Apply migrations
- *
- * NOTE: This function is only used by migration-specific tests (e.g., migrationCli.spec.ts).
- * All other tests should use getPayload() directly without migrations.
- *
- * @param config - A pre-built SanitizedConfig (must have migrationDir and push: false in db config)
- * @param key - Unique key for getPayload caching (prevents instance collisions in tests)
- * @param cron - Whether to enable cron jobs (default: true)
- */
-export async function initializePayloadWithMigrations({
-  config,
-  key,
-  cron = true,
-  skipMigrations = false,
-}: {
-  config: SanitizedConfig
-  key?: string
-  cron?: boolean
-  skipMigrations?: boolean
-}): Promise<Payload> {
-  if (skipMigrations) {
-    return await getPayload({ config, key, cron })
-  }
-
-  const migrationKey = `${key ?? 'payload'}-migrations-${Date.now()}`
-  const payloadForMigrations = await getPayload({ config, key: migrationKey, cron: false })
-
-  // Create initial migration (Payload's schema)
-  await payloadForMigrations.db.createMigration({ migrationName: 'initial', payload: payloadForMigrations })
-
-  // Run vectorize:migrate to patch with IVFFLAT index
-  await vectorizeMigrateScript(config)
-
-  // Apply migrations (forceAcceptWarning bypasses the dev mode prompt)
-  await (payloadForMigrations.db as any).migrate({ forceAcceptWarning: true })
-
-  if (!cron) {
-    return payloadForMigrations
-  }
-
-  return await getPayload({ config, key, cron: true })
-}
-
-/**
- * Create a unique migration directory for a test.
- * Returns the path and a cleanup function.
- */
-export function createTestMigrationsDir(dbName: string): {
-  migrationsDir: string
-  cleanup: () => void
-} {
-  const migrationsDir = join(process.cwd(), 'dev', `test-migrations-${dbName}`)
-  // Clean up any existing migration directory
-  rmSync(migrationsDir, { recursive: true, force: true })
-  mkdirSync(migrationsDir, { recursive: true })
-
-  return {
-    migrationsDir,
-    cleanup: () => rmSync(migrationsDir, { recursive: true, force: true }),
-  }
 }
 
 async function waitForTasks(
@@ -138,16 +72,13 @@ async function waitForTasks(
 }
 
 export async function waitForVectorizationJobs(payload: Payload, maxWaitMs = 10000) {
-  await waitForTasks(payload, ['payloadcms-vectorize:vectorize'], maxWaitMs)
+  await waitForTasks(payload, [TASK_SLUG_VECTORIZE], maxWaitMs)
 }
 
 export async function waitForBulkJobs(payload: Payload, maxWaitMs = 10000) {
   await waitForTasks(
     payload,
-    [
-      'payloadcms-vectorize:prepare-bulk-embedding',
-      'payloadcms-vectorize:poll-or-complete-bulk-embedding',
-    ],
+    [TASK_SLUG_PREPARE_BULK_EMBEDDING, TASK_SLUG_POLL_OR_COMPLETE_BULK_EMBEDDING],
     maxWaitMs,
   )
 }
@@ -265,7 +196,7 @@ export function createMockBulkEmbeddings(
 
 export type BuildPayloadArgs = {
   dbName: string
-  pluginOpts: any
+  pluginOpts: PayloadcmsVectorizeConfig
   key?: string
   skipMigrations?: boolean
 }
@@ -274,15 +205,7 @@ export async function buildPayloadWithIntegration({
   dbName,
   pluginOpts,
   key,
-  skipMigrations,
 }: BuildPayloadArgs): Promise<{ payload: Payload; config: SanitizedConfig }> {
-  const integration = createVectorizeIntegration({
-    default: {
-      dims: DEFAULT_DIMS,
-      ivfflatLists: 1,
-    },
-  })
-
   const config = await buildConfig({
     secret: 'test-secret',
     editor: lexicalEditor(),
@@ -293,13 +216,11 @@ export async function buildPayloadWithIntegration({
       },
     ],
     db: postgresAdapter({
-      extensions: ['vector'],
-      afterSchemaInit: [integration.afterSchemaInitHook],
       pool: {
         connectionString: `postgresql://postgres:password@localhost:5433/${dbName}`,
       },
     }),
-    plugins: [integration.payloadcmsVectorize(pluginOpts)],
+    plugins: [payloadcmsVectorize(pluginOpts)],
     jobs: {
       tasks: [],
       autoRun: [
@@ -356,20 +277,3 @@ export const clearAllCollections = async (pl: Payload) => {
   await safeDelete('payload-jobs')
 }
 
-export async function createSucceededBaselineRun(
-  payload: Payload,
-  {
-    version,
-    completedAt = new Date().toISOString(),
-  }: { version?: string; completedAt?: string } = {},
-) {
-  return (payload as any).create({
-    collection: BULK_EMBEDDINGS_RUNS_SLUG,
-    data: {
-      pool: 'default',
-      embeddingVersion: version ?? '',
-      status: 'succeeded',
-      completedAt,
-    },
-  })
-}

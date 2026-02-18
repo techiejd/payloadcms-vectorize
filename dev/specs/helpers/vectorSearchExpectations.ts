@@ -12,7 +12,7 @@ export function expectVectorSearchResults(results: VectorSearchResult[]) {
 
 export function expectVectorSearchResultShape(result: VectorSearchResult) {
   expect(result).toHaveProperty('id')
-  expect(result).toHaveProperty('similarity')
+  expect(result).toHaveProperty('score')
   expect(result).toHaveProperty('sourceCollection')
   expect(result).toHaveProperty('docId')
   expect(result).toHaveProperty('chunkIndex')
@@ -20,11 +20,11 @@ export function expectVectorSearchResultShape(result: VectorSearchResult) {
   expect(result).toHaveProperty('embeddingVersion')
 }
 
-export function expectResultsOrderedBySimilarity(results: VectorSearchResult[]) {
+export function expectResultsOrderedByScore(results: VectorSearchResult[]) {
   expect(results.length).toBeGreaterThan(1)
 
   for (let i = 0; i < results.length - 1; i++) {
-    expect(results[i].similarity).toBeGreaterThanOrEqual(results[i + 1].similarity)
+    expect(results[i].score).toBeGreaterThanOrEqual(results[i + 1].score)
   }
 }
 
@@ -81,7 +81,7 @@ export function expectValidVectorSearchResults(
   }
 
   if (options?.checkOrdering && results.length > 1) {
-    expectResultsOrderedBySimilarity(results)
+    expectResultsOrderedByScore(results)
   }
 
   if (options?.expectedTitle) {

@@ -2,6 +2,79 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.6.0-beta - 2026-02-01
+
+### Breaking Changes
+
+- **Database Adapter Architecture**: The plugin now uses a pluggable database adapter system. You must install a database adapter package (e.g., `@payloadcms-vectorize/pg`) separately from the core plugin.
+- **`createVectorizeIntegration` removed from core**: Use the adapter-specific integration factory instead (e.g., `createPostgresVectorIntegration` from `@payloadcms-vectorize/pg`).
+- **`dbAdapter` option required**: The `payloadcmsVectorize()` plugin now requires a `dbAdapter` option pointing to your adapter's implementation.
+- **`similarity` renamed to `score`**: The `VectorSearchResult.similarity` field has been renamed to `score` to be more generic across different distance metrics.
+
+### Added
+
+- **`@payloadcms-vectorize/pg` package**: PostgreSQL adapter for pgvector, extracted from the core plugin.
+- **`@payloadcms-vectorize/cf` package**: Cloudflare Vectorize adapter for edge-native vector search.
+- **`DbAdapter` interface**: New interface for implementing custom database adapters. See `adapters/README.md`.
+- **`deleteEmbeddings` on `DbAdapter`**: Adapters can now delete vectors when a document is deleted or re-indexed. Implemented in both the `pg` and `cf` adapters.
+- **Adapter documentation**: Added `adapters/README.md` explaining how to create custom adapters.
+
+### Migration
+
+**Before (0.5.x)**
+
+```typescript
+import { createVectorizeIntegration } from 'payloadcms-vectorize'
+
+const { afterSchemaInitHook, payloadcmsVectorize } = createVectorizeIntegration({
+  main: { dims: 1536, ivfflatLists: 100 },
+})
+
+export default buildConfig({
+  db: postgresAdapter({
+    afterSchemaInit: [afterSchemaInitHook],
+  }),
+  plugins: [
+    payloadcmsVectorize({
+      knowledgePools: { main: { /* ... */ } },
+    }),
+  ],
+})
+```
+
+**After (0.6.0+)**
+
+```typescript
+import { createPostgresVectorIntegration } from '@payloadcms-vectorize/pg'
+import payloadcmsVectorize from 'payloadcms-vectorize'
+
+const integration = createPostgresVectorIntegration({
+  main: { dims: 1536, ivfflatLists: 100 },
+})
+
+export default buildConfig({
+  db: postgresAdapter({
+    afterSchemaInit: [integration.afterSchemaInitHook],
+  }),
+  plugins: [
+    payloadcmsVectorize({
+      dbAdapter: integration.adapter,
+      knowledgePools: { main: { /* ... */ } },
+    }),
+  ],
+})
+```
+
+**Updating search result handling:**
+
+```typescript
+// Before
+const score = result.similarity
+
+// After
+const score = result.score
+```
+
 ## 0.5.3 - 2026-01-24
 
 ### Changed

@@ -4,8 +4,19 @@ import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from '
 import { join, resolve } from 'path'
 import toSnakeCase from 'to-snake-case'
 
-import { getVectorizedPayload } from '../types.js'
-import type { KnowledgePoolStaticConfig } from '../types.js'
+import { getVectorizedPayload } from 'payloadcms-vectorize'
+import { KnowledgePoolsConfig } from './types.js'
+
+function listMigrationFiles(migrationsDir: string) {
+  return readdirSync(migrationsDir)
+    .filter((f) => (f.endsWith('.ts') || f.endsWith('.js')) && f !== 'index.ts' && f !== 'index.js')
+    .map((f) => ({
+      name: f,
+      path: join(migrationsDir, f),
+      mtime: statSync(join(migrationsDir, f)).mtime,
+    }))
+    .sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
+}
 
 /**
  * Get prior dims state from existing migrations
@@ -26,15 +37,7 @@ function getPriorDimsFromMigrations(
   }
 
   // Find all migration files and read them in reverse order (newest first)
-  // Exclude index.ts/index.js as those are not migration files
-  const migrationFiles = readdirSync(migrationsDir)
-    .filter((f) => (f.endsWith('.ts') || f.endsWith('.js')) && f !== 'index.ts' && f !== 'index.js')
-    .map((f) => ({
-      name: f,
-      path: join(migrationsDir, f),
-      mtime: statSync(join(migrationsDir, f)).mtime,
-    }))
-    .sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
+  const migrationFiles = listMigrationFiles(migrationsDir)
 
   // Skip the most recent migration when determining prior dims, since it may contain
   // the pending dims change that we're trying to detect
@@ -55,19 +58,24 @@ function getPriorDimsFromMigrations(
       for (const poolName of poolNames) {
         const tableName = toSnakeCase(poolName)
 
-        const dimsMatch =
-          upContent.match(
-            new RegExp(`ALTER\\s+TABLE[^;]*?"${tableName}"[^;]*?vector\\((\\d+)\\)`, 'is'),
-          ) ||
-          upContent.match(
-            new RegExp(
-              `CREATE\\s+TABLE[^;]*?"${tableName}"[^;]*?embedding[^;]*?vector\\((\\d+)\\)`,
-              'is',
-            ),
-          ) ||
-          upContent.match(
-            new RegExp(`"${tableName}"\\s*\\([^)]*embedding[^)]*vector\\((\\d+)\\)`, 'is'),
-          )
+        const pattern1 = new RegExp(
+          `ALTER\\s+TABLE[^;]*?"${tableName}"[^;]*?vector\\((\\d+)\\)`,
+          'is',
+        )
+        const pattern2 = new RegExp(
+          `CREATE\\s+TABLE[^;]*?"${tableName}"[^;]*?embedding[^;]*?vector\\((\\d+)\\)`,
+          'is',
+        )
+        const pattern3 = new RegExp(
+          `"${tableName}"\\s*\\([^)]*embedding[^)]*vector\\((\\d+)\\)`,
+          'is',
+        )
+
+        const match1 = upContent.match(pattern1)
+        const match2 = upContent.match(pattern2)
+        const match3 = upContent.match(pattern3)
+
+        const dimsMatch = match1 || match2 || match3
 
         if (dimsMatch && !state.get(poolName)) {
           const dims = parseInt(dimsMatch[1], 10)
@@ -93,10 +101,10 @@ function generateDimsChangeTruncateCode(
   newDims: number,
 ): string {
   return `  // payloadcms-vectorize: WARNING - Changing dims from ${oldDims} to ${newDims} is DESTRUCTIVE
-  // All existing embeddings will be deleted. You must re-embed all documents after this migration.
-  // Truncate table (destructive - all embeddings are lost)
-  // Use CASCADE to handle foreign key constraints
-  await db.execute(sql.raw(\`TRUNCATE TABLE "${schemaName}"."${tableName}" CASCADE\`));`
+ // All existing embeddings will be deleted. You must re-embed all documents after this migration.
+ // Truncate table (destructive - all embeddings are lost)
+ // Use CASCADE to handle foreign key constraints
+ await db.execute(sql.raw(\`TRUNCATE TABLE "${schemaName}"."${tableName}" CASCADE\`));`
 }
 
 /**
@@ -108,9 +116,9 @@ function generateDimsChangeDownCode(
   oldDims: number,
 ): string {
   return `  // payloadcms-vectorize: Revert column type to old dimensions
-  // WARNING: Data was truncated during up migration and cannot be restored.
-  // You will need to re-embed all documents after rolling back.
-  await db.execute(sql.raw(\`ALTER TABLE "${schemaName}"."${tableName}" ALTER COLUMN embedding TYPE vector(${oldDims})\`));`
+ // WARNING: Data was truncated during up migration and cannot be restored.
+ // You will need to re-embed all documents after rolling back.
+ await db.execute(sql.raw(\`ALTER TABLE "${schemaName}"."${tableName}" ALTER COLUMN embedding TYPE vector(${oldDims})\`));`
 }
 
 /**
@@ -219,7 +227,9 @@ export const script = async (config: SanitizedConfig): Promise<void> => {
     )
   }
 
-  const staticConfigs = vectorizedPayload._staticConfigs
+  const staticConfigs = (
+    vectorizedPayload.getDbAdapterCustom() as { _staticConfigs: KnowledgePoolsConfig }
+  )._staticConfigs
   if (!staticConfigs || Object.keys(staticConfigs).length === 0) {
     throw new Error('[payloadcms-vectorize] No static configs found')
   }
@@ -243,7 +253,7 @@ export const script = async (config: SanitizedConfig): Promise<void> => {
   }> = []
 
   for (const poolName of poolNames) {
-    const currentConfig = staticConfigs[poolName] as KnowledgePoolStaticConfig
+    const currentConfig = staticConfigs[poolName]
     const priorDimsValue = priorDims.get(poolName)
     const currentDims = currentConfig.dims
 
@@ -282,14 +292,7 @@ export const script = async (config: SanitizedConfig): Promise<void> => {
     )
   }
 
-  const migrationFiles = readdirSync(migrationsDir)
-    .filter((f) => (f.endsWith('.ts') || f.endsWith('.js')) && f !== 'index.ts' && f !== 'index.js')
-    .map((f) => ({
-      name: f,
-      path: join(migrationsDir, f),
-      mtime: statSync(join(migrationsDir, f)).mtime,
-    }))
-    .sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
+  const migrationFiles = listMigrationFiles(migrationsDir)
 
   if (migrationFiles.length === 0) {
     throw new Error(

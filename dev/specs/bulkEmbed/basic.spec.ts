@@ -15,11 +15,13 @@ import {
 import { makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
 import { getVectorizedPayload, VectorizedPayload } from 'payloadcms-vectorize'
 import { expectGoodResult } from '../utils.vitest.js'
+import { createMockAdapter } from 'helpers/mockAdapter.js'
 
 const DIMS = DEFAULT_DIMS
 const dbName = `bulk_basic_${Date.now()}`
 
 const basePluginOptions = {
+  dbAdapter: createMockAdapter(),
   knowledgePools: {
     default: {
       collections: {

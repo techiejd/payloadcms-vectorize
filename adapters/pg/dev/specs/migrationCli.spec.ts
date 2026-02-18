@@ -2,12 +2,15 @@ import type { Payload, SanitizedConfig } from 'payload'
 import { beforeAll, describe, expect, test, afterAll, vi } from 'vitest'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { buildConfig, getPayload } from 'payload'
-import { createVectorizeIntegration } from 'payloadcms-vectorize'
-import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from '../helpers/embed.js'
+import { createPostgresVectorIntegration } from '../../src/index.js'
+import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from '@shared-test/helpers/embed'
 import { createTestDb } from './utils.js'
 import { DIMS } from './constants.js'
+
+const createVectorizeIntegration = createPostgresVectorIntegration
+import payloadcmsVectorize from 'payloadcms-vectorize'
 import type { PostgresPayload } from '../../src/types.js'
-import { script as vectorizeMigrateScript } from '../../src/bin/vectorize-migrate.js'
+import { script as vectorizeMigrateScript } from '../../src/bin-vectorize-migrate.js'
 import { readdirSync, statSync, existsSync, readFileSync, writeFileSync, rmSync } from 'fs'
 import { join, resolve } from 'path'
 
@@ -42,7 +45,8 @@ describe('Migration CLI integration tests', () => {
           },
         }),
         plugins: [
-          integration.payloadcmsVectorize({
+          payloadcmsVectorize({
+          dbAdapter: integration.adapter,
             knowledgePools: {
               default: {
                 collections: {
@@ -73,15 +77,17 @@ describe('Migration CLI integration tests', () => {
       payload = await getPayload({ config, cron: true })
     })
 
-    test('VectorizedPayload has _staticConfigs', async () => {
+    test('VectorizedPayload has _staticConfigs via getDbAdapterCustom', async () => {
       const { getVectorizedPayload } = await import('payloadcms-vectorize')
       const vectorizedPayload = getVectorizedPayload(payload)
 
       expect(vectorizedPayload).toBeTruthy()
-      expect(vectorizedPayload?._staticConfigs).toBeDefined()
-      expect(vectorizedPayload?._staticConfigs.default).toBeDefined()
-      expect(vectorizedPayload?._staticConfigs.default.dims).toBe(DIMS)
-      expect(vectorizedPayload?._staticConfigs.default.ivfflatLists).toBe(10)
+      const adapterCustom = vectorizedPayload?.getDbAdapterCustom()
+      expect(adapterCustom).toBeDefined()
+      expect(adapterCustom?._staticConfigs).toBeDefined()
+      expect(adapterCustom?._staticConfigs.default).toBeDefined()
+      expect(adapterCustom?._staticConfigs.default.dims).toBe(DIMS)
+      expect(adapterCustom?._staticConfigs.default.ivfflatLists).toBe(10)
     })
   })
 
@@ -117,7 +123,8 @@ describe('Migration CLI integration tests', () => {
           push: false,
         }),
         plugins: [
-          integration.payloadcmsVectorize({
+          payloadcmsVectorize({
+          dbAdapter: integration.adapter,
             knowledgePools: {
               default: {
                 collections: {
@@ -232,7 +239,8 @@ describe('Migration CLI integration tests', () => {
           },
         }),
         plugins: [
-          integration.payloadcmsVectorize({
+          payloadcmsVectorize({
+          dbAdapter: integration.adapter,
             knowledgePools: {
               default: {
                 collections: {
@@ -321,7 +329,8 @@ describe('Migration CLI integration tests', () => {
           },
         }),
         plugins: [
-          integration.payloadcmsVectorize({
+          payloadcmsVectorize({
+          dbAdapter: integration.adapter,
             knowledgePools: {
               default: {
                 collections: {
@@ -450,7 +459,8 @@ describe('Migration CLI integration tests', () => {
           },
         }),
         plugins: [
-          integration.payloadcmsVectorize({
+          payloadcmsVectorize({
+          dbAdapter: integration.adapter,
             knowledgePools: {
               default: {
                 collections: {
@@ -540,7 +550,8 @@ describe('Migration CLI integration tests', () => {
           },
         }),
         plugins: [
-          integration.payloadcmsVectorize({
+          payloadcmsVectorize({
+          dbAdapter: integration.adapter,
             knowledgePools: {
               default: {
                 collections: {
@@ -757,7 +768,8 @@ describe('Migration CLI integration tests', () => {
           },
         }),
         plugins: [
-          integration.payloadcmsVectorize({
+          payloadcmsVectorize({
+          dbAdapter: integration.adapter,
             knowledgePools: {
               default: {
                 collections: {

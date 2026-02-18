@@ -1,0 +1,31 @@
+{
+  "name": "@payloadcms-vectorize/pg",
+  "version": "0.6.0-beta.3",
+  "description": "PostgreSQL adapter for payloadcms-vectorize",
+  "license": "MIT",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "peerDependencies": {
+    "payload": ">=3.0.0 <4.0.0",
+    "payloadcms-vectorize": ">=0.6.0-beta <1.0.0",
+    "@payloadcms/db-postgres": ">=3.0.0 <4.0.0"
+  },
+  "devDependencies": {
+    "payloadcms-vectorize": "workspace:*"
+  },
+  "dependencies": {
+    "to-snake-case": "1.0.0"
+  },
+  "engines": {
+    "node": "^18.20.2 || >=20.9.0",
+    "pnpm": "^9 || ^10"
+  },
+  "publishConfig": {
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
+  }
+}

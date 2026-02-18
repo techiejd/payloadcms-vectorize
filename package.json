@@ -1,31 +1,35 @@
 {
   "name": "payloadcms-vectorize",
-  "version": "0.5.3",
+  "version": "0.6.0-beta.3",
   "description": "A plugin to vectorize collections for RAG in Payload 3.0",
   "license": "MIT",
   "type": "module",
   "exports": {
     ".": {
-      "import": "./src/index.ts",
-      "types": "./src/index.ts",
-      "default": "./src/index.ts"
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
     },
     "./client": {
-      "import": "./src/exports/client.ts",
-      "types": "./src/exports/client.ts",
-      "default": "./src/exports/client.ts"
+      "import": "./dist/exports/client.js",
+      "types": "./dist/exports/client.d.ts",
+      "default": "./dist/exports/client.js"
     }
   },
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "files": [
     "dist"
   ],
   "scripts": {
-    "build": "pnpm copyfiles && pnpm build:types && pnpm build:swc",
+    "build": "pnpm copyfiles && pnpm build:types && pnpm build:swc && pnpm build:adapters",
     "build:swc": "swc ./src -d ./dist --config-file .swcrc --strip-leading-paths",
-    "build:types": "tsc --outDir dist --rootDir ./src",
-    "clean": "rimraf {dist,*.tsbuildinfo}",
+    "build:adapters": "pnpm build:adapters:pg && pnpm build:adapters:cf",
+    "build:adapters:pg": "cd ./adapters/pg && swc ./src -d ./dist --config-file ../../.swcrc --strip-leading-paths",
+    "build:adapters:cf": "cd ./adapters/cf && swc ./src -d ./dist --config-file ../../.swcrc --strip-leading-paths",
+    "build:types": "tsc -p tsconfig.build.json --outDir dist --rootDir ./src",
+    "build:types:all": "pnpm build:types && tsc --noEmit",
+    "clean": "rimraf {dist,*.tsbuildinfo,adapters/pg/dist,adapters/cf/dist}",
     "copyfiles": "copyfiles -u 1 \"src/**/*.{html,css,scss,ttf,woff,woff2,eot,svg,jpg,png,json}\" dist/",
     "dev": "cross-env DOTENV_CONFIG_PATH=dev/.env.development NODE_OPTIONS=--require=dotenv/config next dev dev --turbo",
     "dev:generate-importmap": "pnpm dev:payload generate:importmap",
@@ -35,14 +39,21 @@
     "generate:types": "pnpm dev:generate-types",
     "lint": "eslint",
     "lint:fix": "eslint ./src --fix",
+    "changeset": "changeset",
+    "changeset:version": "changeset version",
+    "release": "pnpm clean && pnpm build && changeset publish",
     "prepublishOnly": "pnpm clean && pnpm build",
     "test:setup": "docker-compose -f dev/docker-compose.test.yml up -d",
     "test:teardown": "docker-compose -f dev/docker-compose.test.yml down",
     "test": "pnpm test:int && pnpm test:e2e",
     "test:e2e": "playwright test",
-    "test:int": "cross-env DOTENV_CONFIG_PATH=dev/.env.test NODE_OPTIONS='--require=dotenv/config --import=tsx' vitest"
+    "test:int": "cross-env DOTENV_CONFIG_PATH=dev/.env.test NODE_OPTIONS='--require=dotenv/config --import=tsx' vitest",
+    "test:adapters:pg": "cross-env DOTENV_CONFIG_PATH=dev/.env.test NODE_OPTIONS='--require=dotenv/config --import=tsx' vitest --config adapters/pg/vitest.config.js",
+    "test:adapters:cf": "cross-env DOTENV_CONFIG_PATH=dev/.env.test NODE_OPTIONS='--require=dotenv/config --import=tsx' vitest --config adapters/cf/vitest.config.js"
   },
   "devDependencies": {
+    "@changesets/changelog-github": "^0.5.2",
+    "@changesets/cli": "^2.29.8",
     "@eslint/eslintrc": "^3.2.0",
     "@payloadcms/db-postgres": "3.69.0",
     "@payloadcms/db-sqlite": "3.69.0",

@@ -10,6 +10,7 @@ import {
 import { makeDummyEmbedQuery } from 'helpers/embed.js'
 import { getVectorizedPayload } from '../../../src/types.js'
 import { expectGoodResult } from '../utils.vitest.js'
+import { createMockAdapter } from 'helpers/mockAdapter.js'
 
 const DIMS = DEFAULT_DIMS
 const dbName = `bulk_version_${Date.now()}`
@@ -34,6 +35,7 @@ describe('Bulk embed - version bump', () => {
       await buildPayloadWithIntegration({
         dbName,
         pluginOpts: {
+          dbAdapter: createMockAdapter(),
           knowledgePools: {
             default: {
               collections: {
@@ -74,6 +76,7 @@ describe('Bulk embed - version bump', () => {
       await buildPayloadWithIntegration({
         dbName,
         pluginOpts: {
+          dbAdapter: createMockAdapter(),
           knowledgePools: {
             default: {
               collections: {

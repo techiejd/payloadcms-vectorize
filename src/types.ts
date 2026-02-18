@@ -1,4 +1,13 @@
-import type { CollectionSlug, Payload, Field, Where } from 'payload'
+import type {
+  CollectionConfig,
+  CollectionSlug,
+  Payload,
+  Field,
+  Where,
+  Config,
+  BasePayload,
+  TypeWithID,
+} from 'payload'
 
 /** Result from bulkEmbed method */
 export type BulkEmbedResult =
@@ -43,12 +52,11 @@ export type RetryFailedBatchResult =
 /**
  * Extended Payload type with vectorize plugin methods
  */
-export type VectorizedPayload<TPoolNames extends KnowledgePoolName = KnowledgePoolName> = {
+export type VectorizedPayload = {
   /** Check if bulk embedding is enabled for a knowledge pool */
-  _isBulkEmbedEnabled: (knowledgePool: TPoolNames) => boolean
-  /** Static configs for migration helper access */
-  _staticConfigs: Record<TPoolNames, KnowledgePoolStaticConfig>
-  search: (params: VectorSearchQuery<TPoolNames>) => Promise<Array<VectorSearchResult>>
+  _isBulkEmbedEnabled: (knowledgePool: KnowledgePoolName) => boolean
+  getDbAdapterCustom: () => Record<string, any> | undefined
+  search: (params: VectorSearchQuery) => Promise<Array<VectorSearchResult>>
   queueEmbed: (
     params:
       | {
@@ -61,7 +69,7 @@ export type VectorizedPayload<TPoolNames extends KnowledgePoolName = KnowledgePo
         },
   ) => Promise<void>
   /** Start a bulk embedding run for a knowledge pool */
-  bulkEmbed: (params: { knowledgePool: TPoolNames }) => Promise<BulkEmbedResult>
+  bulkEmbed: (params: { knowledgePool: KnowledgePoolName }) => Promise<BulkEmbedResult>
   /** Retry a failed batch */
   retryFailedBatch: (params: { batchId: string }) => Promise<RetryFailedBatchResult>
 }
@@ -70,13 +78,11 @@ export type VectorizedPayload<TPoolNames extends KnowledgePoolName = KnowledgePo
  * Get the vectorized payload object from config.custom
  * Returns null if the payload instance doesn't have vectorize extensions
  */
-export function getVectorizedPayload<TPoolNames extends KnowledgePoolName = KnowledgePoolName>(
-  payload: Payload,
-): VectorizedPayload<TPoolNames> | null {
-  const custom = (payload.config as any)?.custom
+export function getVectorizedPayload(payload: Payload): VectorizedPayload | null {
+  const custom = payload.config?.custom
   const vectorizedPayloadFactory = custom?.createVectorizedPayloadObject
   if (vectorizedPayloadFactory && typeof vectorizedPayloadFactory === 'function') {
-    return vectorizedPayloadFactory(payload) as VectorizedPayload<TPoolNames>
+    return vectorizedPayloadFactory(payload) as VectorizedPayload
   }
   return null
 }
@@ -96,15 +102,6 @@ export type CollectionVectorizeOption = {
 
 /** Knowledge pool name identifier */
 export type KnowledgePoolName = string
-
-/** Static configuration for a knowledge pool */
-/** Note current limitation: needs a migration in order to change after initial creation */
-export type KnowledgePoolStaticConfig = {
-  /** Vector dimensions for pgvector column */
-  dims: number
-  /** IVFFLAT lists parameter used when creating the index */
-  ivfflatLists: number
-}
 
 /** Dynamic configuration for a knowledge pool */
 /** Does not need a migration in order to change after initial creation */
@@ -258,9 +255,11 @@ export type BulkEmbeddingsFns = {
   onError?: (args: OnBulkErrorArgs) => Promise<void>
 }
 
-export type PayloadcmsVectorizeConfig<TPoolNames extends KnowledgePoolName = KnowledgePoolName> = {
+export type PayloadcmsVectorizeConfig = {
+  /** DbAdapter instance to use for the plugin */
+  dbAdapter: DbAdapter
   /** Knowledge pools and their dynamic configurations */
-  knowledgePools: Record<TPoolNames, KnowledgePoolDynamicConfig>
+  knowledgePools: Record<KnowledgePoolName, KnowledgePoolDynamicConfig>
   /** Queue name for realtime vectorization jobs.
    * Default is Payload's default queue (undefined). */
   realtimeQueueName?: string
@@ -281,40 +280,10 @@ export type PayloadcmsVectorizeConfig<TPoolNames extends KnowledgePoolName = Kno
   disabled?: boolean
 }
 
-// Type guard to check if Payload is using Postgres adapter
-export function isPostgresPayload(payload: any): payload is any & {
-  db: {
-    pool?: { query: (sql: string, params?: any[]) => Promise<any> }
-    drizzle?: { execute: (sql: string) => Promise<any> }
-  }
-} {
-  return (
-    typeof payload?.db?.pool?.query === 'function' ||
-    typeof payload?.db?.drizzle?.execute === 'function'
-  )
-}
-
-// Type for Payload with Postgres database
-export type PostgresPayload = any & {
-  db: {
-    pool?: { query: (sql: string, params?: any[]) => Promise<any> }
-    drizzle?: { execute: (sql: string) => Promise<any> }
-  }
-}
-
-// Job task argument types
-export type VectorizeTaskArgs = {
-  payload: any
-  pluginOptions: PayloadcmsVectorizeConfig
-  doc: Record<string, any>
-  collection: string
-  knowledgePool: KnowledgePoolName
-  toKnowledgePoolFn: ToKnowledgePoolFn
-}
-
 export interface VectorSearchResult {
   id: string
-  similarity: number
+  /** Relevance score (higher = more relevant). Range depends on adapter implementation. */
+  score: number
   sourceCollection: string // The collection that this embedding belongs to
   docId: string // The ID of the source document
   chunkIndex: number // The index of this chunk
@@ -323,13 +292,9 @@ export interface VectorSearchResult {
   [key: string]: any // Extension fields and other dynamic fields
 }
 
-export interface VectorSearchResponse {
-  results: VectorSearchResult[]
-}
-
-export interface VectorSearchQuery<TPoolNames extends KnowledgePoolName = KnowledgePoolName> {
+export interface VectorSearchQuery {
   /** The knowledge pool to search in */
-  knowledgePool: TPoolNames
+  knowledgePool: KnowledgePoolName
   /** The search query string */
   query: string
   /** Optional Payload where clause to filter results. Can rely on embeddings collection fields or extension fields. */
@@ -338,9 +303,89 @@ export interface VectorSearchQuery<TPoolNames extends KnowledgePoolName = Knowle
   limit?: number
 }
 
-export type JobContext = {
-  inlineTask: any
-  job: any
-  req: any
-  tasks: any
+// ==========================================
+// Document types for internal collections
+// ==========================================
+
+/** Document shape for bulk embedding runs collection */
+export interface BulkEmbeddingRunDoc extends TypeWithID {
+  pool: string
+  embeddingVersion: string
+  status: BulkEmbeddingRunStatus
+  totalBatches?: number
+  inputs?: number
+  succeeded?: number
+  failed?: number
+  submittedAt?: string
+  completedAt?: string
+  error?: string
+  failedChunkData?: FailedChunkData[]
+  createdAt: string
+  updatedAt: string
+}
+
+/** Document shape for bulk embedding batches collection */
+export interface BulkEmbeddingBatchDoc extends TypeWithID {
+  run: number | string
+  batchIndex: number
+  providerBatchId: string
+  status: BulkEmbeddingRunStatus
+  inputCount: number
+  succeededCount?: number
+  failedCount?: number
+  submittedAt?: string
+  completedAt?: string
+  error?: string
+  retriedBatch?: number | string
+  createdAt: string
+  updatedAt: string
+}
+
+/** Document shape for bulk embedding input metadata collection */
+export interface BulkEmbeddingInputMetadataDoc extends TypeWithID {
+  run: number | string
+  batch: number | string
+  inputId: string
+  text: string
+  sourceCollection: string
+  docId: string
+  chunkIndex: number
+  embeddingVersion: string
+  extensionFields?: Record<string, unknown>
+  createdAt: string
+  updatedAt: string
+}
+
+export type DbAdapter = {
+  getConfigExtension: (payloadCmsConfig: Config) => {
+    bins?: { key: string; scriptPath: string }[]
+    custom?: Record<string, any>
+    collections?: Record<string, CollectionConfig>
+  }
+  search: (
+    payload: BasePayload,
+    queryEmbedding: number[],
+    poolName: KnowledgePoolName,
+    limit?: number,
+    where?: Where,
+  ) => Promise<Array<VectorSearchResult>>
+  storeEmbedding: (
+    payload: Payload,
+    poolName: KnowledgePoolName,
+    sourceCollection: string,
+    sourceDocId: string,
+    embeddingId: string,
+    embedding: number[] | Float32Array,
+  ) => Promise<void>
+  /**
+   * Delete embeddings for a source document
+   * Called when a document is deleted or re-indexed
+   * The adapter should delete all vectors associated with this document
+   */
+  deleteEmbeddings?: (
+    payload: Payload,
+    poolName: KnowledgePoolName,
+    sourceCollection: string,
+    docId: string,
+  ) => Promise<void>
 }
