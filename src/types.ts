@@ -89,7 +89,14 @@ export type ToKnowledgePoolFn = (
   payload: Payload,
 ) => Promise<Array<{ chunk: string; [key: string]: any }>>
 
+export type ShouldEmbedFn = (
+  doc: Record<string, any>,
+  payload: Payload,
+) => Promise<boolean> | boolean
+
 export type CollectionVectorizeOption = {
+  /** Optional filter: return false to skip embedding this document. Runs before job is queued. Defaults to embedding all documents. */
+  shouldEmbedFn?: ShouldEmbedFn
   /** Function that converts a document to an array of chunks with optional extension field values */
   toKnowledgePool: ToKnowledgePoolFn
 }

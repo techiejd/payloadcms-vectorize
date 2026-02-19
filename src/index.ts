@@ -53,6 +53,7 @@ export type {
   EmbeddingConfig,
 
   // CollectionVectorizeOption
+  ShouldEmbedFn,
   ToKnowledgePoolFn,
 
   // EmbeddingConfig
@@ -275,6 +276,12 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
           for (const { pool, dynamic } of pools) {
             const collectionConfig = dynamic.collections[collectionSlug]
             if (!collectionConfig) continue
+
+            // Check if document should be embedded
+            if (collectionConfig.shouldEmbedFn) {
+              const shouldEmbed = await collectionConfig.shouldEmbedFn(doc, payload)
+              if (!shouldEmbed) continue
+            }
 
             // Only queue real-time vectorization if realTimeIngestionFn is provided
             if (!dynamic.embeddingConfig.realTimeIngestionFn) continue

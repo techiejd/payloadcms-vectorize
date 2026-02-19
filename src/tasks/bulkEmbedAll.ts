@@ -565,6 +565,12 @@ async function streamAndBatchMissingEmbeddings(args: {
             if (hasCurrentEmbedding) continue
           }
 
+          // Check if document should be embedded
+          if (collectionConfig.shouldEmbedFn) {
+            const shouldEmbed = await collectionConfig.shouldEmbedFn(doc, payload)
+            if (!shouldEmbed) continue
+          }
+
           const chunkData = await toKnowledgePool(doc, payload)
 
           // Validate chunks (same validation as real-time ingestion)
