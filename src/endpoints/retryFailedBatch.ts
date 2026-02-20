@@ -209,10 +209,10 @@ export async function retryBatch<TPoolNames extends KnowledgePoolName = Knowledg
     })
   }
 
-  // Queue the poll-or-complete task
-  await payload.jobs.queue<'payloadcms-vectorize:poll-or-complete-bulk-embedding'>({
-    task: 'payloadcms-vectorize:poll-or-complete-bulk-embedding',
-    input: { runId: String(runId) },
+  // Queue a per-batch task for the retried batch
+  await payload.jobs.queue<'payloadcms-vectorize:poll-or-complete-single-batch'>({
+    task: 'payloadcms-vectorize:poll-or-complete-single-batch',
+    input: { runId: String(runId), batchId: String(newBatch.id) },
     ...(queueName ? { queue: queueName } : {}),
   })
 
