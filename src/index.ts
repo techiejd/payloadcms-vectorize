@@ -46,6 +46,7 @@ export type {
   EmbeddingConfig,
 
   // CollectionVectorizeOption
+  ShouldEmbedFn,
   ToKnowledgePoolFn,
 
   // EmbeddingConfig
@@ -210,6 +211,12 @@ export default (pluginOptions: PayloadcmsVectorizeConfig) =>
           if (!dynamic.embeddingConfig.realTimeIngestionFn) continue
           // If no realTimeIngestionFn, nothing happens on doc change
           // User must trigger bulk embedding manually
+
+          // Check if document should be embedded
+          if (collectionConfig.shouldEmbedFn) {
+            const shouldEmbed = await collectionConfig.shouldEmbedFn(doc, payload)
+            if (!shouldEmbed) continue
+          }
 
           await payload.jobs.queue<typeof TASK_SLUG_VECTORIZE>({
             task: TASK_SLUG_VECTORIZE,

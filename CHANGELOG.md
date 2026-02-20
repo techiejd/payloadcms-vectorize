@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.6.0-beta.4 - 2026-02-20
+
+- Merges main with should embed changes.
+
 ## 0.6.0-beta - 2026-02-01
 
 ### Breaking Changes
@@ -36,7 +40,11 @@ export default buildConfig({
   }),
   plugins: [
     payloadcmsVectorize({
-      knowledgePools: { main: { /* ... */ } },
+      knowledgePools: {
+        main: {
+          /* ... */
+        },
+      },
     }),
   ],
 })
@@ -59,7 +67,11 @@ export default buildConfig({
   plugins: [
     payloadcmsVectorize({
       dbAdapter: integration.adapter,
-      knowledgePools: { main: { /* ... */ } },
+      knowledgePools: {
+        main: {
+          /* ... */
+        },
+      },
     }),
   ],
 })
@@ -74,6 +86,12 @@ const score = result.similarity
 // After
 const score = result.score
 ```
+
+## 0.5.4 - 2026-02-20
+
+### Added
+
+- **`shouldEmbedFn` filter**: Optional function on `CollectionVectorizeOption` that runs before a document is queued for embedding. Return `false` to skip the document entirely — no job is created and `toKnowledgePool` is never called. Works for both real-time and bulk embedding. Useful for skipping drafts, archived documents, or any custom criteria.
 
 ## 0.5.3 - 2026-01-24
 

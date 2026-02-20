@@ -263,7 +263,7 @@ The embeddings collection name will be the same as the knowledge pool name.
 
 **2. Dynamic Config** (passed to `payloadcmsVectorize`):
 
-- `collections`: `Record<string, CollectionVectorizeOption>` - Collections and their chunking configs
+- `collections`: `Record<string, CollectionVectorizeOption>` - Collections and their configs (optional `shouldEmbedFn` filter + required `toKnowledgePool` chunker)
 - `extensionFields?`: `Field[]` - Optional fields to extend the embeddings collection schema
 - `embeddingConfig`: Embedding configuration object:
   - `version`: `string` - Version string for tracking model changes
@@ -559,9 +559,21 @@ curl -X POST http://localhost:3000/api/vector-retry-failed-batch \
 
 #### CollectionVectorizeOption
 
+- `shouldEmbedFn? (doc, payload)` – optional filter that runs **before** the document is queued for embedding. Return `false` to skip the document entirely (no job is created and `toKnowledgePool` is never called). Works for both real-time and bulk embedding. Defaults to embedding all documents when omitted.
 - `toKnowledgePool (doc, payload)` – return an array of `{ chunk, ...extensionFieldValues }`. Each object becomes one embedding row and the index in the array determines `chunkIndex`.
 
 Reserved column names: `sourceCollection`, `docId`, `chunkIndex`, `chunkText`, `embeddingVersion`. Avoid reusing them in `extensionFields`.
+
+**Example – skip draft documents:**
+
+```typescript
+collections: {
+  posts: {
+    shouldEmbedFn: async (doc) => doc._status === 'published',
+    toKnowledgePool: postsToKnowledgePool,
+  },
+}
+```
 
 ## Chunkers
 
