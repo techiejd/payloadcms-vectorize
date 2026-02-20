@@ -7,7 +7,8 @@ import { getPayload } from 'payload'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { buildConfig } from 'payload'
 import { lexicalEditor } from '@payloadcms/richtext-lexical'
-import { createVectorizeIntegration } from 'payloadcms-vectorize'
+import payloadcmsVectorize from 'payloadcms-vectorize'
+import { createMockAdapter } from 'helpers/mockAdapter.js'
 
 const embeddingsCollection = 'default'
 
@@ -15,16 +16,10 @@ describe('shouldEmbedFn - real-time', () => {
   let payload: Payload
   let config: SanitizedConfig
   const dbName = `should_embed_fn_rt_${Date.now()}`
+  const adapter = createMockAdapter()
 
   beforeAll(async () => {
     await createTestDb({ dbName })
-
-    const integration = createVectorizeIntegration({
-      default: {
-        dims: DIMS,
-        ivfflatLists: 1,
-      },
-    })
 
     config = await buildConfig({
       secret: process.env.PAYLOAD_SECRET || 'test-secret',
@@ -36,14 +31,13 @@ describe('shouldEmbedFn - real-time', () => {
         },
       ],
       db: postgresAdapter({
-        extensions: ['vector'],
-        afterSchemaInit: [integration.afterSchemaInitHook],
         pool: {
           connectionString: `postgresql://postgres:password@localhost:5433/${dbName}`,
         },
       }),
       plugins: [
-        integration.payloadcmsVectorize({
+        payloadcmsVectorize({
+          dbAdapter: adapter,
           knowledgePools: {
             default: {
               collections: {
