@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.5.4 - 2026-02-20
+
+### Added
+
+- **`shouldEmbedFn` filter**: Optional function on `CollectionVectorizeOption` that runs before a document is queued for embedding. Return `false` to skip the document entirely — no job is created and `toKnowledgePool` is never called. Works for both real-time and bulk embedding. Useful for skipping drafts, archived documents, or any custom criteria.
+
 ## 0.5.3 - 2026-01-24
 
 ### Changed
