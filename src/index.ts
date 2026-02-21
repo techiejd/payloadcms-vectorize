@@ -36,6 +36,7 @@ import {
 import {
   createPrepareBulkEmbeddingTask,
   createPollOrCompleteBulkEmbeddingTask,
+  createPollOrCompleteSingleBatchTask,
 } from './tasks/bulkEmbedAll.js'
 import { createBulkEmbedHandler, startBulkEmbed } from './endpoints/bulkEmbed.js'
 import { createRetryFailedBatchHandler, retryBatch } from './endpoints/retryFailedBatch.js'
@@ -253,6 +254,12 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
         pollOrCompleteQueueName: pluginOptions.bulkQueueNames?.pollOrCompleteQueueName,
       })
       tasks.push(pollOrCompleteBulkEmbedTask)
+
+      const pollOrCompleteSingleBatchTask = createPollOrCompleteSingleBatchTask({
+        knowledgePools: pluginOptions.knowledgePools,
+        pollOrCompleteQueueName: pluginOptions.bulkQueueNames?.pollOrCompleteQueueName,
+      })
+      tasks.push(pollOrCompleteSingleBatchTask)
 
       config.jobs = {
         ...incomingJobs,
