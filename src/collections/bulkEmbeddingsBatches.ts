@@ -116,6 +116,14 @@ export const createBulkEmbeddingsBatchesCollection = (): CollectionConfig => ({
       },
     },
     {
+      name: 'failedChunkData',
+      type: 'json',
+      admin: {
+        description:
+          'Collection, documentId and chunkIndex for each chunk that failed in this batch',
+      },
+    },
+    {
       name: 'retriedBatch',
       type: 'relationship',
       relationTo: BULK_EMBEDDINGS_BATCHES_SLUG,

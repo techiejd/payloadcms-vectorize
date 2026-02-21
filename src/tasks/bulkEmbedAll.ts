@@ -189,7 +189,7 @@ async function finalizeRunIfComplete(args: {
     return { finalized: true, status: 'canceled' }
   }
 
-  // Compute aggregate counts from all succeeded batches
+  // Compute aggregate counts and failedChunkData from all succeeded batches
   let totalSucceeded = 0
   let totalFailed = 0
   const allFailedChunkData: FailedChunkData[] = []
@@ -197,6 +197,9 @@ async function finalizeRunIfComplete(args: {
     if (batch.status === 'succeeded') {
       totalSucceeded += batch.succeededCount || 0
       totalFailed += batch.failedCount || 0
+      if (Array.isArray(batch.failedChunkData)) {
+        allFailedChunkData.push(...batch.failedChunkData)
+      }
     }
   }
 
@@ -520,6 +523,10 @@ export const createPollOrCompleteSingleBatchTask = ({
               ? {
                   succeededCount: completionResult.succeededCount,
                   failedCount: completionResult.failedCount,
+                  failedChunkData:
+                    completionResult.failedChunkData.length > 0
+                      ? completionResult.failedChunkData
+                      : undefined,
                 }
               : {}),
           },
@@ -537,7 +544,6 @@ export const createPollOrCompleteSingleBatchTask = ({
           input: { runId, batchId },
           req,
           ...(pollOrCompleteQueueName ? { queue: pollOrCompleteQueueName } : {}),
-          waitUntil: new Date(Date.now() + 30_000),
         })
 
         return { output: { runId, batchId, status: completionResult.status } }
