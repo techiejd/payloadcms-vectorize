@@ -21,12 +21,11 @@ export default defineConfig(() => {
       hookTimeout: 30_000,
       testTimeout: 30_000,
       exclude: ['**/e2e.spec.{ts,js}', '**/node_modules/**'],
-      // Run test files sequentially to avoid global state interference
-      // (embeddingsTables map and Payload instance caching)
+      // Each test file gets its own forked process so memory is fully
+      // reclaimed between files (prevents OOM on CI).
+      pool: 'forks',
+      // Run test files sequentially to avoid DB / global-state interference.
       fileParallelism: false,
-      // Disable parallel test execution within files as well
-      //threads: false,
-      //maxConcurrency: 1,
     },
   }
 })
