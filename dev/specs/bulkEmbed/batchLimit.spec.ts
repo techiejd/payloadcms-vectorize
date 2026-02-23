@@ -79,53 +79,28 @@ describe('Bulk embed - batchLimit', () => {
   })
 
   test('batchLimit equal to doc count does not create extra continuations', async () => {
-    // Create exactly 2 more posts (matching batchLimit)
-    const uniqueVersion = `${testEmbeddingVersion}-exact-${Date.now()}`
-    const built = await buildPayloadWithIntegration({
-      dbName,
-      pluginOpts: {
-        knowledgePools: {
-          default: {
-            collections: {
-              posts: {
-                toKnowledgePool: async (doc: any) => [{ chunk: doc.title }],
-                batchLimit: 2,
-              },
-            },
-            embeddingConfig: {
-              version: uniqueVersion,
-              queryFn: makeDummyEmbedQuery(DIMS),
-              bulkEmbeddingsFns: createMockBulkEmbeddings({
-                statusSequence: ['succeeded'],
-              }),
-            },
-          },
-        },
-        bulkQueueNames: BULK_QUEUE_NAMES,
-      },
-      key: `batchlimit-exact-${Date.now()}`,
-    })
+    // Clean up from prior test: delete all posts and embeddings
+    await payload.delete({ collection: 'posts', where: {} })
+    await payload.delete({ collection: 'default' as any, where: {} })
 
-    // Clear posts from prior test and create exactly 2
-    await built.payload.delete({ collection: 'posts', where: {} })
+    // Create exactly 2 posts (matching batchLimit: 2)
     for (let i = 0; i < 2; i++) {
-      await built.payload.create({
+      await payload.create({
         collection: 'posts',
         data: { title: `Exact Post ${i}` } as any,
       })
     }
 
-    const vp = getVectorizedPayload(built.payload)
-    const result = await vp?.bulkEmbed({ knowledgePool: 'default' })
+    const result = await vectorizedPayload?.bulkEmbed({ knowledgePool: 'default' })
     expectGoodResult(result)
 
-    await waitForBulkJobs(built.payload, 20000)
+    await waitForBulkJobs(payload, 20000)
 
-    const embeds = await built.payload.find({ collection: 'default' })
+    const embeds = await payload.find({ collection: 'default' })
     expect(embeds.totalDocs).toBe(2)
 
     const runDoc = (
-      await (built.payload as any).find({
+      await (payload as any).find({
         collection: BULK_EMBEDDINGS_RUNS_SLUG,
         where: { id: { equals: result!.runId } },
       })
