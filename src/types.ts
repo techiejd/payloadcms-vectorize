@@ -101,6 +101,10 @@ export type CollectionVectorizeOption = {
   shouldEmbedFn?: ShouldEmbedFn
   /** Function that converts a document to an array of chunks with optional extension field values */
   toKnowledgePool: ToKnowledgePoolFn
+  /** Max documents to fetch from this collection per prepare job.
+   *  Each page of results becomes a separate job linked to the next.
+   *  Defaults to 1000 if not set. */
+  batchLimit?: number
 }
 
 /** Knowledge pool name identifier */
@@ -186,7 +190,8 @@ export type PollBulkEmbeddingsResult = {
 export type AddChunkArgs = {
   /** The chunk to add */
   chunk: BulkEmbeddingInput
-  /** True if this is the last chunk in the run */
+  /** True if this is the last chunk in this job (forces flush).
+   *  Note: may not be the last chunk in the entire run if batchLimit continuations are used. */
   isLastChunk: boolean
 }
 
@@ -242,8 +247,9 @@ export type BulkEmbeddingsFns = {
    * of them were submitted when you return a BatchSubmission.
    *
    * **About `isLastChunk`:**
-   * - `isLastChunk=true` indicates this is the final chunk in the run
-   * - Use this to flush any remaining accumulated chunks before the run completes
+   * - `isLastChunk=true` indicates this is the final chunk in this job
+   * - Use this to flush any remaining accumulated chunks before the job completes
+   * - When `batchLimit` is set, each job's last chunk gets `isLastChunk=true` (not just the run's last chunk)
    * - The plugin uses this only to know when to stop iterating, not to determine which chunks were submitted
    *
    * **Example flow when chunk would exceed limit:**

@@ -246,6 +246,7 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
       const prepareBulkEmbedTask = createPrepareBulkEmbeddingTask({
         knowledgePools: pluginOptions.knowledgePools,
         pollOrCompleteQueueName: pluginOptions.bulkQueueNames?.pollOrCompleteQueueName,
+        prepareBulkEmbedQueueName: pluginOptions.bulkQueueNames?.prepareBulkEmbedQueueName,
       })
       tasks.push(prepareBulkEmbedTask)
 
