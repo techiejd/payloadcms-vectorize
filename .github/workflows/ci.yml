@@ -52,6 +52,7 @@ jobs:
           DIMS: 8
           IVFFLATLISTS: 1
           TEST_ENV: 1
+          NODE_OPTIONS: "--max-old-space-size=8192"
 
   test_e2e:
     runs-on: ubuntu-latest

@@ -158,16 +158,19 @@ async function finalizeRunIfComplete(args: {
   }
 
   if (batches.length === 0) {
+    // No batches means all workers found zero eligible docs — run is complete
     await payload.update({
       id: runId,
       collection: BULK_EMBEDDINGS_RUNS_SLUG,
       data: {
-        status: 'failed',
-        error: 'No batches found for run',
+        status: 'succeeded',
+        inputs: 0,
+        succeeded: 0,
+        failed: 0,
         completedAt: new Date().toISOString(),
       },
     })
-    return { finalized: true, status: 'failed' }
+    return { finalized: true, status: 'succeeded' }
   }
 
   // Check if all batches are terminal
@@ -453,9 +456,13 @@ export const createPrepareBulkEmbeddingTask = ({
         })
       }
 
-      // Note: if this worker produced 0 inputs and has no continuation, we intentionally
-      // do NOT call finalizeRunIfComplete here. Other concurrent workers may still be
-      // creating batches. Finalization is handled by per-batch polling tasks.
+      // If this worker produced 0 batches and has no continuation, try to finalize.
+      // finalizeRunIfComplete is idempotent: if other workers created batches that
+      // aren't terminal yet, it returns { finalized: false } and the polling tasks
+      // will handle finalization later.
+      if (totalResult.batchCount === 0 && !queryResult.nextPage) {
+        await finalizeRunIfComplete({ payload, runId: input.runId, poolName, callbacks })
+      }
 
       return {
         output: { runId: input.runId, status: 'prepared', batchCount: totalResult.batchCount },
