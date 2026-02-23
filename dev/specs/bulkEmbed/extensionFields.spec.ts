@@ -1,5 +1,5 @@
 import type { Payload } from 'payload'
-import { beforeAll, describe, expect, test } from 'vitest'
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { BULK_EMBEDDINGS_RUNS_SLUG } from '../../../src/collections/bulkEmbeddingsRuns.js'
 import {
   BULK_QUEUE_NAMES,
@@ -51,6 +51,10 @@ describe('Bulk embed - extension fields', () => {
     })
     payload = built.payload
     vectorizedPayload = getVectorizedPayload(payload)
+  })
+
+  afterAll(async () => {
+    if (payload) await payload.destroy()
   })
 
   test('extension fields are merged when writing embeddings', async () => {

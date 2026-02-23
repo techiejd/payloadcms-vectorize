@@ -82,31 +82,35 @@ describe('Validation failures mark jobs as errored', () => {
       cron: true,
     })
 
-    await payload.create({
-      collection: 'posts',
-      data: { title: 'bad chunks' },
-    })
+    try {
+      await payload.create({
+        collection: 'posts',
+        data: { title: 'bad chunks' },
+      })
 
-    // Wait for the queued job to finish (success or failure)
-    await waitForVectorizationJobs(payload, 30000)
+      // Wait for the queued job to finish (success or failure)
+      await waitForVectorizationJobs(payload, 30000)
 
-    // Then assert failure
-    const res = await payload.find({
-      collection: 'payload-jobs',
-      where: {
-        and: [{ taskSlug: { equals: 'payloadcms-vectorize:vectorize' } }],
-      },
-      limit: 1,
-      sort: '-createdAt',
-    })
-    const failedJob = (res as any)?.docs?.[0]
-    expect(failedJob.hasError).toBe(true)
-    const errMsg = failedJob.error.message
-    expect(errMsg).toMatch(/chunk/i)
-    expect(errMsg).toMatch(/Invalid indices: 1/)
+      // Then assert failure
+      const res = await payload.find({
+        collection: 'payload-jobs',
+        where: {
+          and: [{ taskSlug: { equals: 'payloadcms-vectorize:vectorize' } }],
+        },
+        limit: 1,
+        sort: '-createdAt',
+      })
+      const failedJob = (res as any)?.docs?.[0]
+      expect(failedJob.hasError).toBe(true)
+      const errMsg = failedJob.error.message
+      expect(errMsg).toMatch(/chunk/i)
+      expect(errMsg).toMatch(/Invalid indices: 1/)
 
-    // Ensure no embeddings were created (all-or-nothing validation)
-    const embeddingsCount = await payload.count({ collection: 'default' })
-    expect(embeddingsCount.totalDocs).toBe(0)
+      // Ensure no embeddings were created (all-or-nothing validation)
+      const embeddingsCount = await payload.count({ collection: 'default' })
+      expect(embeddingsCount.totalDocs).toBe(0)
+    } finally {
+      await payload.destroy()
+    }
   }, 60000)
 })

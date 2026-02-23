@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, test } from 'vitest'
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import {
   BULK_QUEUE_NAMES,
   DEFAULT_DIMS,
@@ -25,8 +25,15 @@ const BULK_QUEUE_NAMES_1 = {
 
 describe('Bulk embed - version bump', () => {
   let post: any
+  const payloadsToDestroy: any[] = []
   beforeAll(async () => {
     await createTestDb({ dbName })
+  })
+
+  afterAll(async () => {
+    for (const p of payloadsToDestroy) {
+      await p.destroy()
+    }
   })
 
   test('version bump re-embeds all even without updates', async () => {
@@ -53,6 +60,8 @@ describe('Bulk embed - version bump', () => {
         key: `payload0`,
       })
     ).payload
+
+    payloadsToDestroy.push(payload0)
 
     post = await payload0.create({ collection: 'posts', data: { title: 'Old' } as any })
 
@@ -94,6 +103,8 @@ describe('Bulk embed - version bump', () => {
         skipMigrations: true,
       })
     ).payload
+
+    payloadsToDestroy.push(payload1)
 
     const vectorizedPayload1 = getVectorizedPayload(payload1)
     const result1 = await vectorizedPayload1?.bulkEmbed({ knowledgePool: 'default' })

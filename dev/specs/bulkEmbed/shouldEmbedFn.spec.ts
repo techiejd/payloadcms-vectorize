@@ -1,5 +1,5 @@
 import type { Payload, SanitizedConfig } from 'payload'
-import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
 import {
   BULK_QUEUE_NAMES,
   DEFAULT_DIMS,
@@ -50,6 +50,10 @@ describe('Bulk embed - shouldEmbedFn', () => {
     payload = built.payload
     config = built.config
     vectorizedPayload = getVectorizedPayload(payload)
+  })
+
+  afterAll(async () => {
+    if (payload) await payload.destroy()
   })
 
   beforeEach(async () => {

@@ -1,7 +1,7 @@
 import type { Payload, SanitizedConfig } from 'payload'
 
 import { buildConfig } from 'payload'
-import { beforeAll, describe, expect, test } from 'vitest'
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { createVectorizeIntegration } from 'payloadcms-vectorize'
 import { lexicalEditor } from '@payloadcms/richtext-lexical'
 import { postgresAdapter } from '@payloadcms/db-postgres'
@@ -73,6 +73,10 @@ describe('Multiple knowledge pools', () => {
       key: `multipools-test-${Date.now()}`,
       cron: true,
     })
+  })
+
+  afterAll(async () => {
+    if (payload) await payload.destroy()
   })
 
   test('creates two embeddings collections with vector columns', async () => {

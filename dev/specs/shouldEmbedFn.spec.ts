@@ -1,5 +1,5 @@
 import type { Payload, SanitizedConfig } from 'payload'
-import { beforeAll, describe, expect, test } from 'vitest'
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
 import { DIMS } from './constants.js'
 import { createTestDb, waitForVectorizationJobs } from './utils.js'
@@ -77,6 +77,10 @@ describe('shouldEmbedFn - real-time', () => {
       key: `should-embed-fn-rt-${Date.now()}`,
       cron: true,
     })
+  })
+
+  afterAll(async () => {
+    if (payload) await payload.destroy()
   })
 
   test('shouldEmbedFn filters documents on real-time create', async () => {

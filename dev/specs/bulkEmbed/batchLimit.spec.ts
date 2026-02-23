@@ -1,5 +1,5 @@
 import type { Payload } from 'payload'
-import { beforeAll, describe, expect, test } from 'vitest'
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { BULK_EMBEDDINGS_RUNS_SLUG } from '../../../src/collections/bulkEmbeddingsRuns.js'
 import { BULK_EMBEDDINGS_BATCHES_SLUG } from '../../../src/collections/bulkEmbeddingsBatches.js'
 import {
@@ -49,6 +49,10 @@ describe('Bulk embed - batchLimit', () => {
     })
     payload = built.payload
     vectorizedPayload = getVectorizedPayload(payload)
+  })
+
+  afterAll(async () => {
+    if (payload) await payload.destroy()
   })
 
   test('batchLimit splits docs across continuation jobs and all get embedded', async () => {

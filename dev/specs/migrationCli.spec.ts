@@ -73,6 +73,10 @@ describe('Migration CLI integration tests', () => {
       payload = await getPayload({ config, cron: true })
     })
 
+    afterAll(async () => {
+      if (payload) await payload.destroy()
+    })
+
     test('VectorizedPayload has _staticConfigs', async () => {
       const { getVectorizedPayload } = await import('payloadcms-vectorize')
       const vectorizedPayload = getVectorizedPayload(payload)
@@ -152,6 +156,10 @@ describe('Migration CLI integration tests', () => {
       })
     })
 
+    afterAll(async () => {
+      if (payload) await payload.destroy()
+    })
+
     test('vector search fails with descriptive error when embedding column missing', async () => {
       const { getVectorizedPayload } = await import('payloadcms-vectorize')
       const vectorizedPayload = getVectorizedPayload(payload)
@@ -200,7 +208,7 @@ describe('Migration CLI integration tests', () => {
     })
 
     afterAll(async () => {
-      // Cleanup: remove test migrations directory
+      if (autoPayload) await autoPayload.destroy()
       if (existsSync(migrationsDir)) {
         rmSync(migrationsDir, { recursive: true, force: true })
       }
@@ -420,6 +428,7 @@ describe('Migration CLI integration tests', () => {
     })
 
     afterAll(async () => {
+      if (dimsPayload) await dimsPayload.destroy()
       if (existsSync(migrationsDir)) {
         rmSync(migrationsDir, { recursive: true, force: true })
       }
@@ -718,6 +727,7 @@ describe('Migration CLI integration tests', () => {
     })
 
     afterAll(async () => {
+      if (multiPayload) await multiPayload.destroy()
       if (existsSync(migrationsDir)) {
         rmSync(migrationsDir, { recursive: true, force: true })
       }

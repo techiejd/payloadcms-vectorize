@@ -3,7 +3,7 @@ import type { Payload } from 'payload'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
 import { Client } from 'pg'
-import { beforeAll, describe, expect, test } from 'vitest'
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 
 import type { PostgresPayload } from '../../src/types.js'
 
@@ -93,6 +93,10 @@ describe('Custom schemaName support', () => {
       key: `schema-name-test-${Date.now()}`,
       cron: true,
     })
+  })
+
+  afterAll(async () => {
+    if (payload) await payload.destroy()
   })
 
   test('embeddings table is created in custom schema', async () => {

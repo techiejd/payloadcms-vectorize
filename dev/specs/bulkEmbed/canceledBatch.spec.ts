@@ -1,5 +1,5 @@
 import type { Payload } from 'payload'
-import { beforeAll, describe, expect, test } from 'vitest'
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import {
   BULK_QUEUE_NAMES,
   DEFAULT_DIMS,
@@ -47,6 +47,10 @@ describe('Bulk embed - canceled batch', () => {
     })
     payload = built.payload
     vectorizedPayload = getVectorizedPayload(payload)
+  })
+
+  afterAll(async () => {
+    if (payload) await payload.destroy()
   })
 
   test('canceled batch marks entire run as failed', async () => {

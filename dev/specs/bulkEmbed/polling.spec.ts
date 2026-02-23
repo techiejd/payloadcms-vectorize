@@ -1,5 +1,5 @@
 import type { Payload } from 'payload'
-import { beforeAll, describe, expect, test, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest'
 import { BULK_EMBEDDINGS_RUNS_SLUG } from '../../../src/collections/bulkEmbeddingsRuns.js'
 import {
   BULK_QUEUE_NAMES,
@@ -45,6 +45,10 @@ describe('Bulk embed - polling requeue', () => {
       key: `polling-${Date.now()}`,
     })
     payload = built.payload
+  })
+
+  afterAll(async () => {
+    if (payload) await payload.destroy()
   })
 
   test('polling requeues when non-terminal then succeeds', async () => {

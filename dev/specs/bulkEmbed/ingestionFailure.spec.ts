@@ -1,5 +1,5 @@
 import type { Payload } from 'payload'
-import { beforeAll, describe, expect, test } from 'vitest'
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { BULK_EMBEDDINGS_RUNS_SLUG } from '../../../src/collections/bulkEmbeddingsRuns.js'
 import { BULK_EMBEDDINGS_BATCHES_SLUG } from '../../../src/collections/bulkEmbeddingsBatches.js'
 import {
@@ -22,6 +22,10 @@ describe('Bulk embed - ingestion validation failures', () => {
 
   beforeAll(async () => {
     await createTestDb({ dbName })
+  })
+
+  afterAll(async () => {
+    if (payload) await payload.destroy()
   })
 
   test('malformed chunk entry fails the bulk embedding run', async () => {

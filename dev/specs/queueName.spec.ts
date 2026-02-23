@@ -1,5 +1,5 @@
 import type { Payload, SanitizedConfig } from 'payload'
-import { beforeAll, describe, expect, test } from 'vitest'
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { chunkText, chunkRichText } from 'helpers/chunkers.js'
 import type { SerializedEditorState } from '@payloadcms/richtext-lexical/lexical'
 import { postgresAdapter } from '@payloadcms/db-postgres'
@@ -74,6 +74,11 @@ describe('Queue tests', () => {
     })
     markdownContent = await getInitialMarkdownContent(config)
   })
+
+  afterAll(async () => {
+    if (payload) await payload.destroy()
+  })
+
   test('vectorization jobs are queued using the queueName', async () => {
     // There is no autoRun so previous jobs are queued and never removed between tests
     const prevJobs = await payload.find({

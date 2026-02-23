@@ -1,5 +1,5 @@
 import type { Payload } from 'payload'
-import { beforeAll, describe, expect, test } from 'vitest'
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import {
   BULK_QUEUE_NAMES,
   DEFAULT_DIMS,
@@ -49,6 +49,10 @@ describe('Bulk embed - multiple chunks with extension fields', () => {
       key: `multichunk-${Date.now()}`,
     })
     payload = built.payload
+  })
+
+  afterAll(async () => {
+    if (payload) await payload.destroy()
   })
 
   test('multiple chunks keep their respective extension fields', async () => {

@@ -1,6 +1,6 @@
 import type { Payload } from 'payload'
 
-import { beforeAll, describe, expect, test } from 'vitest'
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
 import { type SerializedEditorState } from '@payloadcms/richtext-lexical/lexical'
 import { buildDummyConfig, DIMS, getInitialMarkdownContent } from './constants.js'
@@ -198,6 +198,10 @@ describe('Search endpoint integration tests', () => {
       cron: true,
     })
     markdownContent = await getInitialMarkdownContent(config)
+  })
+
+  afterAll(async () => {
+    if (payload) await payload.destroy()
   })
 
   test('querying a title should return the title', async () => {

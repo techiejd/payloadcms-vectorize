@@ -1,5 +1,5 @@
 import type { Payload } from 'payload'
-import { beforeAll, describe, expect, test } from 'vitest'
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import {
   BULK_QUEUE_NAMES,
   DEFAULT_DIMS,
@@ -44,6 +44,10 @@ describe('Bulk embed - realtime mode', () => {
       key: `realtime-${Date.now()}`,
     })
     payload = built.payload
+  })
+
+  afterAll(async () => {
+    if (payload) await payload.destroy()
   })
 
   test('realtime mode queues vectorize jobs when realTimeIngestionFn is provided', async () => {

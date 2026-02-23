@@ -1,5 +1,5 @@
 import type { Payload } from 'payload'
-import { beforeAll, describe, expect, test } from 'vitest'
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { BULK_EMBEDDINGS_RUNS_SLUG } from '../../../src/collections/bulkEmbeddingsRuns.js'
 import {
   BULK_QUEUE_NAMES,
@@ -28,6 +28,10 @@ describe('Bulk embed - partial chunk failures', () => {
 
   beforeAll(async () => {
     await createTestDb({ dbName })
+  })
+
+  afterAll(async () => {
+    if (payload) await payload.destroy()
   })
 
   test('partial chunk failures are tracked and passed to onError', async () => {

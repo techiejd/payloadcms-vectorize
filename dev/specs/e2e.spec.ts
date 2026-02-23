@@ -66,6 +66,10 @@ test.describe('Vector embedding e2e tests', () => {
     payload = await getPayload({ config: _config, key: `e2e-test-${Date.now()}` })
   })
 
+  test.afterAll(async () => {
+    if (payload) await payload.destroy()
+  })
+
   test('querying the endpoint should return the title with testEmbeddingVersion', async ({
     request,
   }) => {
