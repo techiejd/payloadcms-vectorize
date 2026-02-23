@@ -7,6 +7,7 @@ import {
   buildPayloadWithIntegration,
   createMockBulkEmbeddings,
   createTestDb,
+  destroyPayload,
   waitForBulkJobs,
 } from '../utils.js'
 import { getVectorizedPayload } from 'payloadcms-vectorize'
@@ -48,7 +49,7 @@ describe('Bulk embed - polling requeue', () => {
   })
 
   afterAll(async () => {
-    if (payload) await payload.destroy()
+    await destroyPayload(payload)
   })
 
   test('polling requeues when non-terminal then succeeds', async () => {

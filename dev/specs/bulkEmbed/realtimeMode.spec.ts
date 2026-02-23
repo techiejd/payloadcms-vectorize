@@ -6,6 +6,7 @@ import {
   buildPayloadWithIntegration,
   createMockBulkEmbeddings,
   createTestDb,
+  destroyPayload,
   waitForVectorizationJobs,
 } from '../utils.js'
 import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
@@ -47,7 +48,7 @@ describe('Bulk embed - realtime mode', () => {
   })
 
   afterAll(async () => {
-    if (payload) await payload.destroy()
+    await destroyPayload(payload)
   })
 
   test('realtime mode queues vectorize jobs when realTimeIngestionFn is provided', async () => {

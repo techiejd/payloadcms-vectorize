@@ -10,6 +10,7 @@ import {
   buildPayloadWithIntegration,
   createMockBulkEmbeddings,
   createTestDb,
+  destroyPayload,
   waitForBulkJobs,
 } from '../utils.js'
 import { makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
@@ -50,7 +51,7 @@ describe('Bulk embed - failed batch', () => {
   })
 
   afterAll(async () => {
-    if (payload) await payload.destroy()
+    await destroyPayload(payload)
   })
 
   test('failed batch marks entire run as failed', async () => {

@@ -8,6 +8,7 @@ import {
   BULK_QUEUE_NAMES,
   createMockBulkEmbeddings,
   createTestDb,
+  destroyPayload,
   waitForVectorizationJobs,
 } from './utils.js'
 import { getPayload } from 'payload'
@@ -201,7 +202,7 @@ describe('Search endpoint integration tests', () => {
   })
 
   afterAll(async () => {
-    if (payload) await payload.destroy()
+    await destroyPayload(payload)
   })
 
   test('querying a title should return the title', async () => {

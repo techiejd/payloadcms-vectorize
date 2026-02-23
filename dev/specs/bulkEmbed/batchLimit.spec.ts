@@ -8,6 +8,7 @@ import {
   buildPayloadWithIntegration,
   createMockBulkEmbeddings,
   createTestDb,
+  destroyPayload,
   waitForBulkJobs,
 } from '../utils.js'
 import { makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
@@ -52,7 +53,7 @@ describe('Bulk embed - batchLimit', () => {
   })
 
   afterAll(async () => {
-    if (payload) await payload.destroy()
+    await destroyPayload(payload)
   })
 
   test('batchLimit splits docs across continuation jobs and all get embedded', async () => {

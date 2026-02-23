@@ -7,6 +7,7 @@ import {
   buildPayloadWithIntegration,
   createMockBulkEmbeddings,
   createTestDb,
+  destroyPayload,
   waitForBulkJobs,
 } from '../utils.js'
 import { makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
@@ -31,7 +32,7 @@ describe('Bulk embed - partial chunk failures', () => {
   })
 
   afterAll(async () => {
-    if (payload) await payload.destroy()
+    await destroyPayload(payload)
   })
 
   test('partial chunk failures are tracked and passed to onError', async () => {

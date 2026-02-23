@@ -8,6 +8,7 @@ import {
   buildPayloadWithIntegration,
   createMockBulkEmbeddings,
   createTestDb,
+  destroyPayload,
 } from '../utils.js'
 import { makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
 
@@ -46,7 +47,7 @@ describe('Bulk embed - concurrent runs prevention', () => {
   })
 
   afterAll(async () => {
-    if (payload) await payload.destroy()
+    await destroyPayload(payload)
   })
 
   test('cannot start concurrent bulk embed runs for the same pool', async () => {

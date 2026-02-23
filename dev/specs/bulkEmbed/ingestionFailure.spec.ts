@@ -8,6 +8,7 @@ import {
   buildPayloadWithIntegration,
   createMockBulkEmbeddings,
   createTestDb,
+  destroyPayload,
   waitForBulkJobs,
 } from '../utils.js'
 import { makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
@@ -25,7 +26,7 @@ describe('Bulk embed - ingestion validation failures', () => {
   })
 
   afterAll(async () => {
-    if (payload) await payload.destroy()
+    await destroyPayload(payload)
   })
 
   test('malformed chunk entry fails the bulk embedding run', async () => {

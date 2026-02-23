@@ -16,6 +16,7 @@ import { editorConfigFactory, getEnabledNodes, lexicalEditor } from '@payloadcms
 import { DIMS, getInitialMarkdownContent } from './constants.js'
 import {
   createTestDb,
+  destroyPayload,
   waitForVectorizationJobs,
 } from './utils.js'
 import { getPayload } from 'payload'
@@ -113,7 +114,7 @@ describe('Plugin integration tests', () => {
   })
 
   afterAll(async () => {
-    if (payload) await payload.destroy()
+    await destroyPayload(payload)
   })
 
   test('adds embeddings collection with vector column', async () => {

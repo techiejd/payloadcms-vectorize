@@ -2,7 +2,7 @@ import type { Payload, SanitizedConfig } from 'payload'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
 import { DIMS } from './constants.js'
-import { createTestDb, waitForVectorizationJobs } from './utils.js'
+import { createTestDb, destroyPayload, waitForVectorizationJobs } from './utils.js'
 import { getPayload } from 'payload'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { buildConfig } from 'payload'
@@ -80,7 +80,7 @@ describe('shouldEmbedFn - real-time', () => {
   })
 
   afterAll(async () => {
-    if (payload) await payload.destroy()
+    await destroyPayload(payload)
   })
 
   test('shouldEmbedFn filters documents on real-time create', async () => {

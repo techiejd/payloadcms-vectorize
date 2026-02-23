@@ -4,7 +4,7 @@ import { postgresAdapter } from '@payloadcms/db-postgres'
 import { buildConfig, getPayload } from 'payload'
 import { createVectorizeIntegration } from 'payloadcms-vectorize'
 import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from '../helpers/embed.js'
-import { createTestDb } from './utils.js'
+import { createTestDb, destroyPayload } from './utils.js'
 import { DIMS } from './constants.js'
 import type { PostgresPayload } from '../../src/types.js'
 import { script as vectorizeMigrateScript } from '../../src/bin/vectorize-migrate.js'
@@ -74,7 +74,7 @@ describe('Migration CLI integration tests', () => {
     })
 
     afterAll(async () => {
-      if (payload) await payload.destroy()
+      await destroyPayload(payload)
     })
 
     test('VectorizedPayload has _staticConfigs', async () => {
@@ -157,7 +157,7 @@ describe('Migration CLI integration tests', () => {
     })
 
     afterAll(async () => {
-      if (payload) await payload.destroy()
+      await destroyPayload(payload)
     })
 
     test('vector search fails with descriptive error when embedding column missing', async () => {
@@ -208,7 +208,7 @@ describe('Migration CLI integration tests', () => {
     })
 
     afterAll(async () => {
-      if (autoPayload) await autoPayload.destroy()
+      await destroyPayload(autoPayload)
       if (existsSync(migrationsDir)) {
         rmSync(migrationsDir, { recursive: true, force: true })
       }
@@ -428,7 +428,7 @@ describe('Migration CLI integration tests', () => {
     })
 
     afterAll(async () => {
-      if (dimsPayload) await dimsPayload.destroy()
+      await destroyPayload(dimsPayload)
       if (existsSync(migrationsDir)) {
         rmSync(migrationsDir, { recursive: true, force: true })
       }
@@ -727,7 +727,7 @@ describe('Migration CLI integration tests', () => {
     })
 
     afterAll(async () => {
-      if (multiPayload) await multiPayload.destroy()
+      await destroyPayload(multiPayload)
       if (existsSync(migrationsDir)) {
         rmSync(migrationsDir, { recursive: true, force: true })
       }

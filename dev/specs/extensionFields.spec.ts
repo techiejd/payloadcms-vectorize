@@ -4,6 +4,7 @@ import { postgresAdapter } from '@payloadcms/db-postgres'
 import { buildDummyConfig, integration, plugin } from './constants.js'
 import {
   createTestDb,
+  destroyPayload,
   waitForVectorizationJobs,
 } from './utils.js'
 import { getPayload } from 'payload'
@@ -117,7 +118,7 @@ describe('Extension fields integration tests', () => {
   })
 
   afterAll(async () => {
-    if (payload) await payload.destroy()
+    await destroyPayload(payload)
   })
 
   test('extension fields are added to the embeddings table schema', async () => {

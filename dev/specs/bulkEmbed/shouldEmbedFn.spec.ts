@@ -7,6 +7,7 @@ import {
   clearAllCollections,
   createMockBulkEmbeddings,
   createTestDb,
+  destroyPayload,
   waitForBulkJobs,
 } from '../utils.js'
 import { makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
@@ -53,7 +54,7 @@ describe('Bulk embed - shouldEmbedFn', () => {
   })
 
   afterAll(async () => {
-    if (payload) await payload.destroy()
+    await destroyPayload(payload)
   })
 
   beforeEach(async () => {

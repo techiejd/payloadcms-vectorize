@@ -5,6 +5,7 @@ import { describe, expect, test } from 'vitest'
 import { createVectorizeIntegration } from '../../src/index.js'
 import {
   createTestDb,
+  destroyPayload,
   waitForVectorizationJobs,
 } from './utils.js'
 import { getPayload } from 'payload'
@@ -110,7 +111,7 @@ describe('Validation failures mark jobs as errored', () => {
       const embeddingsCount = await payload.count({ collection: 'default' })
       expect(embeddingsCount.totalDocs).toBe(0)
     } finally {
-      await payload.destroy()
+      await destroyPayload(payload)
     }
   }, 60000)
 })

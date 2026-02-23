@@ -5,6 +5,7 @@ import {
   buildPayloadWithIntegration,
   createMockBulkEmbeddings,
   createTestDb,
+  destroyPayload,
   waitForBulkJobs,
 } from '../utils.js'
 import { makeDummyEmbedQuery } from 'helpers/embed.js'
@@ -32,7 +33,7 @@ describe('Bulk embed - version bump', () => {
 
   afterAll(async () => {
     for (const p of payloadsToDestroy) {
-      await p.destroy()
+      await destroyPayload(p)
     }
   })
 

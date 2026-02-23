@@ -3,6 +3,7 @@ import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from 'h
 import { buildDummyConfig, DIMS, integration, plugin } from './constants.js'
 import {
   createTestDb,
+  destroyPayload,
   waitForVectorizationJobs,
 } from './utils.js'
 import { getPayload } from 'payload'
@@ -164,7 +165,7 @@ describe('extensionFields', () => {
       expect(typeof matchingResult.priorityLevel).toBe('number')
       expect(matchingResult.priorityLevel).toBe(42)
     } finally {
-      await payloadWithExtensions.destroy()
+      await destroyPayload(payloadWithExtensions)
     }
   })
 })

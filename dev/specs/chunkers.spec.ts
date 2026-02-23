@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest'
 import { chunkText, chunkRichText } from 'helpers/chunkers.js'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { buildDummyConfig, getInitialMarkdownContent, integration } from './constants.js'
-import { createTestDb } from './utils.js'
+import { createTestDb, destroyPayload } from './utils.js'
 import { getPayload } from 'payload'
 
 describe('Chunkers', () => {
@@ -59,7 +59,7 @@ describe('Chunkers', () => {
       expect(chunks[2]).toContain('Paragraph 5')
       expect(chunks[2]).toContain('Paragraph 6')
     } finally {
-      await thisPayload.destroy()
+      await destroyPayload(thisPayload)
     }
   })
 })

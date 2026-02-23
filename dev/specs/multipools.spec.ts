@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { createVectorizeIntegration } from 'payloadcms-vectorize'
 import { lexicalEditor } from '@payloadcms/richtext-lexical'
 import { postgresAdapter } from '@payloadcms/db-postgres'
-import { createTestDb } from './utils.js'
+import { createTestDb, destroyPayload } from './utils.js'
 import { getPayload } from 'payload'
 import type { PostgresPayload } from '../../src/types.js'
 
@@ -76,7 +76,7 @@ describe('Multiple knowledge pools', () => {
   })
 
   afterAll(async () => {
-    if (payload) await payload.destroy()
+    await destroyPayload(payload)
   })
 
   test('creates two embeddings collections with vector columns', async () => {

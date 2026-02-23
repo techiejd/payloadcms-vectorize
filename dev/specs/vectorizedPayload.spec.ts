@@ -5,6 +5,7 @@ import { getVectorizedPayload, VectorizedPayload } from '../../src/types.js'
 import { buildDummyConfig, DIMS, getInitialMarkdownContent } from './constants.js'
 import {
   createTestDb,
+  destroyPayload,
   waitForVectorizationJobs,
 } from './utils.js'
 import { getPayload } from 'payload'
@@ -104,7 +105,7 @@ describe('VectorizedPayload', () => {
   })
 
   afterAll(async () => {
-    if (payload) await payload.destroy()
+    await destroyPayload(payload)
   })
 
   describe('getVectorizedPayload', () => {

@@ -10,6 +10,7 @@ import type { PostgresPayload } from '../../src/types.js'
 import { buildDummyConfig, DIMS, integration, plugin } from './constants.js'
 import {
   createTestDb,
+  destroyPayload,
   waitForVectorizationJobs,
 } from './utils.js'
 import { getPayload } from 'payload'
@@ -96,7 +97,7 @@ describe('Custom schemaName support', () => {
   })
 
   afterAll(async () => {
-    if (payload) await payload.destroy()
+    await destroyPayload(payload)
   })
 
   test('embeddings table is created in custom schema', async () => {

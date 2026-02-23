@@ -4,7 +4,7 @@ import { chunkText, chunkRichText } from 'helpers/chunkers.js'
 import type { SerializedEditorState } from '@payloadcms/richtext-lexical/lexical'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { buildDummyConfig, getInitialMarkdownContent, integration, plugin } from './constants.js'
-import { createTestDb } from './utils.js'
+import { createTestDb, destroyPayload } from './utils.js'
 import { getPayload } from 'payload'
 
 describe('Queue tests', () => {
@@ -76,7 +76,7 @@ describe('Queue tests', () => {
   })
 
   afterAll(async () => {
-    if (payload) await payload.destroy()
+    await destroyPayload(payload)
   })
 
   test('vectorization jobs are queued using the queueName', async () => {
