@@ -62,11 +62,11 @@ describe('Bulk embed - polling requeue', () => {
     await waitForBulkJobs(payload, 15000)
 
     expect(queueSpy).toHaveBeenNthCalledWith(
-      2, // 2nd call - per-batch task queued from prepare
+      3, // 3rd call - per-batch task queued from worker (1=coordinator, 2=worker)
       expect.objectContaining({ task: 'payloadcms-vectorize:poll-or-complete-single-batch' }),
     )
     expect(queueSpy).toHaveBeenNthCalledWith(
-      3, // 3rd call - per-batch task re-queued after 'running' status
+      4, // 4th call - per-batch task re-queued after 'running' status
       expect.objectContaining({ task: 'payloadcms-vectorize:poll-or-complete-single-batch' }),
     )
 

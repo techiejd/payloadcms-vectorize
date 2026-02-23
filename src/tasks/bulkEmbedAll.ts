@@ -75,6 +75,9 @@ type PollOrCompleteSingleBatchTaskInputOutput = {
 
 const TERMINAL_STATUSES = new Set(['succeeded', 'failed', 'canceled', 'retried'])
 
+// Diagnostic logging prefix
+const LOG = '[vectorize-debug]'
+
 // Helper to load and validate run + config
 async function loadRunAndConfig({
   payload,
@@ -85,11 +88,13 @@ async function loadRunAndConfig({
   runId: string
   knowledgePools: Record<KnowledgePoolName, KnowledgePoolDynamicConfig>
 }) {
+  console.log(`${LOG} loadRunAndConfig runId=${runId}`)
   const run = await payload.findByID({
     collection: BULK_EMBEDDINGS_RUNS_SLUG,
     id: runId,
   })
   const poolName = (run as any)?.pool as KnowledgePoolName
+  console.log(`${LOG} loadRunAndConfig runId=${runId} pool=${poolName} status=${(run as any)?.status}`)
   if (!poolName) {
     throw new Error(`[payloadcms-vectorize] bulk embed run ${runId} missing pool`)
   }
@@ -125,6 +130,7 @@ async function finalizeRunIfComplete(args: {
   }
 }): Promise<{ finalized: boolean; status?: string }> {
   const { payload, runId, poolName, callbacks } = args
+  console.log(`${LOG} finalizeRunIfComplete START runId=${runId}`)
 
   // Check if run is already terminal (prevents double-finalization race)
   const currentRun = await payload.findByID({
@@ -132,6 +138,7 @@ async function finalizeRunIfComplete(args: {
     id: runId,
   })
   if (TERMINAL_STATUSES.has((currentRun as any).status)) {
+    console.log(`${LOG} finalizeRunIfComplete runId=${runId} already terminal: ${(currentRun as any).status}`)
     return { finalized: true, status: (currentRun as any).status }
   }
 
@@ -157,7 +164,10 @@ async function finalizeRunIfComplete(args: {
     batchPage++
   }
 
+  console.log(`${LOG} finalizeRunIfComplete runId=${runId} found ${batches.length} batches`)
+
   if (batches.length === 0) {
+    console.log(`${LOG} finalizeRunIfComplete runId=${runId} 0 batches → marking succeeded`)
     // No batches means all workers found zero eligible docs — run is complete
     await payload.update({
       id: runId,
@@ -176,6 +186,7 @@ async function finalizeRunIfComplete(args: {
   // Check if all batches are terminal
   const batchStatuses = batches.map((b) => b.status as string)
   const allTerminal = batchStatuses.every((status) => TERMINAL_STATUSES.has(status))
+  console.log(`${LOG} finalizeRunIfComplete runId=${runId} batchStatuses=[${batchStatuses.join(',')}] allTerminal=${allTerminal}`)
   if (!allTerminal) {
     return { finalized: false }
   }
@@ -252,6 +263,7 @@ async function finalizeRunIfComplete(args: {
     })
   }
 
+  console.log(`${LOG} finalizeRunIfComplete runId=${runId} FINALIZED as ${runStatus} (succeeded=${totalSucceeded} failed=${totalFailed})`)
   return { finalized: true, status: runStatus }
 }
 
@@ -287,8 +299,10 @@ export const createPrepareBulkEmbeddingTask = ({
       // COORDINATOR MODE: no collectionSlug in input
       // =============================================
       if (!input.collectionSlug) {
+        console.log(`${LOG} COORDINATOR runId=${input.runId}`)
         // Queue one worker per collection
         const collectionSlugs = Object.keys(dynamicConfig.collections)
+        console.log(`${LOG} COORDINATOR runId=${input.runId} collections=[${collectionSlugs.join(',')}]`)
         if (collectionSlugs.length === 0) {
           // No collections configured - mark run as succeeded
           await payload.update({
@@ -325,15 +339,18 @@ export const createPrepareBulkEmbeddingTask = ({
           },
         })
 
+        console.log(`${LOG} COORDINATOR runId=${input.runId} done, queued ${collectionSlugs.length} workers`)
         return { output: { runId: input.runId, status: 'coordinated' } }
       }
 
       // =============================================
       // WORKER MODE: collectionSlug is set
       // =============================================
+      console.log(`${LOG} WORKER runId=${input.runId} collection=${input.collectionSlug} page=${input.page ?? 1}`)
 
       // Early exit if run is already terminal
       if (TERMINAL_STATUSES.has((run as any).status)) {
+        console.log(`${LOG} WORKER runId=${input.runId} early exit: run already ${(run as any).status}`)
         return { output: { runId: input.runId, status: (run as any).status } }
       }
 
@@ -380,6 +397,7 @@ export const createPrepareBulkEmbeddingTask = ({
           : undefined
 
       // STEP 1: Query the page
+      console.log(`${LOG} WORKER runId=${input.runId} querying collection=${collectionSlug} limit=${batchLimit} page=${page} where=${JSON.stringify(where)}`)
       const queryResult = await payload.find({
         collection: collectionSlug,
         where,
@@ -387,9 +405,11 @@ export const createPrepareBulkEmbeddingTask = ({
         page,
         sort: 'id',
       })
+      console.log(`${LOG} WORKER runId=${input.runId} query returned ${queryResult.docs?.length ?? 0} docs, nextPage=${queryResult.nextPage}, totalDocs=${queryResult.totalDocs}`)
 
       // STEP 2: If there's a next page, queue continuation BEFORE processing
       if (queryResult.nextPage) {
+        console.log(`${LOG} WORKER runId=${input.runId} queueing continuation page=${queryResult.nextPage}`)
         await payload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
           task: 'payloadcms-vectorize:prepare-bulk-embedding',
           input: { runId: input.runId, collectionSlug, page: queryResult.nextPage },
@@ -399,6 +419,7 @@ export const createPrepareBulkEmbeddingTask = ({
       }
 
       // STEP 3: Process this page's docs
+      console.log(`${LOG} WORKER runId=${input.runId} processing ${queryResult.docs?.length ?? 0} docs`)
       let totalResult: { batchCount: number; totalInputs: number; batchIds: (string | number)[] }
       try {
         totalResult = await streamAndBatchDocs({
@@ -428,6 +449,8 @@ export const createPrepareBulkEmbeddingTask = ({
         throw error
       }
 
+      console.log(`${LOG} WORKER runId=${input.runId} streamAndBatchDocs result: batchCount=${totalResult.batchCount} totalInputs=${totalResult.totalInputs} batchIds=[${totalResult.batchIds.join(',')}]`)
+
       // STEP 4: Accumulate counts on run record
       if (totalResult.totalInputs > 0) {
         const currentRun = await payload.findByID({
@@ -447,7 +470,9 @@ export const createPrepareBulkEmbeddingTask = ({
       }
 
       // STEP 5: Queue per-batch polling tasks
+      console.log(`${LOG} WORKER runId=${input.runId} queueing ${totalResult.batchIds.length} poll tasks`)
       for (const batchId of totalResult.batchIds) {
+        console.log(`${LOG} WORKER runId=${input.runId} queueing poll for batchId=${batchId}`)
         await payload.jobs.queue<'payloadcms-vectorize:poll-or-complete-single-batch'>({
           task: 'payloadcms-vectorize:poll-or-complete-single-batch',
           input: { runId: input.runId, batchId: String(batchId) },
@@ -461,9 +486,11 @@ export const createPrepareBulkEmbeddingTask = ({
       // aren't terminal yet, it returns { finalized: false } and the polling tasks
       // will handle finalization later.
       if (totalResult.batchCount === 0 && !queryResult.nextPage) {
+        console.log(`${LOG} WORKER runId=${input.runId} 0 batches + no continuation → calling finalizeRunIfComplete`)
         await finalizeRunIfComplete({ payload, runId: input.runId, poolName, callbacks })
       }
 
+      console.log(`${LOG} WORKER runId=${input.runId} DONE status=prepared batchCount=${totalResult.batchCount}`)
       return {
         output: { runId: input.runId, status: 'prepared', batchCount: totalResult.batchCount },
       }
@@ -575,6 +602,7 @@ export const createPollOrCompleteSingleBatchTask = ({
         throw new Error('[payloadcms-vectorize] single batch task requires runId and batchId')
       }
       const { runId, batchId } = input
+      console.log(`${LOG} POLL-SINGLE runId=${runId} batchId=${batchId} START`)
       const payload = req.payload
       const { run, poolName, dynamicConfig } = await loadRunAndConfig({
         payload,
@@ -586,6 +614,7 @@ export const createPollOrCompleteSingleBatchTask = ({
 
       // Early exit if run is already terminal
       if (TERMINAL_STATUSES.has((run as any).status)) {
+        console.log(`${LOG} POLL-SINGLE runId=${runId} batchId=${batchId} run already terminal: ${(run as any).status}`)
         return { output: { runId, batchId, status: (run as any).status } }
       }
 
@@ -594,14 +623,17 @@ export const createPollOrCompleteSingleBatchTask = ({
         collection: BULK_EMBEDDINGS_BATCHES_SLUG,
         id: batchId,
       })
+      console.log(`${LOG} POLL-SINGLE runId=${runId} batchId=${batchId} batchStatus=${(batch as any).status} providerBatchId=${(batch as any).providerBatchId}`)
 
       // If batch is already terminal, just check if run can be finalized
       if (TERMINAL_STATUSES.has((batch as any).status)) {
+        console.log(`${LOG} POLL-SINGLE runId=${runId} batchId=${batchId} batch already terminal → finalizing`)
         await finalizeRunIfComplete({ payload, runId, poolName, callbacks })
         return { output: { runId, batchId, status: (batch as any).status } }
       }
 
       // Poll and complete this single batch
+      console.log(`${LOG} POLL-SINGLE runId=${runId} batchId=${batchId} calling pollAndCompleteSingleBatch`)
       try {
         const completionResult = await pollAndCompleteSingleBatch({
           payload,
@@ -610,6 +642,8 @@ export const createPollOrCompleteSingleBatchTask = ({
           batch,
           callbacks,
         })
+
+        console.log(`${LOG} POLL-SINGLE runId=${runId} batchId=${batchId} pollResult status=${completionResult.status} succeeded=${completionResult.succeededCount} failed=${completionResult.failedCount}`)
 
         // Update batch status and counts
         await payload.update({
@@ -636,11 +670,13 @@ export const createPollOrCompleteSingleBatchTask = ({
 
         // If batch is now terminal, check if run should be finalized
         if (TERMINAL_STATUSES.has(completionResult.status)) {
+          console.log(`${LOG} POLL-SINGLE runId=${runId} batchId=${batchId} batch terminal → calling finalizeRunIfComplete`)
           await finalizeRunIfComplete({ payload, runId, poolName, callbacks })
           return { output: { runId, batchId, status: completionResult.status } }
         }
 
         // Still running - re-queue self with polling delay
+        console.log(`${LOG} POLL-SINGLE runId=${runId} batchId=${batchId} still ${completionResult.status} → re-queueing`)
         await payload.jobs.queue<'payloadcms-vectorize:poll-or-complete-single-batch'>({
           task: 'payloadcms-vectorize:poll-or-complete-single-batch',
           input: { runId, batchId },
@@ -651,6 +687,7 @@ export const createPollOrCompleteSingleBatchTask = ({
         return { output: { runId, batchId, status: completionResult.status } }
       } catch (error) {
         // Batch processing failed - mark batch as failed
+        console.log(`${LOG} POLL-SINGLE runId=${runId} batchId=${batchId} ERROR: ${(error as Error).message}`)
         const errorMessage = (error as Error).message || String(error)
         await payload.update({
           id: batchId,
@@ -771,6 +808,8 @@ async function streamAndBatchDocs(args: {
     }
   }
 
+  console.log(`${LOG} streamAndBatchDocs runId=${runId} collection=${collectionSlug} docsCount=${docs.length}`)
+
   // Determine starting batchIndex from existing batches for this run
   const runIdNum = parseInt(runId, 10)
   const maxBatchResult = await payload.find({
@@ -875,6 +914,7 @@ async function streamAndBatchDocs(args: {
     await processChunk(prevChunk, true)
   }
 
+  console.log(`${LOG} streamAndBatchDocs runId=${runId} DONE batchCount=${batchIds.length} totalInputs=${totalInputs}`)
   return { batchCount: batchIds.length, totalInputs, batchIds }
 }
 
@@ -924,6 +964,7 @@ async function pollAndCompleteSingleBatch(args: {
 }> {
   const { payload, runId, poolName, batch, callbacks } = args
 
+  console.log(`${LOG} pollAndCompleteSingleBatch runId=${runId} batchId=${batch.id} providerBatchId=${batch.providerBatchId}`)
   let succeededCount = 0
   let failedCount = 0
   const failedChunkData: FailedChunkData[] = []
@@ -1042,6 +1083,7 @@ async function pollAndCompleteSingleBatch(args: {
     },
   })
 
+  console.log(`${LOG} pollAndCompleteSingleBatch runId=${runId} batchId=${batch.id} DONE status=${pollResult.status} succeeded=${succeededCount} failed=${failedCount}`)
   return {
     status: pollResult.status,
     error: pollResult.error,
