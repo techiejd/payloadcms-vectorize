@@ -18,6 +18,10 @@ All notable changes to this project will be documented in this file.
 
 - `poll-or-complete-bulk-embedding` task (replaced by `poll-or-complete-single-batch`).
 
+### Upgrade Notes
+
+- **Ensure no bulk embedding run is in progress when upgrading.** The `poll-or-complete-bulk-embedding` task has been removed and replaced by `poll-or-complete-single-batch`. Any in-flight bulk run that still has pending `poll-or-complete-bulk-embedding` jobs will fail because the task slug no longer exists. Wait for all active runs to complete (or cancel them) before deploying this version.
+
 ## 0.5.4 - 2026-02-20
 
 ### Added
