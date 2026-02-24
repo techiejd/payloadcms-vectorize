@@ -146,7 +146,6 @@ export async function waitForBulkJobs(payload: Payload, maxWaitMs = 10000) {
     payload,
     [
       'payloadcms-vectorize:prepare-bulk-embedding',
-      'payloadcms-vectorize:poll-or-complete-bulk-embedding',
       'payloadcms-vectorize:poll-or-complete-single-batch',
     ],
     maxWaitMs,

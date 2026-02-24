@@ -35,7 +35,6 @@ import {
 } from './collections/bulkEmbeddingsBatches.js'
 import {
   createPrepareBulkEmbeddingTask,
-  createPollOrCompleteBulkEmbeddingTask,
   createPollOrCompleteSingleBatchTask,
 } from './tasks/bulkEmbedAll.js'
 import { createBulkEmbedHandler, startBulkEmbed } from './endpoints/bulkEmbed.js'
@@ -249,12 +248,6 @@ export const createVectorizeIntegration = <TPoolNames extends KnowledgePoolName>
         prepareBulkEmbedQueueName: pluginOptions.bulkQueueNames?.prepareBulkEmbedQueueName,
       })
       tasks.push(prepareBulkEmbedTask)
-
-      const pollOrCompleteBulkEmbedTask = createPollOrCompleteBulkEmbeddingTask({
-        knowledgePools: pluginOptions.knowledgePools,
-        pollOrCompleteQueueName: pluginOptions.bulkQueueNames?.pollOrCompleteQueueName,
-      })
-      tasks.push(pollOrCompleteBulkEmbedTask)
 
       const pollOrCompleteSingleBatchTask = createPollOrCompleteSingleBatchTask({
         knowledgePools: pluginOptions.knowledgePools,
