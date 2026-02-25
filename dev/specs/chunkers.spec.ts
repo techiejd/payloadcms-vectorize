@@ -1,8 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { chunkText, chunkRichText } from 'helpers/chunkers.js'
 import { buildDummyConfig, getInitialMarkdownContent } from './constants.js'
-import { destroyPayload } from './utils.js'
-import { getPayload } from 'payload'
 
 describe('Chunkers', () => {
   test('textChunker', () => {
@@ -21,35 +19,27 @@ describe('Chunkers', () => {
     })
     const markdownContent = await getInitialMarkdownContent(cfg)
 
-    const thisPayload = await getPayload({
-      config: cfg,
-      key: `chunkers-test-${Date.now()}`,
-      cron: true,
-    })
+    // chunkRichText only needs the SanitizedConfig for Lexical editor setup,
+    // no real db required
+    const chunks = await chunkRichText(markdownContent, cfg)
 
-    try {
-      const chunks = await chunkRichText(markdownContent, thisPayload)
+    expect(chunks.length).toBe(3)
 
-      expect(chunks.length).toBe(3)
+    // Intro chunk
+    expect(chunks[0]).toContain('Title')
+    expect(chunks[0]).toContain('Quote')
+    expect(chunks[0]).toContain('Paragraph 0')
 
-      // Intro chunk
-      expect(chunks[0]).toContain('Title')
-      expect(chunks[0]).toContain('Quote')
-      expect(chunks[0]).toContain('Paragraph 0')
+    // First H2 section
+    expect(chunks[1]).toContain('## Header 1')
+    expect(chunks[1]).toContain('Paragraph 1')
+    expect(chunks[1]).toContain('Paragraph 2')
+    expect(chunks[1]).toContain('Paragraph 3')
 
-      // First H2 section
-      expect(chunks[1]).toContain('## Header 1')
-      expect(chunks[1]).toContain('Paragraph 1')
-      expect(chunks[1]).toContain('Paragraph 2')
-      expect(chunks[1]).toContain('Paragraph 3')
-
-      // Second H2 section
-      expect(chunks[2]).toContain('## Header 2')
-      expect(chunks[2]).toContain('Paragraph 4')
-      expect(chunks[2]).toContain('Paragraph 5')
-      expect(chunks[2]).toContain('Paragraph 6')
-    } finally {
-      await destroyPayload(thisPayload)
-    }
+    // Second H2 section
+    expect(chunks[2]).toContain('## Header 2')
+    expect(chunks[2]).toContain('Paragraph 4')
+    expect(chunks[2]).toContain('Paragraph 5')
+    expect(chunks[2]).toContain('Paragraph 6')
   })
 })

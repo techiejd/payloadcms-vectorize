@@ -27,15 +27,13 @@ const BULK_QUEUE_NAMES_1 = {
 
 describe('Bulk embed - version bump', () => {
   let post: any
-  const payloadsToDestroy: any[] = []
+  let payload1: any = null
   beforeAll(async () => {
     await createTestDb({ dbName })
   })
 
   afterAll(async () => {
-    for (const p of payloadsToDestroy) {
-      await destroyPayload(p)
-    }
+    await destroyPayload(payload1)
   })
 
   test('version bump re-embeds all even without updates', async () => {
@@ -64,8 +62,6 @@ describe('Bulk embed - version bump', () => {
       })
     ).payload
 
-    payloadsToDestroy.push(payload0)
-
     post = await payload0.create({ collection: 'posts', data: { title: 'Old' } as any })
 
     const vectorizedPayload0 = getVectorizedPayload(payload0)
@@ -74,7 +70,6 @@ describe('Bulk embed - version bump', () => {
 
     await waitForBulkJobs(payload0)
 
-    // Debug: log embeddings after first run
     const embeds0 = await payload0.find({
       collection: 'default',
       where: { docId: { equals: String(post.id) } },
@@ -82,7 +77,10 @@ describe('Bulk embed - version bump', () => {
     expect(embeds0.totalDocs).toBe(1)
     expect(embeds0.docs[0].embeddingVersion).toBe('old-version')
 
-    const payload1 = (
+    // Destroy payload0 before creating payload1 to prevent cron worker interference
+    await destroyPayload(payload0)
+
+    payload1 = (
       await buildPayloadWithIntegration({
         dbName,
         pluginOpts: {
@@ -107,8 +105,6 @@ describe('Bulk embed - version bump', () => {
         skipMigrations: true,
       })
     ).payload
-
-    payloadsToDestroy.push(payload1)
 
     const vectorizedPayload1 = getVectorizedPayload(payload1)
     const result1 = await vectorizedPayload1?.bulkEmbed({ knowledgePool: 'default' })

@@ -135,7 +135,7 @@ describe('extensionFields', () => {
       const knowledgePools: Record<string, KnowledgePoolDynamicConfig> = {
         default: defaultKnowledgePool,
       }
-      const searchHandler = createVectorSearchHandlers(knowledgePools).requestHandler
+      const searchHandler = createVectorSearchHandlers(knowledgePools, adapter).requestHandler
       const mockRequest = {
         json: async () => ({
           query: testQuery,
