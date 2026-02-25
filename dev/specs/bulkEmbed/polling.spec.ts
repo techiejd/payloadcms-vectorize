@@ -1,5 +1,5 @@
 import type { Payload } from 'payload'
-import { beforeAll, describe, expect, test, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest'
 import { BULK_EMBEDDINGS_RUNS_SLUG } from '../../../src/collections/bulkEmbeddingsRuns.js'
 import {
   BULK_QUEUE_NAMES,
@@ -7,6 +7,7 @@ import {
   buildPayloadWithIntegration,
   createMockBulkEmbeddings,
   createTestDb,
+  destroyPayload,
   waitForBulkJobs,
 } from '../utils.js'
 import { getVectorizedPayload } from 'payloadcms-vectorize'
@@ -49,6 +50,10 @@ describe('Bulk embed - polling requeue', () => {
     payload = built.payload
   })
 
+  afterAll(async () => {
+    await destroyPayload(payload)
+  })
+
   test('polling requeues when non-terminal then succeeds', async () => {
     const post = await payload.create({ collection: 'posts', data: { title: 'Loop' } as any })
     const queueSpy = vi.spyOn(payload.jobs, 'queue')
@@ -59,12 +64,12 @@ describe('Bulk embed - polling requeue', () => {
     await waitForBulkJobs(payload, 15000)
 
     expect(queueSpy).toHaveBeenNthCalledWith(
-      2, // 2nd call
-      expect.objectContaining({ task: 'payloadcms-vectorize:poll-or-complete-bulk-embedding' }),
+      3, // 3rd call - per-batch task queued from worker (1=coordinator, 2=worker)
+      expect.objectContaining({ task: 'payloadcms-vectorize:poll-or-complete-single-batch' }),
     )
     expect(queueSpy).toHaveBeenNthCalledWith(
-      3, // 3rd call
-      expect.objectContaining({ task: 'payloadcms-vectorize:poll-or-complete-bulk-embedding' }),
+      4, // 4th call - per-batch task re-queued after 'running' status
+      expect.objectContaining({ task: 'payloadcms-vectorize:poll-or-complete-single-batch' }),
     )
 
     const embeds = await payload.find({

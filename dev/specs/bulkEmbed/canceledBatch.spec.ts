@@ -1,11 +1,12 @@
 import type { Payload } from 'payload'
-import { beforeAll, describe, expect, test } from 'vitest'
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import {
   BULK_QUEUE_NAMES,
   DEFAULT_DIMS,
   buildPayloadWithIntegration,
   createMockBulkEmbeddings,
   createTestDb,
+  destroyPayload,
   waitForBulkJobs,
 } from '../utils.js'
 import { makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
@@ -49,6 +50,10 @@ describe('Bulk embed - canceled batch', () => {
     })
     payload = built.payload
     vectorizedPayload = getVectorizedPayload(payload)
+  })
+
+  afterAll(async () => {
+    await destroyPayload(payload)
   })
 
   test('canceled batch marks entire run as failed', async () => {

@@ -1,11 +1,12 @@
 import type { Payload } from 'payload'
-import { beforeAll, describe, expect, test } from 'vitest'
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import {
   BULK_QUEUE_NAMES,
   DEFAULT_DIMS,
   buildPayloadWithIntegration,
   createMockBulkEmbeddings,
   createTestDb,
+  destroyPayload,
   waitForBulkJobs,
 } from '../utils.js'
 import { makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
@@ -51,6 +52,10 @@ describe('Bulk embed - multiple chunks with extension fields', () => {
       key: `multichunk-${Date.now()}`,
     })
     payload = built.payload
+  })
+
+  afterAll(async () => {
+    await destroyPayload(payload)
   })
 
   test('multiple chunks keep their respective extension fields', async () => {

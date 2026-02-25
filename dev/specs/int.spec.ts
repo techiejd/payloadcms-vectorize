@@ -1,6 +1,6 @@
 import type { Payload, SanitizedConfig } from 'payload'
 
-import { beforeAll, describe, expect, test } from 'vitest'
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
 import { chunkRichText, chunkText } from 'helpers/chunkers.js'
 import { createHeadlessEditor } from '@payloadcms/richtext-lexical/lexical/headless'
@@ -13,7 +13,11 @@ import {
 import { $createHeadingNode } from '@payloadcms/richtext-lexical/lexical/rich-text'
 import { editorConfigFactory, getEnabledNodes, lexicalEditor } from '@payloadcms/richtext-lexical'
 import { DIMS, getInitialMarkdownContent } from './constants.js'
-import { createTestDb, waitForVectorizationJobs } from './utils.js'
+import {
+  createTestDb,
+  destroyPayload,
+  waitForVectorizationJobs,
+} from './utils.js'
 import { getPayload } from 'payload'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { buildConfig } from 'payload'
@@ -96,6 +100,10 @@ describe('Plugin integration tests', () => {
     })
 
     markdownContent = await getInitialMarkdownContent(config)
+  })
+
+  afterAll(async () => {
+    await destroyPayload(payload)
   })
 
   test('creates embeddings on create', async () => {

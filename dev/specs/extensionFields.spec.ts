@@ -1,7 +1,11 @@
 import type { Payload } from 'payload'
-import { beforeAll, describe, expect, test } from 'vitest'
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { postgresAdapter } from '@payloadcms/db-postgres'
-import { createTestDb, waitForVectorizationJobs } from './utils.js'
+import {
+  createTestDb,
+  destroyPayload,
+  waitForVectorizationJobs,
+} from './utils.js'
 import { getPayload, buildConfig } from 'payload'
 import { chunkText, chunkRichText } from 'helpers/chunkers.js'
 import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
@@ -116,6 +120,10 @@ describe('Extension fields integration tests', () => {
       key: `extension-fields-test-${Date.now()}`,
       cron: true,
     })
+  })
+
+  afterAll(async () => {
+    await destroyPayload(payload)
   })
 
   test('extension field values are stored with embeddings', async () => {

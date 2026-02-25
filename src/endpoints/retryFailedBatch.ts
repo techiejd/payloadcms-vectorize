@@ -210,10 +210,10 @@ export async function retryBatch<TPoolNames extends KnowledgePoolName = Knowledg
     })
   }
 
-  // Queue the poll-or-complete task
+  // Queue a per-batch task for the retried batch
   await payload.jobs.queue<typeof TASK_SLUG_POLL_OR_COMPLETE_BULK_EMBEDDING>({
     task: TASK_SLUG_POLL_OR_COMPLETE_BULK_EMBEDDING,
-    input: { runId: String(runId) },
+    input: { runId: String(runId), batchId: String(newBatch.id) },
     ...(queueName ? { queue: queueName } : {}),
   })
 

@@ -4,7 +4,7 @@ import { postgresAdapter } from '@payloadcms/db-postgres'
 import { buildConfig, getPayload } from 'payload'
 import { createPostgresVectorIntegration } from '../../src/index.js'
 import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from '@shared-test/helpers/embed'
-import { createTestDb } from './utils.js'
+import { createTestDb, destroyPayload } from './utils.js'
 import { DIMS } from './constants.js'
 
 const createVectorizeIntegration = createPostgresVectorIntegration
@@ -75,6 +75,10 @@ describe('Migration CLI integration tests', () => {
       })
 
       payload = await getPayload({ config, cron: true })
+    })
+
+    afterAll(async () => {
+      await destroyPayload(payload)
     })
 
     test('VectorizedPayload has _staticConfigs via getDbAdapterCustom', async () => {
@@ -159,6 +163,10 @@ describe('Migration CLI integration tests', () => {
       })
     })
 
+    afterAll(async () => {
+      await destroyPayload(payload)
+    })
+
     test('vector search fails with descriptive error when embedding column missing', async () => {
       const { getVectorizedPayload } = await import('payloadcms-vectorize')
       const vectorizedPayload = getVectorizedPayload(payload)
@@ -207,7 +215,7 @@ describe('Migration CLI integration tests', () => {
     })
 
     afterAll(async () => {
-      // Cleanup: remove test migrations directory
+      await destroyPayload(autoPayload)
       if (existsSync(migrationsDir)) {
         rmSync(migrationsDir, { recursive: true, force: true })
       }
@@ -429,6 +437,7 @@ describe('Migration CLI integration tests', () => {
     })
 
     afterAll(async () => {
+      await destroyPayload(dimsPayload)
       if (existsSync(migrationsDir)) {
         rmSync(migrationsDir, { recursive: true, force: true })
       }
@@ -729,6 +738,7 @@ describe('Migration CLI integration tests', () => {
     })
 
     afterAll(async () => {
+      await destroyPayload(multiPayload)
       if (existsSync(migrationsDir)) {
         rmSync(migrationsDir, { recursive: true, force: true })
       }

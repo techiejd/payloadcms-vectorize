@@ -3,7 +3,7 @@ import type { Payload, SanitizedConfig } from 'payload'
 import config from '@payload-config'
 import { getPayload } from 'payload'
 import { getInitialMarkdownContent } from './constants.js'
-import { waitForVectorizationJobs, waitForBulkJobs } from './utils.js'
+import { destroyPayload, waitForVectorizationJobs, waitForBulkJobs } from './utils.js'
 import { testEmbeddingVersion } from 'helpers/embed.js'
 import { devUser } from 'helpers/credentials.js'
 import { BULK_EMBEDDINGS_RUNS_SLUG } from '../../src/collections/bulkEmbeddingsRuns.js'
@@ -64,6 +64,10 @@ test.describe('Vector embedding e2e tests', () => {
     // Setup: Create a post and wait for realtime embedding
     _config = await config
     payload = await getPayload({ config: _config, key: `e2e-test-${Date.now()}` })
+  })
+
+  test.afterAll(async () => {
+    await destroyPayload(payload)
   })
 
   test('querying the endpoint should return the title with testEmbeddingVersion', async ({

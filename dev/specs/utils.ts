@@ -277,3 +277,25 @@ export const clearAllCollections = async (pl: Payload) => {
   await safeDelete('payload-jobs')
 }
 
+/** Safely destroy a Payload instance (stops crons, closes DB pool). */
+export async function destroyPayload(payload: Payload | null | undefined) {
+  if (payload) await payload.destroy()
+}
+
+export async function createSucceededBaselineRun(
+  payload: Payload,
+  {
+    version,
+    completedAt = new Date().toISOString(),
+  }: { version?: string; completedAt?: string } = {},
+) {
+  return (payload as any).create({
+    collection: BULK_EMBEDDINGS_RUNS_SLUG,
+    data: {
+      pool: 'default',
+      embeddingVersion: version ?? '',
+      status: 'succeeded',
+      completedAt,
+    },
+  })
+}
