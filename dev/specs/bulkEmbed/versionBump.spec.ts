@@ -44,90 +44,101 @@ describe('Bulk embed - version bump', () => {
   })
 
   test('version bump re-embeds all even without updates', async () => {
-    const payload0 = (
-      await buildPayloadWithIntegration({
-        dbName,
-        pluginOpts: {
-          dbAdapter: createMockAdapter(),
-          knowledgePools: {
-            default: {
-              collections: {
-                posts: {
-                  toKnowledgePool: async (doc: any) => [{ chunk: doc.title }],
+    // STEP 1: Build payload0 with old-version and run bulk embed
+    const payload0 = await test.step('create payload0 and embed with old-version', async () => {
+      const p = (
+        await buildPayloadWithIntegration({
+          dbName,
+          pluginOpts: {
+            dbAdapter: createMockAdapter(),
+            knowledgePools: {
+              default: {
+                collections: {
+                  posts: {
+                    toKnowledgePool: async (doc: any) => [{ chunk: doc.title }],
+                  },
+                },
+                embeddingConfig: {
+                  version: 'old-version',
+                  queryFn: makeDummyEmbedQuery(DIMS),
+                  bulkEmbeddingsFns: createMockBulkEmbeddings({ statusSequence: ['succeeded'] }),
                 },
               },
-              embeddingConfig: {
-                version: 'old-version',
-                queryFn: makeDummyEmbedQuery(DIMS),
-                bulkEmbeddingsFns: createMockBulkEmbeddings({ statusSequence: ['succeeded'] }),
-              },
             },
+            realtimeQueueName: QUEUE_NAMES_0.realtimeQueueName,
+            bulkQueueNames: QUEUE_NAMES_0.bulkQueueNames,
           },
-          realtimeQueueName: QUEUE_NAMES_0.realtimeQueueName,
-          bulkQueueNames: QUEUE_NAMES_0.bulkQueueNames,
-        },
-        key: `payload0-${Date.now()}`,
-      })
-    ).payload
+          key: `payload0-${Date.now()}`,
+        })
+      ).payload
+      payloadsToDestroy.push(p)
 
-    payloadsToDestroy.push(payload0)
+      post = await p.create({ collection: 'posts', data: { title: 'Old' } as any })
 
-    post = await payload0.create({ collection: 'posts', data: { title: 'Old' } as any })
+      const vectorizedPayload0 = getVectorizedPayload(p)
+      const result0 = await vectorizedPayload0?.bulkEmbed({ knowledgePool: 'default' })
+      expectGoodResult(result0)
 
-    const vectorizedPayload0 = getVectorizedPayload(payload0)
-    const result0 = await vectorizedPayload0?.bulkEmbed({ knowledgePool: 'default' })
-    expectGoodResult(result0)
-
-    await waitForBulkJobs(payload0)
-
-    const embeds0 = await payload0.find({
-      collection: 'default',
-      where: { docId: { equals: String(post.id) } },
+      await waitForBulkJobs(p, 30000)
+      return p
     })
-    expect(embeds0.totalDocs).toBe(1)
-    expect(embeds0.docs[0].embeddingVersion).toBe('old-version')
 
-    const payload1 = (
-      await buildPayloadWithIntegration({
-        dbName,
-        pluginOpts: {
-          dbAdapter: createMockAdapter(),
-          knowledgePools: {
-            default: {
-              collections: {
-                posts: {
-                  toKnowledgePool: async (doc: any) => [{ chunk: doc.title }],
+    // STEP 2: Verify payload0's embeddings before proceeding
+    await test.step('verify old-version embedding exists', async () => {
+      const embeds0 = await payload0.find({
+        collection: 'default',
+        where: { docId: { equals: String(post.id) } },
+      })
+      expect(embeds0.totalDocs).toBe(1)
+      expect(embeds0.docs[0].embeddingVersion).toBe('old-version')
+    })
+
+    // STEP 3: Build payload1 with new-version and run bulk embed
+    const payload1 = await test.step('create payload1 and embed with new-version', async () => {
+      const p = (
+        await buildPayloadWithIntegration({
+          dbName,
+          pluginOpts: {
+            dbAdapter: createMockAdapter(),
+            knowledgePools: {
+              default: {
+                collections: {
+                  posts: {
+                    toKnowledgePool: async (doc: any) => [{ chunk: doc.title }],
+                  },
+                },
+                embeddingConfig: {
+                  version: 'new-version',
+                  queryFn: makeDummyEmbedQuery(DIMS),
+                  bulkEmbeddingsFns: createMockBulkEmbeddings({ statusSequence: ['succeeded'] }),
                 },
               },
-              embeddingConfig: {
-                version: 'new-version',
-                queryFn: makeDummyEmbedQuery(DIMS),
-                bulkEmbeddingsFns: createMockBulkEmbeddings({ statusSequence: ['succeeded'] }),
-              },
             },
+            realtimeQueueName: QUEUE_NAMES_1.realtimeQueueName,
+            bulkQueueNames: QUEUE_NAMES_1.bulkQueueNames,
           },
-          realtimeQueueName: QUEUE_NAMES_1.realtimeQueueName,
-          bulkQueueNames: QUEUE_NAMES_1.bulkQueueNames,
-        },
-        key: `payload1-${Date.now()}`,
-        skipMigrations: true,
-      })
-    ).payload
+          key: `payload1-${Date.now()}`,
+          skipMigrations: true,
+        })
+      ).payload
+      payloadsToDestroy.push(p)
 
-    payloadsToDestroy.push(payload1)
+      const vectorizedPayload1 = getVectorizedPayload(p)
+      const result1 = await vectorizedPayload1?.bulkEmbed({ knowledgePool: 'default' })
+      expectGoodResult(result1)
 
-    const vectorizedPayload1 = getVectorizedPayload(payload1)
-    const result1 = await vectorizedPayload1?.bulkEmbed({ knowledgePool: 'default' })
-    expectGoodResult(result1)
-
-    await waitForBulkJobs(payload1)
-
-    const embeds1 = await payload1.find({
-      collection: 'default',
-      where: { docId: { equals: String(post.id) } },
+      await waitForBulkJobs(p, 30000)
+      return p
     })
 
-    expect(embeds1.totalDocs).toBe(1)
-    expect(embeds1.docs[0].embeddingVersion).toBe('new-version')
+    // STEP 4: Verify new-version replaced old-version
+    await test.step('verify new-version embedding replaced old', async () => {
+      const embeds1 = await payload1.find({
+        collection: 'default',
+        where: { docId: { equals: String(post.id) } },
+      })
+      expect(embeds1.totalDocs).toBe(1)
+      expect(embeds1.docs[0].embeddingVersion).toBe('new-version')
+    })
   })
 })
