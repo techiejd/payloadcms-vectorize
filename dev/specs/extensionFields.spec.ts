@@ -1,9 +1,10 @@
 import type { Payload } from 'payload'
-import { beforeAll, describe, expect, test } from 'vitest'
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { buildDummyConfig, integration, plugin } from './constants.js'
 import {
   createTestDb,
+  destroyPayload,
   waitForVectorizationJobs,
 } from './utils.js'
 import { getPayload } from 'payload'
@@ -114,6 +115,10 @@ describe('Extension fields integration tests', () => {
       key: `extension-fields-test-${Date.now()}`,
       cron: true,
     })
+  })
+
+  afterAll(async () => {
+    await destroyPayload(payload)
   })
 
   test('extension fields are added to the embeddings table schema', async () => {

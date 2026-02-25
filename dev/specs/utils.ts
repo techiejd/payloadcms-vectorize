@@ -146,7 +146,7 @@ export async function waitForBulkJobs(payload: Payload, maxWaitMs = 10000) {
     payload,
     [
       'payloadcms-vectorize:prepare-bulk-embedding',
-      'payloadcms-vectorize:poll-or-complete-bulk-embedding',
+      'payloadcms-vectorize:poll-or-complete-single-batch',
     ],
     maxWaitMs,
   )
@@ -354,6 +354,11 @@ export const clearAllCollections = async (pl: Payload) => {
   await safeDelete('default')
   await safeDelete('posts')
   await safeDelete('payload-jobs')
+}
+
+/** Safely destroy a Payload instance (stops crons, closes DB pool). */
+export async function destroyPayload(payload: Payload | null | undefined) {
+  if (payload) await payload.destroy()
 }
 
 export async function createSucceededBaselineRun(

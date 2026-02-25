@@ -1,5 +1,5 @@
 import type { Payload } from 'payload'
-import { beforeAll, describe, expect, test } from 'vitest'
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { BULK_EMBEDDINGS_RUNS_SLUG } from '../../../src/collections/bulkEmbeddingsRuns.js'
 import { BULK_EMBEDDINGS_BATCHES_SLUG } from '../../../src/collections/bulkEmbeddingsBatches.js'
 import {
@@ -8,6 +8,7 @@ import {
   buildPayloadWithIntegration,
   createMockBulkEmbeddings,
   createTestDb,
+  destroyPayload,
   waitForBulkJobs,
 } from '../utils.js'
 import { makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
@@ -22,6 +23,10 @@ describe('Bulk embed - ingestion validation failures', () => {
 
   beforeAll(async () => {
     await createTestDb({ dbName })
+  })
+
+  afterAll(async () => {
+    await destroyPayload(payload)
   })
 
   test('malformed chunk entry fails the bulk embedding run', async () => {

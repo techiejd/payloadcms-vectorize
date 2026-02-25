@@ -11,7 +11,7 @@ describe('jobs.tasks merging', () => {
         { slug: 'payloadcms-vectorize:vectorize', handler: expect.any(Function) },
         { slug: 'payloadcms-vectorize:prepare-bulk-embedding', handler: expect.any(Function) },
         {
-          slug: 'payloadcms-vectorize:poll-or-complete-bulk-embedding',
+          slug: 'payloadcms-vectorize:poll-or-complete-single-batch',
           handler: expect.any(Function),
         },
       ]),

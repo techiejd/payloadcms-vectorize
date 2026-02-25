@@ -1,6 +1,5 @@
 import {
   JsonObject,
-  PaginatedDocs,
   Payload,
   TaskConfig,
   TaskHandlerResult,
@@ -10,6 +9,7 @@ import {
   BatchSubmission,
   BulkEmbeddingOutput,
   CollectedEmbeddingInput,
+  CollectionVectorizeOption,
   KnowledgePoolDynamicConfig,
   KnowledgePoolName,
 } from '../types.js'
@@ -26,6 +26,10 @@ import toSnakeCase from 'to-snake-case'
 
 type PrepareBulkEmbeddingTaskInput = {
   runId: string
+  /** If set, this is a per-collection worker job */
+  collectionSlug?: string
+  /** Page within the collection (default: 1) */
+  page?: number
 }
 
 type PrepareBulkEmbeddingTaskOutput = {
@@ -39,18 +43,20 @@ type PrepareBulkEmbeddingTaskInputOutput = {
   output: PrepareBulkEmbeddingTaskOutput
 }
 
-type PollOrCompleteBulkEmbeddingTaskInput = {
+type PollOrCompleteSingleBatchTaskInput = {
   runId: string
+  batchId: string
 }
 
-type PollOrCompleteBulkEmbeddingTaskOutput = {
+type PollOrCompleteSingleBatchTaskOutput = {
   runId: string
+  batchId: string
   status: string
 }
 
-type PollOrCompleteBulkEmbeddingTaskInputOutput = {
-  input: PollOrCompleteBulkEmbeddingTaskInput
-  output: PollOrCompleteBulkEmbeddingTaskOutput
+type PollOrCompleteSingleBatchTaskInputOutput = {
+  input: PollOrCompleteSingleBatchTaskInput
+  output: PollOrCompleteSingleBatchTaskOutput
 }
 
 const TERMINAL_STATUSES = new Set(['succeeded', 'failed', 'canceled', 'retried'])
@@ -87,12 +93,159 @@ async function loadRunAndConfig({
   return { run, poolName, dynamicConfig }
 }
 
+/**
+ * Check if all batches for a run are terminal, and if so finalize the run.
+ * This function is idempotent - safe to call concurrently from multiple per-batch tasks.
+ */
+async function finalizeRunIfComplete(args: {
+  payload: Payload
+  runId: string
+  poolName: KnowledgePoolName
+  callbacks: {
+    onError?: (args: {
+      providerBatchIds: string[]
+      error: Error
+      failedChunkData?: FailedChunkData[]
+      failedChunkCount?: number
+    }) => Promise<void>
+  }
+}): Promise<{ finalized: boolean; status?: string }> {
+  const { payload, runId, poolName, callbacks } = args
+
+  // Check if run is already terminal (prevents double-finalization race)
+  const currentRun = await payload.findByID({
+    collection: BULK_EMBEDDINGS_RUNS_SLUG,
+    id: runId,
+  })
+  if (TERMINAL_STATUSES.has((currentRun as any).status)) {
+    return { finalized: true, status: (currentRun as any).status }
+  }
+
+  // Stream through batches page-by-page, aggregating without storing them all in memory
+  const runIdNum = parseInt(runId, 10)
+  const PAGE_SIZE = 100
+  let page = 1
+  let totalBatchCount = 0
+  let allTerminal = true
+  let hasAnySucceeded = false
+  let allCanceled = true
+  let totalSucceeded = 0
+  let totalFailed = 0
+  const allFailedChunkData: FailedChunkData[] = []
+  const succeededBatchIds: number[] = []
+  const providerBatchIds: string[] = []
+
+  while (true) {
+    const result = await payload.find({
+      collection: BULK_EMBEDDINGS_BATCHES_SLUG,
+      where: { run: { equals: runIdNum } },
+      limit: PAGE_SIZE,
+      page,
+      sort: 'batchIndex',
+    })
+    const docs = (result as any)?.docs || []
+
+    for (const batch of docs) {
+      totalBatchCount++
+      const status = batch.status as string
+      providerBatchIds.push(batch.providerBatchId as string)
+
+      if (!TERMINAL_STATUSES.has(status)) allTerminal = false
+      if (status === 'succeeded') hasAnySucceeded = true
+      if (status !== 'canceled') allCanceled = false
+
+      if (status === 'succeeded') {
+        totalSucceeded += batch.succeededCount || 0
+        totalFailed += batch.failedCount || 0
+        succeededBatchIds.push(parseInt(String(batch.id), 10))
+        if (Array.isArray(batch.failedChunkData)) {
+          allFailedChunkData.push(...batch.failedChunkData)
+        }
+      }
+    }
+
+    const totalPages = (result as any)?.totalPages ?? page
+    if (page >= totalPages || docs.length === 0) break
+    page++
+  }
+
+
+  if (totalBatchCount === 0) {
+    await payload.update({
+      id: runId,
+      collection: BULK_EMBEDDINGS_RUNS_SLUG,
+      data: {
+        status: 'succeeded',
+        inputs: 0,
+        succeeded: 0,
+        failed: 0,
+        completedAt: new Date().toISOString(),
+      },
+    })
+    return { finalized: true, status: 'succeeded' }
+  }
+
+  if (!allTerminal) {
+    return { finalized: false }
+  }
+
+  // All batches are terminal — finalize the run
+  if (allCanceled) {
+    await payload.update({
+      id: runId,
+      collection: BULK_EMBEDDINGS_RUNS_SLUG,
+      data: { status: 'canceled', completedAt: new Date().toISOString() },
+    })
+    return { finalized: true, status: 'canceled' }
+  }
+
+  const runStatus = hasAnySucceeded ? 'succeeded' : 'failed'
+
+  await payload.update({
+    id: runId,
+    collection: BULK_EMBEDDINGS_RUNS_SLUG,
+    data: {
+      status: runStatus,
+      succeeded: totalSucceeded,
+      failed: totalFailed,
+      failedChunkData: allFailedChunkData.length > 0 ? allFailedChunkData : undefined,
+      completedAt: new Date().toISOString(),
+    },
+  })
+
+  // Cleanup metadata for succeeded batches only
+  if (succeededBatchIds.length > 0) {
+    await payload.delete({
+      collection: BULK_EMBEDDINGS_INPUT_METADATA_SLUG,
+      where: { batch: { in: succeededBatchIds } },
+    })
+  }
+
+  // Call onError if there were any failures
+  if (callbacks.onError && (totalFailed > 0 || !hasAnySucceeded)) {
+    await callbacks.onError({
+      providerBatchIds,
+      error: new Error(
+        totalFailed > 0
+          ? `${totalFailed} chunk(s) failed during completion`
+          : 'All batches failed',
+      ),
+      failedChunkData: allFailedChunkData.length > 0 ? allFailedChunkData : undefined,
+      failedChunkCount: totalFailed > 0 ? totalFailed : undefined,
+    })
+  }
+
+  return { finalized: true, status: runStatus }
+}
+
 export const createPrepareBulkEmbeddingTask = ({
   knowledgePools,
   pollOrCompleteQueueName,
+  prepareBulkEmbedQueueName,
 }: {
   knowledgePools: Record<KnowledgePoolName, KnowledgePoolDynamicConfig>
   pollOrCompleteQueueName?: string
+  prepareBulkEmbedQueueName?: string
 }): TaskConfig<PrepareBulkEmbeddingTaskInputOutput> => {
   const task: TaskConfig<PrepareBulkEmbeddingTaskInputOutput> = {
     slug: 'payloadcms-vectorize:prepare-bulk-embedding',
@@ -104,7 +257,7 @@ export const createPrepareBulkEmbeddingTask = ({
         throw new Error('[payloadcms-vectorize] bulk embed runId is required')
       }
       const payload = req.payload
-      const { poolName, dynamicConfig } = await loadRunAndConfig({
+      const { run, poolName, dynamicConfig } = await loadRunAndConfig({
         payload,
         runId: input.runId,
         knowledgePools,
@@ -113,7 +266,76 @@ export const createPrepareBulkEmbeddingTask = ({
       const callbacks = dynamicConfig.embeddingConfig.bulkEmbeddingsFns!
       const embeddingVersion = dynamicConfig.embeddingConfig.version
 
-      // Find baseline run information
+      // =============================================
+      // COORDINATOR MODE: no collectionSlug in input
+      // =============================================
+      if (!input.collectionSlug) {
+        // Queue one worker per collection
+        const collectionSlugs = Object.keys(dynamicConfig.collections)
+        if (collectionSlugs.length === 0) {
+          // No collections configured - mark run as succeeded
+          await payload.update({
+            id: input.runId,
+            collection: BULK_EMBEDDINGS_RUNS_SLUG,
+            data: {
+              status: 'succeeded',
+              totalBatches: 0,
+              inputs: 0,
+              succeeded: 0,
+              failed: 0,
+              completedAt: new Date().toISOString(),
+            },
+          })
+          return { output: { runId: input.runId, status: 'succeeded', batchCount: 0 } }
+        }
+
+        for (const collectionSlug of collectionSlugs) {
+          await payload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
+            task: 'payloadcms-vectorize:prepare-bulk-embedding',
+            input: { runId: input.runId, collectionSlug, page: 1 },
+            req,
+            ...(prepareBulkEmbedQueueName ? { queue: prepareBulkEmbedQueueName } : {}),
+          })
+        }
+
+        // Update run status
+        await payload.update({
+          id: input.runId,
+          collection: BULK_EMBEDDINGS_RUNS_SLUG,
+          data: {
+            status: 'running',
+            submittedAt: new Date().toISOString(),
+          },
+        })
+
+        return { output: { runId: input.runId, status: 'coordinated' } }
+      }
+
+      // =============================================
+      // WORKER MODE: collectionSlug is set
+      // =============================================
+
+      // Early exit if run is already terminal
+      if (TERMINAL_STATUSES.has((run as any).status)) {
+        return { output: { runId: input.runId, status: (run as any).status } }
+      }
+
+      const collectionSlug = input.collectionSlug
+      const collectionConfig = dynamicConfig.collections[collectionSlug]
+      if (!collectionConfig) {
+        throw new Error(
+          `[payloadcms-vectorize] collection "${collectionSlug}" not found in pool "${poolName}"`,
+        )
+      }
+
+      const DEFAULT_BATCH_LIMIT = 1000
+      const batchLimit =
+        collectionConfig.batchLimit && collectionConfig.batchLimit > 0
+          ? collectionConfig.batchLimit
+          : DEFAULT_BATCH_LIMIT
+      const page = input.page ?? 1
+
+      // Compute baseline/version for filtering
       const latestSucceededRun = await payload.find({
         collection: BULK_EMBEDDINGS_RUNS_SLUG,
         where: {
@@ -126,28 +348,56 @@ export const createPrepareBulkEmbeddingTask = ({
         limit: 1,
         sort: '-completedAt',
       })
-
       const baselineRun = (latestSucceededRun as any)?.docs?.[0]
       const baselineVersion: string | undefined = baselineRun?.embeddingVersion
       const lastBulkCompletedAt: string | undefined = baselineRun?.completedAt
       const versionMismatch = baselineVersion !== undefined && baselineVersion !== embeddingVersion
+      const includeAll = versionMismatch || !baselineRun
+      const lastCompletedAtDate = lastBulkCompletedAt ? new Date(lastBulkCompletedAt) : undefined
 
-      // Stream missing embeddings and create batches
-      let result
+      // Build where clause for this collection
+      const where = includeAll
+        ? undefined
+        : lastCompletedAtDate
+          ? { updatedAt: { greater_than: lastCompletedAtDate.toISOString() } }
+          : undefined
+
+      // STEP 1: Query the page
+      const queryResult = await payload.find({
+        collection: collectionSlug,
+        where,
+        limit: batchLimit,
+        page,
+        sort: 'id',
+      })
+
+      // STEP 2: If there's a next page, queue continuation BEFORE processing
+      if (queryResult.nextPage) {
+        await payload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
+          task: 'payloadcms-vectorize:prepare-bulk-embedding',
+          input: { runId: input.runId, collectionSlug, page: queryResult.nextPage },
+          req,
+          ...(prepareBulkEmbedQueueName ? { queue: prepareBulkEmbedQueueName } : {}),
+        })
+      }
+
+      // STEP 3: Process this page's docs
+      let totalResult: { batchCount: number; totalInputs: number; batchIds: (string | number)[] }
       try {
-        result = await streamAndBatchMissingEmbeddings({
+        totalResult = await streamAndBatchDocs({
           payload,
           runId: input.runId,
           poolName,
-          dynamicConfig,
+          collectionSlug,
+          collectionConfig,
+          docs: (queryResult.docs || []) as Array<JsonObject & TypeWithID>,
           embeddingVersion,
-          lastBulkCompletedAt,
-          versionMismatch,
-          hasBaseline: Boolean(baselineRun),
+          includeAll,
+          lastCompletedAtDate,
           addChunk: callbacks.addChunk,
         })
       } catch (error) {
-        // Ingestion failed (e.g., validation error) - mark run as failed
+        // Ingestion failed - mark run as failed
         const errorMessage = (error as Error).message || String(error)
         await payload.update({
           id: input.runId,
@@ -158,49 +408,48 @@ export const createPrepareBulkEmbeddingTask = ({
             completedAt: new Date().toISOString(),
           },
         })
-        // Re-throw so Payload's job system marks the job as failed
         throw error
       }
 
-      if (result.totalInputs === 0) {
-        // No inputs to process - mark run as succeeded
+
+      // STEP 4: Accumulate counts on run record
+      if (totalResult.totalInputs > 0) {
+        const currentRun = await payload.findByID({
+          collection: BULK_EMBEDDINGS_RUNS_SLUG,
+          id: input.runId,
+        })
+        const existingInputs = (currentRun as any).inputs ?? 0
+        const existingBatches = (currentRun as any).totalBatches ?? 0
         await payload.update({
           id: input.runId,
           collection: BULK_EMBEDDINGS_RUNS_SLUG,
           data: {
-            status: 'succeeded',
-            totalBatches: 0,
-            inputs: 0,
-            succeeded: 0,
-            failed: 0,
-            completedAt: new Date().toISOString(),
+            totalBatches: existingBatches + totalResult.batchCount,
+            inputs: existingInputs + totalResult.totalInputs,
           },
         })
-        return { output: { runId: input.runId, status: 'succeeded', batchCount: 0 } }
       }
 
-      // Update run with batch count and total inputs
-      await payload.update({
-        id: input.runId,
-        collection: BULK_EMBEDDINGS_RUNS_SLUG,
-        data: {
-          status: 'running',
-          totalBatches: result.batchCount,
-          inputs: result.totalInputs,
-          submittedAt: new Date().toISOString(),
-        },
-      })
+      // STEP 5: Queue per-batch polling tasks
+      for (const batchId of totalResult.batchIds) {
+        await payload.jobs.queue<'payloadcms-vectorize:poll-or-complete-single-batch'>({
+          task: 'payloadcms-vectorize:poll-or-complete-single-batch',
+          input: { runId: input.runId, batchId: String(batchId) },
+          req,
+          ...(pollOrCompleteQueueName ? { queue: pollOrCompleteQueueName } : {}),
+        })
+      }
 
-      // Queue the poll task to monitor all batches
-      await payload.jobs.queue<'payloadcms-vectorize:poll-or-complete-bulk-embedding'>({
-        task: 'payloadcms-vectorize:poll-or-complete-bulk-embedding',
-        input: { runId: input.runId },
-        req,
-        ...(pollOrCompleteQueueName ? { queue: pollOrCompleteQueueName } : {}),
-      })
+      // If this worker produced 0 batches and has no continuation, try to finalize.
+      // finalizeRunIfComplete is idempotent: if other workers created batches that
+      // aren't terminal yet, it returns { finalized: false } and the polling tasks
+      // will handle finalization later.
+      if (totalResult.batchCount === 0 && !queryResult.nextPage) {
+        await finalizeRunIfComplete({ payload, runId: input.runId, poolName, callbacks })
+      }
 
       return {
-        output: { runId: input.runId, status: 'prepared', batchCount: result.batchCount },
+        output: { runId: input.runId, status: 'prepared', batchCount: totalResult.batchCount },
       }
     },
   }
@@ -208,277 +457,114 @@ export const createPrepareBulkEmbeddingTask = ({
   return task
 }
 
-export const createPollOrCompleteBulkEmbeddingTask = ({
+export const createPollOrCompleteSingleBatchTask = ({
   knowledgePools,
   pollOrCompleteQueueName,
 }: {
   knowledgePools: Record<KnowledgePoolName, KnowledgePoolDynamicConfig>
   pollOrCompleteQueueName?: string
-}): TaskConfig<PollOrCompleteBulkEmbeddingTaskInputOutput> => {
-  const task: TaskConfig<PollOrCompleteBulkEmbeddingTaskInputOutput> = {
-    slug: 'payloadcms-vectorize:poll-or-complete-bulk-embedding',
+}): TaskConfig<PollOrCompleteSingleBatchTaskInputOutput> => {
+  const task: TaskConfig<PollOrCompleteSingleBatchTaskInputOutput> = {
+    slug: 'payloadcms-vectorize:poll-or-complete-single-batch',
     handler: async ({
       input,
       req,
-    }): Promise<TaskHandlerResult<PollOrCompleteBulkEmbeddingTaskInputOutput>> => {
-      if (!input?.runId) {
-        throw new Error('[payloadcms-vectorize] bulk embed runId is required')
+    }): Promise<TaskHandlerResult<PollOrCompleteSingleBatchTaskInputOutput>> => {
+      if (!input?.runId || !input?.batchId) {
+        throw new Error('[payloadcms-vectorize] single batch task requires runId and batchId')
       }
+      const { runId, batchId } = input
       const payload = req.payload
       const { run, poolName, dynamicConfig } = await loadRunAndConfig({
         payload,
-        runId: input.runId,
+        runId,
         knowledgePools,
       })
 
       const callbacks = dynamicConfig.embeddingConfig.bulkEmbeddingsFns!
 
-      // Check if run is already terminal
-      const currentStatus = (run as any).status
-      if (TERMINAL_STATUSES.has(currentStatus)) {
-        return { output: { runId: input.runId, status: currentStatus } }
+      // Early exit if run is already terminal
+      if (TERMINAL_STATUSES.has((run as any).status)) {
+        return { output: { runId, batchId, status: (run as any).status } }
       }
 
-      // Load all batches for this run with pagination to handle >1000 batches
-      // Convert runId to number for postgres relationship queries
-      const runIdNum = parseInt(input.runId, 10)
-      const batches: any[] = []
-      let batchPage = 1
-      const batchLimit = 100 // Smaller pages for better memory management
+      // Load this specific batch
+      const batch = await payload.findByID({
+        collection: BULK_EMBEDDINGS_BATCHES_SLUG,
+        id: batchId,
+      })
 
-      while (true) {
-        const batchesResult = await payload.find({
+      // If batch is already terminal, just check if run can be finalized
+      if (TERMINAL_STATUSES.has((batch as any).status)) {
+        await finalizeRunIfComplete({ payload, runId, poolName, callbacks })
+        return { output: { runId, batchId, status: (batch as any).status } }
+      }
+
+      // Poll and complete this single batch
+      try {
+        const completionResult = await pollAndCompleteSingleBatch({
+          payload,
+          runId,
+          poolName,
+          batch,
+          callbacks,
+        })
+
+
+        // Update batch status and counts
+        await payload.update({
+          id: batchId,
           collection: BULK_EMBEDDINGS_BATCHES_SLUG,
-          where: { run: { equals: runIdNum } },
-          limit: batchLimit,
-          page: batchPage,
-          sort: 'batchIndex',
-        })
-        const pageDocs = (batchesResult as any)?.docs || []
-        batches.push(...pageDocs)
-
-        const totalPages = (batchesResult as any)?.totalPages ?? batchPage
-        if (batchPage >= totalPages || pageDocs.length === 0) break
-        batchPage++
-      }
-
-      if (batches.length === 0) {
-        // No batches found - this shouldn't happen but handle gracefully
-        await payload.update({
-          id: input.runId,
-          collection: BULK_EMBEDDINGS_RUNS_SLUG,
           data: {
-            status: 'failed',
-            error: 'No batches found for run',
-            completedAt: new Date().toISOString(),
-          },
-        })
-        return { output: { runId: input.runId, status: 'failed' } }
-      }
-
-      // Poll each non-terminal batch and complete succeeded ones incrementally
-      let anyRunning = false
-      let totalSucceeded = 0
-      let totalFailed = 0
-      const allFailedChunkData: FailedChunkData[] = []
-      const batchStatuses = new Map<string, string>() // Track batch statuses as we process
-
-      // Initialize with current statuses
-      for (const batch of batches) {
-        batchStatuses.set(String(batch.id), batch.status as string)
-        // Accumulate counts from already completed batches
-        if (TERMINAL_STATUSES.has(batch.status as string)) {
-          if (batch.status === 'succeeded') {
-            totalSucceeded += batch.succeededCount || 0
-            totalFailed += batch.failedCount || 0
-          }
-        }
-      }
-
-      for (const batch of batches) {
-        const batchStatus = batchStatuses.get(String(batch.id)) as string
-
-        // Skip batches that are already completed
-        if (TERMINAL_STATUSES.has(batchStatus)) {
-          continue
-        }
-
-        // Poll batch and complete if succeeded (streams embeddings via onChunk callback)
-        try {
-          const completionResult = await pollAndCompleteSingleBatch({
-            payload,
-            runId: input.runId,
-            poolName,
-            batch,
-            callbacks,
-          })
-
-          // Update batch status and counts
-          await payload.update({
-            id: batch.id,
-            collection: BULK_EMBEDDINGS_BATCHES_SLUG,
-            data: {
-              status: completionResult.status,
-              error: completionResult.error,
-              ...(TERMINAL_STATUSES.has(completionResult.status)
-                ? { completedAt: new Date().toISOString() }
-                : {}),
-              ...(completionResult.status === 'succeeded'
-                ? {
-                    succeededCount: completionResult.succeededCount,
-                    failedCount: completionResult.failedCount,
-                  }
-                : {}),
-            },
-          })
-
-          // Track the new status
-          batchStatuses.set(String(batch.id), completionResult.status)
-
-          // Accumulate counts from newly succeeded batches
-          if (completionResult.status === 'succeeded') {
-            totalSucceeded += completionResult.succeededCount
-            totalFailed += completionResult.failedCount
-            allFailedChunkData.push(...completionResult.failedChunkData)
-          }
-
-          // Track if still running (queued or running)
-          if (completionResult.status === 'queued' || completionResult.status === 'running') {
-            anyRunning = true
-          }
-          // Failed/canceled batches - leave them, can be re-run later
-        } catch (error) {
-          // Completion failed - mark batch as failed
-          const errorMessage = (error as Error).message || String(error)
-          await payload.update({
-            id: batch.id,
-            collection: BULK_EMBEDDINGS_BATCHES_SLUG,
-            data: {
-              status: 'failed',
-              error: `Completion failed: ${errorMessage}`,
-              completedAt: new Date().toISOString(),
-            },
-          })
-          batchStatuses.set(String(batch.id), 'failed')
-        }
-      }
-
-      // Check if all batches are complete
-      const allBatchesComplete = Array.from(batchStatuses.values()).every((status) =>
-        TERMINAL_STATUSES.has(status),
-      )
-
-      if (allBatchesComplete) {
-        // All batches are done - finalize the run
-        const hasAnySucceeded = Array.from(batchStatuses.values()).some(
-          (status) => status === 'succeeded',
-        )
-
-        // Check if any batches are failed (not just canceled) - we keep metadata for potential retries
-        const hasFailedBatches = Array.from(batchStatuses.values()).some(
-          (status) => status === 'failed',
-        )
-
-        await payload.update({
-          id: input.runId,
-          collection: BULK_EMBEDDINGS_RUNS_SLUG,
-          data: {
-            status: hasAnySucceeded ? 'succeeded' : 'failed',
-            succeeded: totalSucceeded,
-            failed: totalFailed,
-            failedChunkData: allFailedChunkData.length > 0 ? allFailedChunkData : undefined,
-            completedAt: new Date().toISOString(),
+            status: completionResult.status,
+            error: completionResult.error,
+            ...(TERMINAL_STATUSES.has(completionResult.status)
+              ? { completedAt: new Date().toISOString() }
+              : {}),
+            ...(completionResult.status === 'succeeded'
+              ? {
+                  succeededCount: completionResult.succeededCount,
+                  failedCount: completionResult.failedCount,
+                  failedChunkData:
+                    completionResult.failedChunkData.length > 0
+                      ? completionResult.failedChunkData
+                      : undefined,
+                }
+              : {}),
           },
         })
 
-        // Cleanup metadata for succeeded batches only
-        // Keep metadata for failed batches to allow retry functionality
-        const succeededBatchIds = Array.from(batchStatuses.entries())
-          .filter(([_, status]) => status === 'succeeded')
-          .map(([id, _]) => parseInt(id, 10))
-
-        if (succeededBatchIds.length > 0) {
-          await payload.delete({
-            collection: BULK_EMBEDDINGS_INPUT_METADATA_SLUG,
-            where: { batch: { in: succeededBatchIds } },
-          })
+        // If batch is now terminal, check if run should be finalized
+        if (TERMINAL_STATUSES.has(completionResult.status)) {
+          await finalizeRunIfComplete({ payload, runId, poolName, callbacks })
+          return { output: { runId, batchId, status: completionResult.status } }
         }
 
-        // Call onError if there were any failures
-        if (callbacks.onError && (totalFailed > 0 || !hasAnySucceeded)) {
-          const providerBatchIds = batches.map((b: any) => b.providerBatchId as string)
-          await callbacks.onError({
-            providerBatchIds,
-            error: new Error(
-              totalFailed > 0
-                ? `${totalFailed} chunk(s) failed during completion`
-                : 'All batches failed',
-            ),
-            failedChunkData: allFailedChunkData.length > 0 ? allFailedChunkData : undefined,
-            failedChunkCount: totalFailed > 0 ? totalFailed : undefined,
-          })
-        }
-
-        return {
-          output: {
-            runId: input.runId,
-            status: hasAnySucceeded ? 'succeeded' : 'failed',
-          },
-        }
-      }
-
-      // If still running, requeue this task
-      if (anyRunning) {
-        await payload.jobs.queue<'payloadcms-vectorize:poll-or-complete-bulk-embedding'>({
-          task: 'payloadcms-vectorize:poll-or-complete-bulk-embedding',
-          input: { runId: input.runId },
+        // Still running - re-queue self with polling delay
+        await payload.jobs.queue<'payloadcms-vectorize:poll-or-complete-single-batch'>({
+          task: 'payloadcms-vectorize:poll-or-complete-single-batch',
+          input: { runId, batchId },
           req,
           ...(pollOrCompleteQueueName ? { queue: pollOrCompleteQueueName } : {}),
         })
-        return { output: { runId: input.runId, status: 'polling' } }
-      }
 
-      // Edge case: allBatchesComplete is false but anyRunning is false
-      // This happens when all batches are in 'canceled' or 'failed' status but we didn't detect it above
-      // Check if all batches are canceled
-      const allCanceled = Array.from(batchStatuses.values()).every(
-        (status) => status === 'canceled',
-      )
-
-      if (allCanceled) {
+        return { output: { runId, batchId, status: completionResult.status } }
+      } catch (error) {
+        // Batch processing failed - mark batch as failed
+        const errorMessage = (error as Error).message || String(error)
         await payload.update({
-          id: input.runId,
-          collection: BULK_EMBEDDINGS_RUNS_SLUG,
+          id: batchId,
+          collection: BULK_EMBEDDINGS_BATCHES_SLUG,
           data: {
-            status: 'canceled',
+            status: 'failed',
+            error: `Completion failed: ${errorMessage}`,
             completedAt: new Date().toISOString(),
           },
         })
-        return { output: { runId: input.runId, status: 'canceled' } }
+        // Check if this was the last batch to complete
+        await finalizeRunIfComplete({ payload, runId, poolName, callbacks })
+        return { output: { runId, batchId, status: 'failed' } }
       }
-
-      // Fallback: mark as failed with diagnostic info
-      const statusCounts = Array.from(batchStatuses.values()).reduce(
-        (acc, status) => {
-          acc[status] = (acc[status] || 0) + 1
-          return acc
-        },
-        {} as Record<string, number>,
-      )
-      payload.logger.warn(
-        `[payloadcms-vectorize] Run ${input.runId} reached unexpected state. Batch statuses: ${JSON.stringify(statusCounts)}`,
-      )
-
-      await payload.update({
-        id: input.runId,
-        collection: BULK_EMBEDDINGS_RUNS_SLUG,
-        data: {
-          status: 'failed',
-          error: `Run reached unexpected state. Batch statuses: ${JSON.stringify(statusCounts)}`,
-          completedAt: new Date().toISOString(),
-        },
-      })
-      return { output: { runId: input.runId, status: 'failed' } }
     },
   }
 
@@ -486,150 +572,123 @@ export const createPollOrCompleteBulkEmbeddingTask = ({
 }
 
 /**
- * Stream through missing embeddings, calling addChunk for each.
+ * Process pre-fetched docs from a single collection, calling addChunk for each chunk.
  * User controls batching via addChunk return value.
  *
  * Single-pass approach using async generator to yield chunks sequentially.
  * This avoids the need for a pre-counting pass while correctly determining isLastChunk.
  */
-async function streamAndBatchMissingEmbeddings(args: {
+async function streamAndBatchDocs(args: {
   payload: Payload
   runId: string
   poolName: KnowledgePoolName
-  dynamicConfig: KnowledgePoolDynamicConfig
+  collectionSlug: string
+  collectionConfig: CollectionVectorizeOption
+  docs: Array<JsonObject & TypeWithID>
   embeddingVersion: string
-  lastBulkCompletedAt?: string
-  versionMismatch: boolean
-  hasBaseline: boolean
+  includeAll: boolean
+  lastCompletedAtDate?: Date
   addChunk: (args: {
     chunk: BulkEmbeddingInput
     isLastChunk: boolean
   }) => Promise<BatchSubmission | null>
-}): Promise<{ batchCount: number; totalInputs: number }> {
+}): Promise<{ batchCount: number; totalInputs: number; batchIds: (string | number)[] }> {
   const {
     payload,
     runId,
     poolName,
-    dynamicConfig,
+    collectionSlug,
+    collectionConfig,
+    docs,
     embeddingVersion,
-    lastBulkCompletedAt,
-    versionMismatch,
-    hasBaseline,
+    includeAll,
+    lastCompletedAtDate,
     addChunk,
   } = args
 
-  const includeAll = versionMismatch || !hasBaseline
-  const lastCompletedAtDate = lastBulkCompletedAt ? new Date(lastBulkCompletedAt) : undefined
-  const collectionSlugs = Object.keys(dynamicConfig.collections)
-
-  // Async generator that yields chunks one at a time
+  // Async generator that yields chunks one at a time from pre-fetched docs
   async function* generateChunks(): AsyncGenerator<CollectedEmbeddingInput, void, unknown> {
-    for (const collectionSlug of collectionSlugs) {
-      const collectionConfig = dynamicConfig.collections[collectionSlug]
-      if (!collectionConfig) continue
+    const toKnowledgePool = collectionConfig.toKnowledgePool
 
-      const toKnowledgePool = collectionConfig.toKnowledgePool
-      const limit = 50
+    for (const doc of docs) {
+      // If !includeAll, we still need to check if document has current embedding
+      // (can't filter this in the where clause since it's a cross-collection check)
+      if (!includeAll && !lastCompletedAtDate) {
+        const hasCurrentEmbedding = await docHasEmbeddingVersion({
+          payload,
+          poolName,
+          sourceCollection: collectionSlug,
+          docId: String(doc.id),
+          embeddingVersion,
+        })
+        if (hasCurrentEmbedding) continue
+      }
 
-      // Build where clause: filter by updatedAt if we have lastBulkCompletedAt and !includeAll
-      const where = includeAll
-        ? undefined
-        : lastCompletedAtDate
-          ? {
-              updatedAt: {
-                greater_than: lastCompletedAtDate.toISOString(),
-              },
-            }
-          : undefined
+      // Check if document should be embedded
+      if (collectionConfig.shouldEmbedFn) {
+        const shouldEmbed = await collectionConfig.shouldEmbedFn(doc, payload)
+        if (!shouldEmbed) continue
+      }
 
-      let res: PaginatedDocs<JsonObject & TypeWithID> | undefined = await payload.find({
-        collection: collectionSlug,
-        where,
-        limit,
-      })
-      do {
-        const docs = res?.docs || []
-        if (!docs.length) break
+      const chunkData = await toKnowledgePool(doc, payload)
 
-        for (const doc of docs) {
-          // If !includeAll, we still need to check if document has current embedding
-          // (can't filter this in the where clause since it's a cross-collection check)
-          if (!includeAll && !lastCompletedAtDate) {
-            const hasCurrentEmbedding = await docHasEmbeddingVersion({
-              payload,
-              poolName,
-              sourceCollection: collectionSlug,
-              docId: String(doc.id),
-              embeddingVersion,
-            })
-            if (hasCurrentEmbedding) continue
-          }
+      // Validate chunks (same validation as real-time ingestion)
+      const invalidEntries = chunkData
+        .map((entry, idx) => {
+          if (!entry || typeof entry !== 'object') return idx
+          if (typeof entry.chunk !== 'string') return idx
+          return null
+        })
+        .filter((idx): idx is number => idx !== null)
 
-          // Check if document should be embedded
-          if (collectionConfig.shouldEmbedFn) {
-            const shouldEmbed = await collectionConfig.shouldEmbedFn(doc, payload)
-            if (!shouldEmbed) continue
-          }
+      if (invalidEntries.length > 0) {
+        throw new Error(
+          `[payloadcms-vectorize] toKnowledgePool returned ${invalidEntries.length} invalid entr${
+            invalidEntries.length === 1 ? 'y' : 'ies'
+          } for document ${doc.id} in collection "${collectionSlug}". Each entry must be an object with a "chunk" string. Invalid indices: ${invalidEntries.join(
+            ', ',
+          )}`,
+        )
+      }
 
-          const chunkData = await toKnowledgePool(doc, payload)
+      // Yield valid chunks
+      for (let idx = 0; idx < chunkData.length; idx++) {
+        const chunkEntry = chunkData[idx]
+        const { chunk, ...extensionFields } = chunkEntry
 
-          // Validate chunks (same validation as real-time ingestion)
-          const invalidEntries = chunkData
-            .map((entry, idx) => {
-              if (!entry || typeof entry !== 'object') return idx
-              if (typeof entry.chunk !== 'string') return idx
-              return null
-            })
-            .filter((idx): idx is number => idx !== null)
-
-          if (invalidEntries.length > 0) {
-            throw new Error(
-              `[payloadcms-vectorize] toKnowledgePool returned ${invalidEntries.length} invalid entr${
-                invalidEntries.length === 1 ? 'y' : 'ies'
-              } for document ${doc.id} in collection "${collectionSlug}". Each entry must be an object with a "chunk" string. Invalid indices: ${invalidEntries.join(
-                ', ',
-              )}`,
-            )
-          }
-
-          // Yield valid chunks
-          for (let idx = 0; idx < chunkData.length; idx++) {
-            const chunkEntry = chunkData[idx]
-            const { chunk, ...extensionFields } = chunkEntry
-
-            yield {
-              id: `${collectionSlug}:${doc.id}:${idx}`,
-              text: chunk,
-              metadata: {
-                sourceCollection: collectionSlug,
-                docId: String(doc.id),
-                chunkIndex: idx,
-                embeddingVersion,
-                extensionFields,
-              },
-            }
-          }
+        yield {
+          id: `${collectionSlug}:${doc.id}:${idx}`,
+          text: chunk,
+          metadata: {
+            sourceCollection: collectionSlug,
+            docId: String(doc.id),
+            chunkIndex: idx,
+            embeddingVersion,
+            extensionFields,
+          },
         }
-      } while (
-        (res = res.nextPage
-          ? await payload.find({
-              collection: collectionSlug,
-              where,
-              limit,
-              page: res.nextPage,
-            })
-          : undefined)
-      )
+      }
     }
   }
 
+
+  // Determine starting batchIndex from existing batches for this run
+  const runIdNum = parseInt(runId, 10)
+  const maxBatchResult = await payload.find({
+    collection: BULK_EMBEDDINGS_BATCHES_SLUG,
+    where: { run: { equals: runIdNum } },
+    sort: '-batchIndex',
+    limit: 1,
+  })
+  let batchIndex =
+    maxBatchResult.docs.length > 0 ? ((maxBatchResult.docs[0] as any).batchIndex ?? 0) + 1 : 0
+
   // Process chunks from generator
-  let batchIndex = 0
   let totalInputs = 0
   const pendingChunks: CollectedEmbeddingInput[] = []
   const chunkIterator = generateChunks()
-  const runIdNum = parseInt(runId, 10)
   let currentBatchId: number | undefined = undefined
+  const batchIds: (string | number)[] = []
 
   async function processChunk(
     chunk: CollectedEmbeddingInput,
@@ -699,12 +758,13 @@ async function streamAndBatchMissingEmbeddings(args: {
       })
 
       totalInputs += inputCount
+      batchIds.push(currentBatchId)
       batchIndex++
       currentBatchId = undefined // Reset for next batch
     }
   }
 
-  // Process chunks from generator
+  // Process chunks from generator using look-ahead for isLastChunk
   let prevChunk: CollectedEmbeddingInput | undefined = undefined
   for await (const currentChunk of chunkIterator) {
     if (prevChunk) {
@@ -716,7 +776,7 @@ async function streamAndBatchMissingEmbeddings(args: {
     await processChunk(prevChunk, true)
   }
 
-  return { batchCount: batchIndex, totalInputs }
+  return { batchCount: batchIds.length, totalInputs, batchIds }
 }
 
 /**

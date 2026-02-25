@@ -1,11 +1,12 @@
 import type { Payload } from 'payload'
-import { beforeAll, describe, expect, test } from 'vitest'
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import {
   BULK_QUEUE_NAMES,
   DEFAULT_DIMS,
   buildPayloadWithIntegration,
   createMockBulkEmbeddings,
   createTestDb,
+  destroyPayload,
   waitForVectorizationJobs,
 } from '../utils.js'
 import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
@@ -44,6 +45,10 @@ describe('Bulk embed - realtime mode', () => {
       key: `realtime-${Date.now()}`,
     })
     payload = built.payload
+  })
+
+  afterAll(async () => {
+    await destroyPayload(payload)
   })
 
   test('realtime mode queues vectorize jobs when realTimeIngestionFn is provided', async () => {

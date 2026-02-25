@@ -1,6 +1,6 @@
 import type { Payload, SanitizedConfig } from 'payload'
 
-import { beforeAll, describe, expect, test } from 'vitest'
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
 import { chunkRichText, chunkText } from 'helpers/chunkers.js'
 import { createHeadlessEditor } from '@payloadcms/richtext-lexical/lexical/headless'
@@ -16,6 +16,7 @@ import { editorConfigFactory, getEnabledNodes, lexicalEditor } from '@payloadcms
 import { DIMS, getInitialMarkdownContent } from './constants.js'
 import {
   createTestDb,
+  destroyPayload,
   waitForVectorizationJobs,
 } from './utils.js'
 import { getPayload } from 'payload'
@@ -110,6 +111,10 @@ describe('Plugin integration tests', () => {
     })
 
     markdownContent = await getInitialMarkdownContent(config)
+  })
+
+  afterAll(async () => {
+    await destroyPayload(payload)
   })
 
   test('adds embeddings collection with vector column', async () => {

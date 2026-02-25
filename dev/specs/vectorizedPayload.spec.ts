@@ -1,10 +1,11 @@
 import type { Payload } from 'payload'
 
-import { beforeAll, describe, expect, test } from 'vitest'
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { getVectorizedPayload, VectorizedPayload } from '../../src/types.js'
 import { buildDummyConfig, DIMS, getInitialMarkdownContent } from './constants.js'
 import {
   createTestDb,
+  destroyPayload,
   waitForVectorizationJobs,
 } from './utils.js'
 import { getPayload } from 'payload'
@@ -101,6 +102,10 @@ describe('VectorizedPayload', () => {
       cron: true,
     })
     markdownContent = await getInitialMarkdownContent(config)
+  })
+
+  afterAll(async () => {
+    await destroyPayload(payload)
   })
 
   describe('getVectorizedPayload', () => {
