@@ -16,24 +16,31 @@ import { createMockAdapter } from 'helpers/mockAdapter.js'
 const DIMS = DEFAULT_DIMS
 const dbName = `bulk_version_${Date.now()}`
 
-// Use distinct bulk queue names per payload instance so that
-// the second payload's cron worker handles its own bulk runs,
-// instead of the first payload instance continuing to process them.
-const BULK_QUEUE_NAMES_0 = BULK_QUEUE_NAMES
-const BULK_QUEUE_NAMES_1 = {
-  prepareBulkEmbedQueueName: `${BULK_QUEUE_NAMES.prepareBulkEmbedQueueName}-v2`,
-  pollOrCompleteQueueName: `${BULK_QUEUE_NAMES.pollOrCompleteQueueName}-v2`,
+// Use distinct queue names per payload instance so that each instance's
+// cron worker only processes its own jobs and doesn't interfere with the other.
+const QUEUE_NAMES_0 = {
+  realtimeQueueName: 'vectorize-realtime-v0',
+  bulkQueueNames: BULK_QUEUE_NAMES,
+}
+const QUEUE_NAMES_1 = {
+  realtimeQueueName: 'vectorize-realtime-v1',
+  bulkQueueNames: {
+    prepareBulkEmbedQueueName: `${BULK_QUEUE_NAMES.prepareBulkEmbedQueueName}-v2`,
+    pollOrCompleteQueueName: `${BULK_QUEUE_NAMES.pollOrCompleteQueueName}-v2`,
+  },
 }
 
 describe('Bulk embed - version bump', () => {
   let post: any
-  let payload1: any = null
+  const payloadsToDestroy: any[] = []
   beforeAll(async () => {
     await createTestDb({ dbName })
   })
 
   afterAll(async () => {
-    await destroyPayload(payload1)
+    for (const p of payloadsToDestroy) {
+      await destroyPayload(p)
+    }
   })
 
   test('version bump re-embeds all even without updates', async () => {
@@ -56,11 +63,14 @@ describe('Bulk embed - version bump', () => {
               },
             },
           },
-          bulkQueueNames: BULK_QUEUE_NAMES_0,
+          realtimeQueueName: QUEUE_NAMES_0.realtimeQueueName,
+          bulkQueueNames: QUEUE_NAMES_0.bulkQueueNames,
         },
-        key: `payload0`,
+        key: `payload0-${Date.now()}`,
       })
     ).payload
+
+    payloadsToDestroy.push(payload0)
 
     post = await payload0.create({ collection: 'posts', data: { title: 'Old' } as any })
 
@@ -77,10 +87,7 @@ describe('Bulk embed - version bump', () => {
     expect(embeds0.totalDocs).toBe(1)
     expect(embeds0.docs[0].embeddingVersion).toBe('old-version')
 
-    // Destroy payload0 before creating payload1 to prevent cron worker interference
-    await destroyPayload(payload0)
-
-    payload1 = (
+    const payload1 = (
       await buildPayloadWithIntegration({
         dbName,
         pluginOpts: {
@@ -99,12 +106,15 @@ describe('Bulk embed - version bump', () => {
               },
             },
           },
-          bulkQueueNames: BULK_QUEUE_NAMES_1,
+          realtimeQueueName: QUEUE_NAMES_1.realtimeQueueName,
+          bulkQueueNames: QUEUE_NAMES_1.bulkQueueNames,
         },
-        key: `payload1`,
+        key: `payload1-${Date.now()}`,
         skipMigrations: true,
       })
     ).payload
+
+    payloadsToDestroy.push(payload1)
 
     const vectorizedPayload1 = getVectorizedPayload(payload1)
     const result1 = await vectorizedPayload1?.bulkEmbed({ knowledgePool: 'default' })
