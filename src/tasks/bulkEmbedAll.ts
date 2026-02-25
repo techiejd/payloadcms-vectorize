@@ -175,7 +175,6 @@ async function finalizeRunIfComplete(args: {
     page++
   }
 
-
   if (totalBatchCount === 0) {
     await payload.update({
       id: runId,
@@ -232,9 +231,7 @@ async function finalizeRunIfComplete(args: {
     await callbacks.onError({
       providerBatchIds,
       error: new Error(
-        totalFailed > 0
-          ? `${totalFailed} chunk(s) failed during completion`
-          : 'All batches failed',
+        totalFailed > 0 ? `${totalFailed} chunk(s) failed during completion` : 'All batches failed',
       ),
       failedChunkData: allFailedChunkData.length > 0 ? allFailedChunkData : undefined,
       failedChunkCount: totalFailed > 0 ? totalFailed : undefined,
@@ -417,7 +414,6 @@ export const createPrepareBulkEmbeddingTask = ({
         })
         throw error
       }
-
 
       // STEP 4: Accumulate counts on run record
       if (totalResult.totalInputs > 0) {
@@ -662,7 +658,6 @@ async function streamAndBatchDocs(args: {
       }
     }
   }
-
 
   // Determine starting batchIndex from existing batches for this run
   const runIdNum = parseInt(runId, 10)
