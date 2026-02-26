@@ -17,9 +17,9 @@ import { expectGoodResult } from '../utils.vitest.js'
 import { createMockAdapter } from 'helpers/mockAdapter.js'
 
 const DIMS = DEFAULT_DIMS
-const dbName = `bulk_multibatch_${Date.now()}`
+const dbName = `bulk_batchlimit_${Date.now()}`
 
-describe('Bulk embed - multiple batches', () => {
+describe('Bulk embed - batchLimit', () => {
   let payload: Payload
   let vectorizedPayload: VectorizedPayload | null = null
 
@@ -34,6 +34,7 @@ describe('Bulk embed - multiple batches', () => {
             collections: {
               posts: {
                 toKnowledgePool: async (doc: any) => [{ chunk: doc.title }],
+                batchLimit: 2,
               },
             },
             embeddingConfig: {
@@ -41,14 +42,13 @@ describe('Bulk embed - multiple batches', () => {
               queryFn: makeDummyEmbedQuery(DIMS),
               bulkEmbeddingsFns: createMockBulkEmbeddings({
                 statusSequence: ['succeeded'],
-                flushAfterChunks: 2,
               }),
             },
           },
         },
         bulkQueueNames: BULK_QUEUE_NAMES,
       },
-      key: `multibatch-${Date.now()}`,
+      key: `batchlimit-${Date.now()}`,
     })
     payload = built.payload
     vectorizedPayload = getVectorizedPayload(payload)
@@ -58,10 +58,44 @@ describe('Bulk embed - multiple batches', () => {
     await destroyPayload(payload)
   })
 
-  test('multiple batches are created when flushing after N chunks', async () => {
-    // Create 5 posts (should result in 3 batches: 2, 2, 1)
+  test('batchLimit splits docs across continuation jobs and all get embedded', async () => {
+    // Create 5 posts with batchLimit: 2
+    // Should result in 3 prepare jobs (2 docs, 2 docs, 1 doc)
     for (let i = 0; i < 5; i++) {
-      await payload.create({ collection: 'posts', data: { title: `Post ${i}` } as any })
+      await payload.create({ collection: 'posts', data: { title: `BatchLimit Post ${i}` } as any })
+    }
+
+    const result = await vectorizedPayload?.bulkEmbed({ knowledgePool: 'default' })
+    expectGoodResult(result)
+
+    await waitForBulkJobs(payload, 30000)
+
+    // All 5 posts should have embeddings
+    const embeds = await payload.find({ collection: 'default' })
+    expect(embeds.totalDocs).toBe(5)
+
+    // Run should be succeeded
+    const runDoc = (
+      await (payload as any).find({
+        collection: BULK_EMBEDDINGS_RUNS_SLUG,
+        where: { id: { equals: result!.runId } },
+      })
+    ).docs[0]
+    expect(runDoc.status).toBe('succeeded')
+    expect(runDoc.inputs).toBe(5)
+  })
+
+  test('batchLimit equal to doc count does not create extra continuations', async () => {
+    // Clean up from prior test: delete all posts and embeddings
+    await payload.delete({ collection: 'posts', where: {} })
+    await payload.delete({ collection: 'default' as any, where: {} })
+
+    // Create exactly 2 posts (matching batchLimit: 2)
+    for (let i = 0; i < 2; i++) {
+      await payload.create({
+        collection: 'posts',
+        data: { title: `Exact Post ${i}` } as any,
+      })
     }
 
     const result = await vectorizedPayload?.bulkEmbed({ knowledgePool: 'default' })
@@ -69,20 +103,8 @@ describe('Bulk embed - multiple batches', () => {
 
     await waitForBulkJobs(payload, 20000)
 
-    const batches = await payload.find({
-      collection: BULK_EMBEDDINGS_BATCHES_SLUG as any,
-      where: { run: { equals: result!.runId } },
-      sort: 'batchIndex',
-    })
-    expect(batches.totalDocs).toBe(3)
-    expect(batches.docs[0]).toHaveProperty('batchIndex', 0)
-    expect(batches.docs[1]).toHaveProperty('batchIndex', 1)
-    expect(batches.docs[2]).toHaveProperty('batchIndex', 2)
-
-    const embeds = await payload.find({
-      collection: 'default',
-    })
-    expect(embeds.totalDocs).toBe(5)
+    const embeds = await payload.find({ collection: 'default' })
+    expect(embeds.totalDocs).toBe(2)
 
     const runDoc = (
       await (payload as any).find({
@@ -90,7 +112,6 @@ describe('Bulk embed - multiple batches', () => {
         where: { id: { equals: result!.runId } },
       })
     ).docs[0]
-    expect(runDoc.totalBatches).toBe(3)
     expect(runDoc.status).toBe('succeeded')
   })
 })

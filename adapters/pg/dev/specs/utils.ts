@@ -1,6 +1,6 @@
 import { Client } from 'pg'
 
-export { waitForVectorizationJobs } from '@shared-test/utils'
+export { waitForVectorizationJobs, destroyPayload } from '@shared-test/utils'
 
 export const createTestDb = async ({ dbName }: { dbName: string }) => {
   const adminUri =

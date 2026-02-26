@@ -29,7 +29,7 @@ import {
 } from './collections/bulkEmbeddingsBatches.js'
 import {
   createPrepareBulkEmbeddingTask,
-  createPollOrCompleteBulkEmbeddingTask,
+  createPollOrCompleteSingleBatchTask,
 } from './tasks/bulkEmbedAll.js'
 import { createBulkEmbedHandler, startBulkEmbed } from './endpoints/bulkEmbed.js'
 import { createRetryFailedBatchHandler, retryBatch } from './endpoints/retryFailedBatch.js'
@@ -177,7 +177,7 @@ export default (pluginOptions: PayloadcmsVectorizeConfig) =>
     })
     tasks.push(prepareBulkEmbedTask)
 
-    const pollOrCompleteBulkEmbedTask = createPollOrCompleteBulkEmbeddingTask({
+    const pollOrCompleteBulkEmbedTask = createPollOrCompleteSingleBatchTask({
       knowledgePools: pluginOptions.knowledgePools,
       pollOrCompleteQueueName: pluginOptions.bulkQueueNames?.pollOrCompleteQueueName,
       adapter: pluginOptions.dbAdapter,

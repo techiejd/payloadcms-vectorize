@@ -4,13 +4,14 @@
  * These tests verify Postgres-specific functionality like
  * vector column creation, schema modifications, etc.
  */
-import { beforeAll, describe, expect, test } from 'vitest'
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import type { Payload, SanitizedConfig } from 'payload'
 import { buildConfig, getPayload } from 'payload'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { lexicalEditor } from '@payloadcms/richtext-lexical'
 import { Client } from 'pg'
 import { createPostgresVectorIntegration } from '../../src/index.js'
+import { destroyPayload } from './utils.js'
 import payloadcmsVectorize from 'payloadcms-vectorize'
 
 const DIMS = 8
@@ -86,6 +87,10 @@ describe('Postgres-specific integration tests', () => {
       key: `pg-int-test-${Date.now()}`,
       cron: false,
     })
+  })
+
+  afterAll(async () => {
+    await destroyPayload(payload)
   })
 
   test('adds embeddings collection with vector column', async () => {

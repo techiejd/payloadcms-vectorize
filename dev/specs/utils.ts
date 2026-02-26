@@ -75,12 +75,39 @@ export async function waitForVectorizationJobs(payload: Payload, maxWaitMs = 100
   await waitForTasks(payload, [TASK_SLUG_VECTORIZE], maxWaitMs)
 }
 
-export async function waitForBulkJobs(payload: Payload, maxWaitMs = 10000) {
-  await waitForTasks(
-    payload,
-    [TASK_SLUG_PREPARE_BULK_EMBEDDING, TASK_SLUG_POLL_OR_COMPLETE_BULK_EMBEDDING],
-    maxWaitMs,
+export async function waitForBulkJobs(payload: Payload, maxWaitMs = 10000, intervalMs = 250) {
+  const hasJobsCollection = (payload as any)?.config?.collections?.some(
+    (c: any) => c.slug === 'payload-jobs',
   )
+  if (!hasJobsCollection) return
+
+  const taskSlugs = [TASK_SLUG_PREPARE_BULK_EMBEDDING, TASK_SLUG_POLL_OR_COMPLETE_BULK_EMBEDDING]
+  const startTime = Date.now()
+
+  while (Date.now() - startTime < maxWaitMs) {
+    const pending = await payload.find({
+      collection: 'payload-jobs',
+      where: {
+        and: [{ taskSlug: { in: taskSlugs } }, { completedAt: { exists: false } }],
+      },
+    })
+
+    if (pending.totalDocs === 0) {
+      // No pending jobs — but with coordinator/worker fan-out, new jobs may
+      // appear between the coordinator completing and the worker being queued.
+      // Double-check: if any bulk run is still non-terminal, keep waiting.
+      const activeRuns = await payload.find({
+        collection: BULK_EMBEDDINGS_RUNS_SLUG,
+        where: { status: { in: ['queued', 'running'] } },
+        limit: 1,
+      })
+      if (activeRuns.totalDocs === 0) return
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, intervalMs))
+  }
+  // One last grace wait
+  await new Promise((resolve) => setTimeout(resolve, 500))
 }
 
 export const DEFAULT_DIMS = 8
@@ -277,3 +304,25 @@ export const clearAllCollections = async (pl: Payload) => {
   await safeDelete('payload-jobs')
 }
 
+/** Safely destroy a Payload instance (stops crons, closes DB pool). */
+export async function destroyPayload(payload: Payload | null | undefined) {
+  if (payload) await payload.destroy()
+}
+
+export async function createSucceededBaselineRun(
+  payload: Payload,
+  {
+    version,
+    completedAt = new Date().toISOString(),
+  }: { version?: string; completedAt?: string } = {},
+) {
+  return (payload as any).create({
+    collection: BULK_EMBEDDINGS_RUNS_SLUG,
+    data: {
+      pool: 'default',
+      embeddingVersion: version ?? '',
+      status: 'succeeded',
+      completedAt,
+    },
+  })
+}

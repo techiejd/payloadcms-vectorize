@@ -1,6 +1,6 @@
 {
   "name": "payloadcms-vectorize",
-  "version": "0.6.0-beta.4",
+  "version": "0.6.0-beta.5",
   "description": "A plugin to vectorize collections for RAG in Payload 3.0",
   "license": "MIT",
   "type": "module",
@@ -47,9 +47,9 @@
     "test:teardown": "docker-compose -f dev/docker-compose.test.yml down",
     "test": "pnpm test:int && pnpm test:e2e",
     "test:e2e": "playwright test",
-    "test:int": "cross-env DOTENV_CONFIG_PATH=dev/.env.test NODE_OPTIONS='--require=dotenv/config --import=tsx' vitest",
-    "test:adapters:pg": "cross-env DOTENV_CONFIG_PATH=dev/.env.test NODE_OPTIONS='--require=dotenv/config --import=tsx' vitest --config adapters/pg/vitest.config.js",
-    "test:adapters:cf": "cross-env DOTENV_CONFIG_PATH=dev/.env.test NODE_OPTIONS='--require=dotenv/config --import=tsx' vitest --config adapters/cf/vitest.config.js"
+    "test:int": "cross-env DOTENV_CONFIG_PATH=dev/.env.test NODE_OPTIONS='--require=dotenv/config --import=tsx --max-old-space-size=8192' vitest",
+    "test:adapters:pg": "cross-env DOTENV_CONFIG_PATH=dev/.env.test NODE_OPTIONS='--require=dotenv/config --import=tsx --max-old-space-size=8192' vitest --config adapters/pg/vitest.config.js",
+    "test:adapters:cf": "cross-env DOTENV_CONFIG_PATH=dev/.env.test NODE_OPTIONS='--require=dotenv/config --import=tsx --max-old-space-size=8192' vitest --config adapters/cf/vitest.config.js"
   },
   "devDependencies": {
     "@changesets/changelog-github": "^0.5.2",

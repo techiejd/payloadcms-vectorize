@@ -1,5 +1,5 @@
 import type { Payload } from 'payload'
-import { beforeAll, describe, expect, test } from 'vitest'
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { BULK_EMBEDDINGS_RUNS_SLUG } from '../../../src/collections/bulkEmbeddingsRuns.js'
 import { getVectorizedPayload } from '../../../src/types.js'
 import {
@@ -8,6 +8,7 @@ import {
   buildPayloadWithIntegration,
   createMockBulkEmbeddings,
   createTestDb,
+  destroyPayload,
 } from '../utils.js'
 import { makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
 import { createMockAdapter } from 'helpers/mockAdapter.js'
@@ -45,6 +46,10 @@ describe('Bulk embed - concurrent runs prevention', () => {
       key: `concurrent-${Date.now()}`,
     })
     payload = built.payload
+  })
+
+  afterAll(async () => {
+    await destroyPayload(payload)
   })
 
   test('cannot start concurrent bulk embed runs for the same pool', async () => {

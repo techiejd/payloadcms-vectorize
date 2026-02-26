@@ -19,6 +19,8 @@ describe('Chunkers', () => {
     })
     const markdownContent = await getInitialMarkdownContent(cfg)
 
+    // chunkRichText only needs the SanitizedConfig for Lexical editor setup,
+    // no real db required
     const chunks = await chunkRichText(markdownContent, cfg)
 
     expect(chunks.length).toBe(3)
