@@ -12,121 +12,79 @@ import { makeDummyEmbedQuery } from 'helpers/embed.js'
 import { getVectorizedPayload } from '../../../src/types.js'
 import { expectGoodResult } from '../utils.vitest.js'
 import { createMockAdapter } from 'helpers/mockAdapter.js'
+import type { Payload } from 'payload'
 
 const DIMS = DEFAULT_DIMS
 const dbName = `bulk_version_${Date.now()}`
 
-// Use distinct queue names per payload instance so that each instance's
-// cron worker only processes its own jobs and doesn't interfere with the other.
-const QUEUE_NAMES_0 = {
-  realtimeQueueName: 'vectorize-realtime-v0',
-  bulkQueueNames: BULK_QUEUE_NAMES,
-}
-const QUEUE_NAMES_1 = {
-  realtimeQueueName: 'vectorize-realtime-v1',
-  bulkQueueNames: {
-    prepareBulkEmbedQueueName: `${BULK_QUEUE_NAMES.prepareBulkEmbedQueueName}-v2`,
-    pollOrCompleteQueueName: `${BULK_QUEUE_NAMES.pollOrCompleteQueueName}-v2`,
-  },
-}
-
 describe('Bulk embed - version bump', () => {
-  let post: any
-  const payloadsToDestroy: any[] = []
+  let payload: Payload
+  let knowledgePools: any
+
   beforeAll(async () => {
     await createTestDb({ dbName })
-  })
 
-  afterAll(async () => {
-    for (const p of payloadsToDestroy) {
-      await destroyPayload(p)
+    knowledgePools = {
+      default: {
+        collections: {
+          posts: {
+            toKnowledgePool: async (doc: any) => [{ chunk: doc.title }],
+          },
+        },
+        embeddingConfig: {
+          version: 'old-version',
+          queryFn: makeDummyEmbedQuery(DIMS),
+          bulkEmbeddingsFns: createMockBulkEmbeddings({ statusSequence: ['succeeded'] }),
+        },
+      },
     }
-  })
 
-  test('version bump re-embeds all even without updates', async () => {
-    // Phase 1: Build payload0 with old-version and run bulk embed
-    const payload0 = (
+    payload = (
       await buildPayloadWithIntegration({
         dbName,
         pluginOpts: {
           dbAdapter: createMockAdapter(),
-          knowledgePools: {
-            default: {
-              collections: {
-                posts: {
-                  toKnowledgePool: async (doc: any) => [{ chunk: doc.title }],
-                },
-              },
-              embeddingConfig: {
-                version: 'old-version',
-                queryFn: makeDummyEmbedQuery(DIMS),
-                bulkEmbeddingsFns: createMockBulkEmbeddings({ statusSequence: ['succeeded'] }),
-              },
-            },
-          },
-          realtimeQueueName: QUEUE_NAMES_0.realtimeQueueName,
-          bulkQueueNames: QUEUE_NAMES_0.bulkQueueNames,
+          knowledgePools,
+          bulkQueueNames: BULK_QUEUE_NAMES,
         },
-        key: `payload0-${Date.now()}`,
+        key: `version-bump-${Date.now()}`,
       })
     ).payload
+  })
 
-    payloadsToDestroy.push(payload0)
+  afterAll(async () => {
+    await destroyPayload(payload)
+  })
 
-    post = await payload0.create({ collection: 'posts', data: { title: 'Old' } as any })
+  test('version bump re-embeds all even without updates', async () => {
+    // Phase 1: Bulk embed with old-version
+    const post = await payload.create({ collection: 'posts', data: { title: 'Old' } as any })
 
-    const vectorizedPayload0 = getVectorizedPayload(payload0)
-    const result0 = await vectorizedPayload0?.bulkEmbed({ knowledgePool: 'default' })
+    const vp = getVectorizedPayload(payload)
+    const result0 = await vp?.bulkEmbed({ knowledgePool: 'default' })
     expectGoodResult(result0)
 
-    await waitForBulkJobs(payload0, 30000)
+    await waitForBulkJobs(payload, 30000)
 
-    // Phase 2: Verify payload0's embeddings before proceeding
-    const embeds0 = await payload0.find({
+    const embeds0 = await payload.find({
       collection: 'default',
       where: { docId: { equals: String(post.id) } },
     })
     expect(embeds0.totalDocs).toBe(1)
     expect(embeds0.docs[0].embeddingVersion).toBe('old-version')
 
-    // Phase 3: Build payload1 with new-version and run bulk embed
-    const payload1 = (
-      await buildPayloadWithIntegration({
-        dbName,
-        pluginOpts: {
-          dbAdapter: createMockAdapter(),
-          knowledgePools: {
-            default: {
-              collections: {
-                posts: {
-                  toKnowledgePool: async (doc: any) => [{ chunk: doc.title }],
-                },
-              },
-              embeddingConfig: {
-                version: 'new-version',
-                queryFn: makeDummyEmbedQuery(DIMS),
-                bulkEmbeddingsFns: createMockBulkEmbeddings({ statusSequence: ['succeeded'] }),
-              },
-            },
-          },
-          realtimeQueueName: QUEUE_NAMES_1.realtimeQueueName,
-          bulkQueueNames: QUEUE_NAMES_1.bulkQueueNames,
-        },
-        key: `payload1-${Date.now()}`,
-        skipMigrations: true,
-      })
-    ).payload
+    // Phase 2: Mutate config to new-version and re-embed
+    knowledgePools.default.embeddingConfig.version = 'new-version'
+    knowledgePools.default.embeddingConfig.bulkEmbeddingsFns = createMockBulkEmbeddings({
+      statusSequence: ['succeeded'],
+    })
 
-    payloadsToDestroy.push(payload1)
-
-    const vectorizedPayload1 = getVectorizedPayload(payload1)
-    const result1 = await vectorizedPayload1?.bulkEmbed({ knowledgePool: 'default' })
+    const result1 = await vp?.bulkEmbed({ knowledgePool: 'default' })
     expectGoodResult(result1)
 
-    await waitForBulkJobs(payload1, 30000)
+    await waitForBulkJobs(payload, 30000)
 
-    // Phase 4: Verify new-version replaced old-version
-    const embeds1 = await payload1.find({
+    const embeds1 = await payload.find({
       collection: 'default',
       where: { docId: { equals: String(post.id) } },
     })
