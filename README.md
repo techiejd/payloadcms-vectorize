@@ -941,6 +941,8 @@ MIT
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
+**We're especially looking for help adding more database adapters!** If you use MongoDB Atlas, SQLite, Pinecone, Qdrant, or any other vector-capable database with Payload CMS, we'd love your help building an adapter. See [adapters/README.md](./adapters/README.md) for the `DbAdapter` interface and how to get started. Open an issue to coordinate before starting work.
+
 ## ⭐ Star This Repository
 
 If you find this plugin useful, please give it a star! Stars help us understand how many developers are using this plugin and directly influence our development priorities. More stars = more features, better performance, and faster bug fixes.
