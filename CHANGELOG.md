@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.7.0
+
+### Breaking Changes
+
+- **Database Adapter Architecture**: The plugin now uses a pluggable database adapter system. You must install a database adapter package (e.g., `@payloadcms-vectorize/pg`) separately from the core plugin.
+- **`dbAdapter` option required**: The `payloadcmsVectorize()` plugin now requires a `dbAdapter` option pointing to your adapter's implementation.
+- **`similarity` renamed to `score`**: The `VectorSearchResult.similarity` field has been renamed to `score` to be more generic across different distance metrics.
+
+### Added
+
+- **`@payloadcms-vectorize/pg` package**: PostgreSQL adapter for pgvector, extracted from the core plugin.
+- **`DbAdapter` interface**: New interface for implementing custom database adapters. See `adapters/README.md`.
+- **`deleteEmbeddings` on `DbAdapter`**: Adapters can now delete vectors when a document is deleted or re-indexed.
+
 ## 0.6.0-beta.5 - 2026-02-25
 
 - Merges main into split_db_adapter (per-batch polling, coordinator/worker architecture, destroyPayload cleanup).
