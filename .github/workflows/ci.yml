@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, develop]
   pull_request:
-    branches: [main, split_db_adapter]
+    branches: [main]
 
 jobs:
   typecheck:
@@ -119,44 +119,6 @@ jobs:
           IVFFLATLISTS: 1
           TEST_ENV: 1
 
-  test_adapters_cf:
-    runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: pgvector/pgvector:pg15
-        env:
-          POSTGRES_PASSWORD: password
-          POSTGRES_DB: payload_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5433:5432
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install
-
-      - name: Run cf adapter tests
-        run: pnpm test:adapters:cf
-        env:
-          PAYLOAD_SECRET: test-secret-key
-          TEST_ENV: 1
-
   test_e2e:
     runs-on: ubuntu-latest
 
@@ -208,7 +170,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    needs: [typecheck, test_int, test_adapters_pg, test_adapters_cf, test_e2e]
+    needs: [typecheck, test_int, test_adapters_pg, test_e2e]
     if: always()
     steps:
       - name: Check required jobs
@@ -216,7 +178,6 @@ jobs:
           if [ "${{ needs.typecheck.result }}" != "success" ] || \
              [ "${{ needs.test_int.result }}" != "success" ] || \
              [ "${{ needs.test_adapters_pg.result }}" != "success" ] || \
-             [ "${{ needs.test_adapters_cf.result }}" != "success" ] || \
              [ "${{ needs.test_e2e.result }}" != "success" ]; then
             echo "One or more required jobs failed"
             exit 1

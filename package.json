@@ -24,12 +24,11 @@
   "scripts": {
     "build": "pnpm copyfiles && pnpm build:types && pnpm build:swc && pnpm build:adapters",
     "build:swc": "swc ./src -d ./dist --config-file .swcrc --strip-leading-paths",
-    "build:adapters": "pnpm build:adapters:pg && pnpm build:adapters:cf",
+    "build:adapters": "pnpm build:adapters:pg",
     "build:adapters:pg": "cd ./adapters/pg && swc ./src -d ./dist --config-file ../../.swcrc --strip-leading-paths",
-    "build:adapters:cf": "cd ./adapters/cf && swc ./src -d ./dist --config-file ../../.swcrc --strip-leading-paths",
     "build:types": "tsc -p tsconfig.build.json --outDir dist --rootDir ./src",
     "build:types:all": "pnpm build:types && tsc --noEmit",
-    "clean": "rimraf {dist,*.tsbuildinfo,adapters/pg/dist,adapters/cf/dist}",
+    "clean": "rimraf {dist,*.tsbuildinfo,adapters/pg/dist}",
     "copyfiles": "copyfiles -u 1 \"src/**/*.{html,css,scss,ttf,woff,woff2,eot,svg,jpg,png,json}\" dist/",
     "dev": "cross-env DOTENV_CONFIG_PATH=dev/.env.development NODE_OPTIONS=--require=dotenv/config next dev dev --turbo",
     "dev:generate-importmap": "pnpm dev:payload generate:importmap",
@@ -48,8 +47,7 @@
     "test": "pnpm test:int && pnpm test:e2e",
     "test:e2e": "playwright test",
     "test:int": "cross-env DOTENV_CONFIG_PATH=dev/.env.test NODE_OPTIONS='--require=dotenv/config --import=tsx --max-old-space-size=8192' vitest",
-    "test:adapters:pg": "cross-env DOTENV_CONFIG_PATH=dev/.env.test NODE_OPTIONS='--require=dotenv/config --import=tsx --max-old-space-size=8192' vitest --config adapters/pg/vitest.config.js",
-    "test:adapters:cf": "cross-env DOTENV_CONFIG_PATH=dev/.env.test NODE_OPTIONS='--require=dotenv/config --import=tsx --max-old-space-size=8192' vitest --config adapters/cf/vitest.config.js"
+    "test:adapters:pg": "cross-env DOTENV_CONFIG_PATH=dev/.env.test NODE_OPTIONS='--require=dotenv/config --import=tsx --max-old-space-size=8192' vitest --config adapters/pg/vitest.config.js"
   },
   "devDependencies": {
     "@changesets/changelog-github": "^0.5.2",
