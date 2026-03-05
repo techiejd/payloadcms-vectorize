@@ -1,4 +1,5 @@
 import {
+  CollectionSlug,
   JsonObject,
   Payload,
   TaskConfig,
@@ -8,21 +9,26 @@ import {
 import {
   BatchSubmission,
   BulkEmbeddingOutput,
+  BulkEmbeddingRunDoc,
+  BulkEmbeddingBatchDoc,
+  BulkEmbeddingInputMetadataDoc,
   CollectedEmbeddingInput,
   CollectionVectorizeOption,
   KnowledgePoolDynamicConfig,
   KnowledgePoolName,
+  BulkEmbeddingInput,
+  DbAdapter,
+  FailedChunkData,
 } from '../types.js'
 import { BULK_EMBEDDINGS_RUNS_SLUG } from '../collections/bulkEmbeddingsRuns.js'
 import { BULK_EMBEDDINGS_INPUT_METADATA_SLUG } from '../collections/bulkEmbeddingInputMetadata.js'
 import { BULK_EMBEDDINGS_BATCHES_SLUG } from '../collections/bulkEmbeddingsBatches.js'
 import {
-  isPostgresPayload,
-  PostgresPayload,
-  BulkEmbeddingInput,
-  FailedChunkData,
-} from '../types.js'
-import toSnakeCase from 'to-snake-case'
+  TASK_SLUG_PREPARE_BULK_EMBEDDING,
+  TASK_SLUG_POLL_OR_COMPLETE_BULK_EMBEDDING,
+} from '../constants.js'
+import { validateChunkData } from '../utils/validateChunkData.js'
+import { deleteDocumentEmbeddings } from '../utils/deleteDocumentEmbeddings.js'
 
 type PrepareBulkEmbeddingTaskInput = {
   runId: string
@@ -71,11 +77,11 @@ async function loadRunAndConfig({
   runId: string
   knowledgePools: Record<KnowledgePoolName, KnowledgePoolDynamicConfig>
 }) {
-  const run = await payload.findByID({
+  const run = (await payload.findByID({
     collection: BULK_EMBEDDINGS_RUNS_SLUG,
     id: runId,
-  })
-  const poolName = (run as any)?.pool as KnowledgePoolName
+  })) as BulkEmbeddingRunDoc
+  const poolName = run.pool as KnowledgePoolName
   if (!poolName) {
     throw new Error(`[payloadcms-vectorize] bulk embed run ${runId} missing pool`)
   }
@@ -169,7 +175,6 @@ async function finalizeRunIfComplete(args: {
     page++
   }
 
-
   if (totalBatchCount === 0) {
     await payload.update({
       id: runId,
@@ -226,9 +231,7 @@ async function finalizeRunIfComplete(args: {
     await callbacks.onError({
       providerBatchIds,
       error: new Error(
-        totalFailed > 0
-          ? `${totalFailed} chunk(s) failed during completion`
-          : 'All batches failed',
+        totalFailed > 0 ? `${totalFailed} chunk(s) failed during completion` : 'All batches failed',
       ),
       failedChunkData: allFailedChunkData.length > 0 ? allFailedChunkData : undefined,
       failedChunkCount: totalFailed > 0 ? totalFailed : undefined,
@@ -248,7 +251,7 @@ export const createPrepareBulkEmbeddingTask = ({
   prepareBulkEmbedQueueName?: string
 }): TaskConfig<PrepareBulkEmbeddingTaskInputOutput> => {
   const task: TaskConfig<PrepareBulkEmbeddingTaskInputOutput> = {
-    slug: 'payloadcms-vectorize:prepare-bulk-embedding',
+    slug: TASK_SLUG_PREPARE_BULK_EMBEDDING,
     handler: async ({
       input,
       req,
@@ -348,7 +351,8 @@ export const createPrepareBulkEmbeddingTask = ({
         limit: 1,
         sort: '-completedAt',
       })
-      const baselineRun = (latestSucceededRun as any)?.docs?.[0]
+
+      const baselineRun = latestSucceededRun.docs?.[0] as BulkEmbeddingRunDoc | undefined
       const baselineVersion: string | undefined = baselineRun?.embeddingVersion
       const lastBulkCompletedAt: string | undefined = baselineRun?.completedAt
       const versionMismatch = baselineVersion !== undefined && baselineVersion !== embeddingVersion
@@ -411,7 +415,6 @@ export const createPrepareBulkEmbeddingTask = ({
         throw error
       }
 
-
       // STEP 4: Accumulate counts on run record
       if (totalResult.totalInputs > 0) {
         const currentRun = await payload.findByID({
@@ -432,8 +435,8 @@ export const createPrepareBulkEmbeddingTask = ({
 
       // STEP 5: Queue per-batch polling tasks
       for (const batchId of totalResult.batchIds) {
-        await payload.jobs.queue<'payloadcms-vectorize:poll-or-complete-single-batch'>({
-          task: 'payloadcms-vectorize:poll-or-complete-single-batch',
+        await payload.jobs.queue<typeof TASK_SLUG_POLL_OR_COMPLETE_BULK_EMBEDDING>({
+          task: TASK_SLUG_POLL_OR_COMPLETE_BULK_EMBEDDING,
           input: { runId: input.runId, batchId: String(batchId) },
           req,
           ...(pollOrCompleteQueueName ? { queue: pollOrCompleteQueueName } : {}),
@@ -460,12 +463,14 @@ export const createPrepareBulkEmbeddingTask = ({
 export const createPollOrCompleteSingleBatchTask = ({
   knowledgePools,
   pollOrCompleteQueueName,
+  adapter,
 }: {
   knowledgePools: Record<KnowledgePoolName, KnowledgePoolDynamicConfig>
   pollOrCompleteQueueName?: string
+  adapter: DbAdapter
 }): TaskConfig<PollOrCompleteSingleBatchTaskInputOutput> => {
   const task: TaskConfig<PollOrCompleteSingleBatchTaskInputOutput> = {
-    slug: 'payloadcms-vectorize:poll-or-complete-single-batch',
+    slug: TASK_SLUG_POLL_OR_COMPLETE_BULK_EMBEDDING,
     handler: async ({
       input,
       req,
@@ -484,15 +489,15 @@ export const createPollOrCompleteSingleBatchTask = ({
       const callbacks = dynamicConfig.embeddingConfig.bulkEmbeddingsFns!
 
       // Early exit if run is already terminal
-      if (TERMINAL_STATUSES.has((run as any).status)) {
-        return { output: { runId, batchId, status: (run as any).status } }
+      if (TERMINAL_STATUSES.has(run.status)) {
+        return { output: { runId, batchId, status: run.status } }
       }
 
       // Load this specific batch
-      const batch = await payload.findByID({
+      const batch = (await payload.findByID({
         collection: BULK_EMBEDDINGS_BATCHES_SLUG,
         id: batchId,
-      })
+      })) as BulkEmbeddingBatchDoc
 
       // If batch is already terminal, just check if run can be finalized
       if (TERMINAL_STATUSES.has((batch as any).status)) {
@@ -508,8 +513,8 @@ export const createPollOrCompleteSingleBatchTask = ({
           poolName,
           batch,
           callbacks,
+          adapter,
         })
-
 
         // Update batch status and counts
         await payload.update({
@@ -541,8 +546,8 @@ export const createPollOrCompleteSingleBatchTask = ({
         }
 
         // Still running - re-queue self with polling delay
-        await payload.jobs.queue<'payloadcms-vectorize:poll-or-complete-single-batch'>({
-          task: 'payloadcms-vectorize:poll-or-complete-single-batch',
+        await payload.jobs.queue<typeof TASK_SLUG_POLL_OR_COMPLETE_BULK_EMBEDDING>({
+          task: TASK_SLUG_POLL_OR_COMPLETE_BULK_EMBEDDING,
           input: { runId, batchId },
           req,
           ...(pollOrCompleteQueueName ? { queue: pollOrCompleteQueueName } : {}),
@@ -632,24 +637,7 @@ async function streamAndBatchDocs(args: {
 
       const chunkData = await toKnowledgePool(doc, payload)
 
-      // Validate chunks (same validation as real-time ingestion)
-      const invalidEntries = chunkData
-        .map((entry, idx) => {
-          if (!entry || typeof entry !== 'object') return idx
-          if (typeof entry.chunk !== 'string') return idx
-          return null
-        })
-        .filter((idx): idx is number => idx !== null)
-
-      if (invalidEntries.length > 0) {
-        throw new Error(
-          `[payloadcms-vectorize] toKnowledgePool returned ${invalidEntries.length} invalid entr${
-            invalidEntries.length === 1 ? 'y' : 'ies'
-          } for document ${doc.id} in collection "${collectionSlug}". Each entry must be an object with a "chunk" string. Invalid indices: ${invalidEntries.join(
-            ', ',
-          )}`,
-        )
-      }
+      validateChunkData(chunkData, String(doc.id), collectionSlug)
 
       // Yield valid chunks
       for (let idx = 0; idx < chunkData.length; idx++) {
@@ -670,7 +658,6 @@ async function streamAndBatchDocs(args: {
       }
     }
   }
-
 
   // Determine starting batchIndex from existing batches for this run
   const runIdNum = parseInt(runId, 10)
@@ -711,7 +698,7 @@ async function streamAndBatchDocs(args: {
           submittedAt: new Date().toISOString(),
         },
       })
-      currentBatchId = (placeholderBatch as any).id
+      currentBatchId = placeholderBatch.id as number
     }
 
     if (!currentBatchId) {
@@ -790,7 +777,7 @@ async function documentExists(args: {
   const { payload, collection, docId } = args
   try {
     await payload.findByID({
-      collection: collection as any,
+      collection: collection as CollectionSlug,
       id: docId,
     })
     return true
@@ -809,13 +796,14 @@ async function pollAndCompleteSingleBatch(args: {
   payload: Payload
   runId: string
   poolName: KnowledgePoolName
-  batch: any
+  batch: BulkEmbeddingBatchDoc
   callbacks: {
     pollOrCompleteBatch: (args: {
       providerBatchId: string
       onChunk: (chunk: BulkEmbeddingOutput) => Promise<void>
     }) => Promise<{ status: string; error?: string }>
   }
+  adapter: DbAdapter
 }): Promise<{
   status: string
   error?: string
@@ -823,7 +811,7 @@ async function pollAndCompleteSingleBatch(args: {
   failedCount: number
   failedChunkData: FailedChunkData[]
 }> {
-  const { payload, runId, poolName, batch, callbacks } = args
+  const { payload, runId, poolName, batch, callbacks, adapter } = args
 
   let succeededCount = 0
   let failedCount = 0
@@ -901,15 +889,12 @@ async function pollAndCompleteSingleBatch(args: {
 
         // Only delete if no embeddings exist for this version (they're from an old version)
         if (!hasCurrentEmbedding) {
-          // Delete existing embeddings for this document (from old version)
-          await payload.delete({
-            collection: poolName,
-            where: {
-              and: [
-                { sourceCollection: { equals: meta.sourceCollection } },
-                { docId: { equals: String(meta.docId) } },
-              ],
-            },
+          await deleteDocumentEmbeddings({
+            payload,
+            poolName,
+            collection: meta.sourceCollection,
+            docId: String(meta.docId),
+            adapter,
           })
         }
       }
@@ -920,7 +905,7 @@ async function pollAndCompleteSingleBatch(args: {
         : Array.from(output.embedding)
 
       const created = await payload.create({
-        collection: poolName,
+        collection: poolName as CollectionSlug,
         data: {
           sourceCollection: meta.sourceCollection,
           docId: String(meta.docId),
@@ -929,15 +914,17 @@ async function pollAndCompleteSingleBatch(args: {
           embeddingVersion: meta.embeddingVersion,
           ...(meta.extensionFields || {}),
           embedding: embeddingArray,
-        } as any,
+        },
       })
 
-      await persistVectorColumn({
+      await adapter.storeEmbedding(
         payload,
-        poolName: toSnakeCase(poolName),
-        vector: embeddingArray,
-        id: String((created as any)?.id ?? ''),
-      })
+        poolName,
+        meta.sourceCollection,
+        String(meta.docId),
+        String(created.id),
+        embeddingArray,
+      )
 
       succeededCount++
     },
@@ -952,34 +939,6 @@ async function pollAndCompleteSingleBatch(args: {
   }
 }
 
-async function persistVectorColumn(args: {
-  payload: Payload
-  poolName: KnowledgePoolName
-  vector: number[] | Float32Array
-  id: string
-}) {
-  const { payload, poolName, vector, id } = args
-  if (!isPostgresPayload(payload)) {
-    throw new Error('[payloadcms-vectorize] Bulk embeddings require the Postgres adapter')
-  }
-  const postgresPayload = payload as PostgresPayload
-  const schemaName = postgresPayload.db.schemaName || 'public'
-  const literal = `[${Array.from(vector).join(',')}]`
-  const sql = `UPDATE "${schemaName}"."${toSnakeCase(poolName)}" SET embedding = $1 WHERE id = $2`
-  const runSQL = async (statement: string, params?: any[]) => {
-    if (postgresPayload.db.pool?.query) return postgresPayload.db.pool.query(statement, params)
-    if (postgresPayload.db.drizzle?.execute) return postgresPayload.db.drizzle.execute(statement)
-    throw new Error('[payloadcms-vectorize] Failed to persist vector column')
-  }
-  try {
-    await runSQL(sql, [literal, id])
-  } catch (e) {
-    const errorMessage = (e as Error).message || (e as any).toString()
-    payload.logger.error(`[payloadcms-vectorize] Failed to persist vector column: ${errorMessage}`)
-    throw e
-  }
-}
-
 async function docHasEmbeddingVersion(args: {
   payload: Payload
   poolName: KnowledgePoolName
@@ -989,7 +948,7 @@ async function docHasEmbeddingVersion(args: {
 }): Promise<boolean> {
   const { payload, poolName, sourceCollection, docId, embeddingVersion } = args
   const existing = await payload.find({
-    collection: poolName,
+    collection: poolName as CollectionSlug,
     where: {
       and: [
         { sourceCollection: { equals: sourceCollection } },
@@ -999,7 +958,7 @@ async function docHasEmbeddingVersion(args: {
     },
     limit: 1,
   })
-  return (existing as any)?.totalDocs > 0
+  return existing.totalDocs > 0
 }
 
 /**
@@ -1017,7 +976,7 @@ async function getMetadataByInputId(args: {
   docId: string
   chunkIndex: number
   embeddingVersion: string
-  extensionFields?: Record<string, any>
+  extensionFields?: Record<string, unknown>
 } | null> {
   const { payload, runId, inputId } = args
   const runIdNum = parseInt(runId, 10)
@@ -1030,7 +989,7 @@ async function getMetadataByInputId(args: {
     limit: 1,
   })
 
-  const doc = (result as any)?.docs?.[0]
+  const doc = result.docs?.[0] as BulkEmbeddingInputMetadataDoc | undefined
   if (!doc) return null
 
   return {

@@ -11,6 +11,7 @@ import {
   destroyPayload,
 } from '../utils.js'
 import { makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
+import { createMockAdapter } from 'helpers/mockAdapter.js'
 
 const DIMS = DEFAULT_DIMS
 const dbName = `bulk_concurrent_${Date.now()}`
@@ -23,6 +24,7 @@ describe('Bulk embed - concurrent runs prevention', () => {
     const built = await buildPayloadWithIntegration({
       dbName,
       pluginOpts: {
+        dbAdapter: createMockAdapter(),
         knowledgePools: {
           default: {
             collections: {

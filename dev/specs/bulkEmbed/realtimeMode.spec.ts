@@ -10,6 +10,7 @@ import {
   waitForVectorizationJobs,
 } from '../utils.js'
 import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
+import { createMockAdapter } from 'helpers/mockAdapter.js'
 
 const DIMS = DEFAULT_DIMS
 const dbName = `bulk_realtime_${Date.now()}`
@@ -20,6 +21,7 @@ describe('Bulk embed - realtime mode', () => {
 
   beforeAll(async () => {
     realtimeOptions = {
+      dbAdapter: createMockAdapter(),
       knowledgePools: {
         default: {
           collections: {

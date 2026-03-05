@@ -2,7 +2,7 @@ import { postgresAdapter } from '@payloadcms/db-postgres'
 import { lexicalEditor } from '@payloadcms/richtext-lexical'
 import path from 'path'
 import { buildConfig } from 'payload'
-import { createVectorizeIntegration } from 'payloadcms-vectorize'
+import payloadcmsVectorize from 'payloadcms-vectorize'
 import {
   makeDummyEmbedDocs,
   testEmbeddingVersion,
@@ -18,6 +18,7 @@ import { testEmailAdapter } from './helpers/testEmailAdapter.js'
 import { seed } from './seed.js'
 import { chunkRichText, chunkText } from './helpers/chunkers.js'
 import { createMockBulkEmbeddings } from './specs/utils.js'
+import { createMockAdapter } from 'helpers/mockAdapter.js'
 
 const filename = fileURLToPath(import.meta.url)
 const dirname = path.dirname(filename)
@@ -32,7 +33,6 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 const dims = Number(process.env.DIMS)
-const ivfflatLists = Number(process.env.IVFFLATLISTS)
 const embedDocs = process.env.USE_VOYAGE !== undefined ? voyageEmbedDocs : makeDummyEmbedDocs(dims)
 const embedQuery =
   process.env.USE_VOYAGE !== undefined ? voyageEmbedQuery : makeDummyEmbedQuery(dims)
@@ -55,20 +55,7 @@ const ssl =
       }
     : undefined
 
-const { afterSchemaInitHook, payloadcmsVectorize } = createVectorizeIntegration({
-  default: {
-    dims,
-    ivfflatLists, // Rule of thumb: ivfflatLists = sqrt(total_number_of_vectors). Helps with working memory usage.
-  },
-  bulkDefault: {
-    dims,
-    ivfflatLists,
-  },
-  failingBulkDefault: {
-    dims,
-    ivfflatLists,
-  },
-})
+const adapter = createMockAdapter()
 
 const buildConfigWithPostgres = async () => {
   return buildConfig({
@@ -87,8 +74,6 @@ const buildConfigWithPostgres = async () => {
       },
     ],
     db: postgresAdapter({
-      extensions: ['vector'],
-      afterSchemaInit: [afterSchemaInitHook],
       pool: {
         connectionString:
           process.env.DATABASE_URI || 'postgresql://postgres:password@localhost:5433/payload_test',
@@ -130,6 +115,7 @@ const buildConfigWithPostgres = async () => {
     },
     plugins: [
       payloadcmsVectorize({
+        dbAdapter: adapter,
         knowledgePools: {
           default: {
             collections: {
@@ -143,7 +129,7 @@ const buildConfigWithPostgres = async () => {
                   }
                   // Process content
                   if (doc.content) {
-                    const contentChunks = await chunkRichText(doc.content, payload)
+                    const contentChunks = await chunkRichText(doc.content, payload.config)
                     chunks.push(...contentChunks.map((chunk) => ({ chunk })))
                   }
                   return chunks
@@ -168,7 +154,7 @@ const buildConfigWithPostgres = async () => {
                   }
                   // Process content
                   if (doc.content) {
-                    const contentChunks = await chunkRichText(doc.content, payload)
+                    const contentChunks = await chunkRichText(doc.content, payload.config)
                     chunks.push(...contentChunks.map((chunk) => ({ chunk })))
                   }
                   return chunks
@@ -193,7 +179,7 @@ const buildConfigWithPostgres = async () => {
                   }
                   // Process content
                   if (doc.content) {
-                    const contentChunks = await chunkRichText(doc.content, payload)
+                    const contentChunks = await chunkRichText(doc.content, payload.config)
                     chunks.push(...contentChunks.map((chunk) => ({ chunk })))
                   }
                   return chunks

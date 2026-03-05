@@ -20,6 +20,7 @@ export default defineConfig(() => {
       environment: 'node',
       hookTimeout: 30_000,
       testTimeout: 30_000,
+      include: ['dev/specs/**/*.spec.ts'],
       exclude: ['**/e2e.spec.{ts,js}', '**/node_modules/**'],
       // Each test file gets its own forked process so memory is fully
       // reclaimed between files (prevents OOM on CI).

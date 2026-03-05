@@ -16,20 +16,13 @@
   "compilerOptions": {
     "baseUrl": "./",
     "paths": {
-      "@payload-config": [
-        "./payload.config.ts"
-      ],
-      "payloadcms-vectorize": [
-        "../src/index.ts"
-      ],
-      "payloadcms-vectorize/client": [
-        "../src/exports/client.ts"
-      ],
-      "payloadcms-vectorize/rsc": [
-        "../src/exports/rsc.ts"
-      ]
+      "@payload-config": ["./payload.config.ts"],
+      "payloadcms-vectorize": ["../src/index.ts"],
+      "payloadcms-vectorize/client": ["../src/exports/client.ts"],
+      "payloadcms-vectorize/rsc": ["../src/exports/rsc.ts"],
+      "@payloadcms-vectorize/pg": ["../adapters/pg/src/index.ts"]
     },
     "noEmit": true,
-    "emitDeclarationOnly": false,
+    "emitDeclarationOnly": false
   }
 }

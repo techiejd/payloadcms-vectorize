@@ -1,6 +1,7 @@
 import type { Payload, PayloadHandler } from 'payload'
 import { BULK_EMBEDDINGS_RUNS_SLUG } from '../collections/bulkEmbeddingsRuns.js'
 import type { BulkEmbedResult, KnowledgePoolDynamicConfig, KnowledgePoolName } from '../types.js'
+import { TASK_SLUG_PREPARE_BULK_EMBEDDING } from '../constants.js'
 
 /**
  * Core logic for starting a bulk embed run.
@@ -54,8 +55,8 @@ export async function startBulkEmbed<
     },
   })
 
-  await payload.jobs.queue<'payloadcms-vectorize:prepare-bulk-embedding'>({
-    task: 'payloadcms-vectorize:prepare-bulk-embedding',
+  await payload.jobs.queue<typeof TASK_SLUG_PREPARE_BULK_EMBEDDING>({
+    task: TASK_SLUG_PREPARE_BULK_EMBEDDING,
     input: { runId: String(run.id) },
     ...(queueName ? { queue: queueName } : {}),
   })

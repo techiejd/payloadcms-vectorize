@@ -2,26 +2,20 @@ import { postgresAdapter } from '@payloadcms/db-postgres'
 import { buildConfig } from 'payload'
 import { describe, expect, test } from 'vitest'
 
-import { createVectorizeIntegration } from '../../src/index.js'
+import payloadcmsVectorize from '../../src/index.js'
 import {
   createTestDb,
   destroyPayload,
   waitForVectorizationJobs,
 } from './utils.js'
 import { getPayload } from 'payload'
+import { createMockAdapter } from 'helpers/mockAdapter.js'
 
 const DIMS = 8
 const dbName = 'failed_validation_test'
 
 const embedDocs = async (texts: string[]) => texts.map(() => Array(DIMS).fill(0))
 const embedQuery = async (_text: string) => Array(DIMS).fill(0)
-
-const { afterSchemaInitHook, payloadcmsVectorize } = createVectorizeIntegration({
-  default: {
-    dims: DIMS,
-    ivfflatLists: 1,
-  },
-})
 
 const buildMalformedConfig = async () => {
   return buildConfig({
@@ -41,16 +35,14 @@ const buildMalformedConfig = async () => {
       },
     ],
     db: postgresAdapter({
-      extensions: ['vector'],
-      afterSchemaInit: [afterSchemaInitHook],
       pool: {
         connectionString:
-          process.env.DATABASE_URI ||
-          `postgresql://postgres:password@localhost:5433/${dbName}`,
+          process.env.DATABASE_URI || `postgresql://postgres:password@localhost:5433/${dbName}`,
       },
     }),
     plugins: [
       payloadcmsVectorize({
+        dbAdapter: createMockAdapter(),
         knowledgePools: {
           default: {
             collections: {

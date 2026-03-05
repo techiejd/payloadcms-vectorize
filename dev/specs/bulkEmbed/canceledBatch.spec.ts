@@ -12,6 +12,7 @@ import {
 import { makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
 import { getVectorizedPayload, VectorizedPayload } from 'payloadcms-vectorize'
 import { expectGoodResult } from '../utils.vitest.js'
+import { createMockAdapter } from 'helpers/mockAdapter.js'
 
 const DIMS = DEFAULT_DIMS
 const dbName = `bulk_canceled_${Date.now()}`
@@ -28,6 +29,7 @@ describe('Bulk embed - canceled batch', () => {
     const built = await buildPayloadWithIntegration({
       dbName,
       pluginOpts: {
+        dbAdapter: createMockAdapter(),
         knowledgePools: {
           default: {
             collections: {

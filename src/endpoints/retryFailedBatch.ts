@@ -8,6 +8,7 @@ import type {
   RetryFailedBatchResult,
   BulkEmbeddingInput,
 } from '../types.js'
+import { TASK_SLUG_POLL_OR_COMPLETE_BULK_EMBEDDING } from '../constants.js'
 
 /**
  * Core logic for retrying a failed batch.
@@ -210,8 +211,8 @@ export async function retryBatch<TPoolNames extends KnowledgePoolName = Knowledg
   }
 
   // Queue a per-batch task for the retried batch
-  await payload.jobs.queue<'payloadcms-vectorize:poll-or-complete-single-batch'>({
-    task: 'payloadcms-vectorize:poll-or-complete-single-batch',
+  await payload.jobs.queue<typeof TASK_SLUG_POLL_OR_COMPLETE_BULK_EMBEDDING>({
+    task: TASK_SLUG_POLL_OR_COMPLETE_BULK_EMBEDDING,
     input: { runId: String(runId), batchId: String(newBatch.id) },
     ...(queueName ? { queue: queueName } : {}),
   })

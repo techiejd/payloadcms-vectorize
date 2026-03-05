@@ -1,16 +1,18 @@
-import { Payload, TaskConfig, TaskHandlerResult } from 'payload'
-import {
-  isPostgresPayload,
-  PostgresPayload,
-  KnowledgePoolName,
+import type { Payload, TaskConfig, TaskHandlerResult } from 'payload'
+
+import type {
+  DbAdapter,
   KnowledgePoolDynamicConfig,
+  KnowledgePoolName,
   ToKnowledgePoolFn,
 } from '../types.js'
-import toSnakeCase from 'to-snake-case'
+import { TASK_SLUG_VECTORIZE } from '../constants.js'
+import { validateChunkData } from '../utils/validateChunkData.js'
+import { deleteDocumentEmbeddings } from '../utils/deleteDocumentEmbeddings.js'
 
 type VectorizeTaskInput = {
-  doc: Record<string, any>
   collection: string
+  doc: Record<string, any>
   knowledgePool: KnowledgePoolName
 }
 type VectorizeTaskOutput = {
@@ -22,8 +24,10 @@ type VectorizeTaskInputOutput = {
 }
 
 export const createVectorizeTask = ({
+  adapter,
   knowledgePools,
 }: {
+  adapter: DbAdapter
   knowledgePools: Record<KnowledgePoolName, KnowledgePoolDynamicConfig>
 }) => {
   /**
@@ -31,10 +35,14 @@ export const createVectorizeTask = ({
    * @description Scheduled task that vectorizes on data change.
    */
   const processVectorizationTask: TaskConfig<VectorizeTaskInputOutput> = {
-    slug: 'payloadcms-vectorize:vectorize',
+    slug: TASK_SLUG_VECTORIZE,
     handler: async ({ input, req }): Promise<TaskHandlerResult<VectorizeTaskInputOutput>> => {
-      if (!input.collection) throw new Error('[payloadcms-vectorize] collection is required')
-      if (!input.knowledgePool) throw new Error('[payloadcms-vectorize] knowledgePool is required')
+      if (!input.collection) {
+        throw new Error('[payloadcms-vectorize] collection is required')
+      }
+      if (!input.knowledgePool) {
+        throw new Error('[payloadcms-vectorize] knowledgePool is required')
+      }
 
       const dynamicConfig = knowledgePools[input.knowledgePool]
       if (!dynamicConfig) {
@@ -44,13 +52,14 @@ export const createVectorizeTask = ({
       }
 
       await runVectorizeTask({
-        payload: req.payload,
-        poolName: input.knowledgePool,
+        adapter,
         dynamicConfig,
         job: {
-          doc: input.doc,
           collection: input.collection,
+          doc: input.doc,
         },
+        payload: req.payload,
+        poolName: input.knowledgePool,
       })
       return {
         output: {
@@ -63,15 +72,16 @@ export const createVectorizeTask = ({
 }
 
 async function runVectorizeTask(args: {
-  payload: Payload
-  poolName: KnowledgePoolName
+  adapter: DbAdapter
   dynamicConfig: KnowledgePoolDynamicConfig
   job: {
-    doc: Record<string, any>
     collection: string
+    doc: Record<string, any>
   }
+  payload: Payload
+  poolName: KnowledgePoolName
 }) {
-  const { payload, poolName, dynamicConfig, job } = args
+  const { adapter, dynamicConfig, job, payload, poolName } = args
   const embeddingVersion = dynamicConfig.embeddingConfig.version
   const sourceDoc = job.doc
   const collection = job.collection
@@ -83,56 +93,21 @@ async function runVectorizeTask(args: {
   }
   const toKnowledgePoolFn: ToKnowledgePoolFn = collectionConfig.toKnowledgePool
 
-  const isPostgres = isPostgresPayload(payload)
-  if (!isPostgres) {
-    throw new Error('[payloadcms-vectorize] Only works with Postgres')
-  }
-  const runSQL = async (sql: string, params?: any[]) => {
-    const postgresPayload = payload as PostgresPayload
-    if (postgresPayload.db.pool?.query) return postgresPayload.db.pool.query(sql, params)
-    if (postgresPayload.db.drizzle?.execute) return postgresPayload.db.drizzle.execute(sql)
-    throw new Error('[payloadcms-vectorize] Failed to persist vector column')
-  }
-
   // Delete all existing embeddings for this document before creating new ones
   // This ensures we replace old embeddings (potentially with a different embeddingVersion)
   // and prevents duplicates when a document is updated
-  await payload.delete({
-    collection: poolName,
-    where: {
-      and: [
-        { sourceCollection: { equals: collection } },
-        { docId: { equals: String(sourceDoc.id) } },
-      ],
-    },
+  await deleteDocumentEmbeddings({
+    payload,
+    poolName,
+    collection,
+    docId: String(sourceDoc.id),
+    adapter,
   })
 
   // Get chunks from toKnowledgePoolFn
   const chunkData = await toKnowledgePoolFn(sourceDoc, payload)
 
-  if (!Array.isArray(chunkData)) {
-    throw new Error(
-      `[payloadcms-vectorize] toKnowledgePool for collection "${collection}" must return an array of entries with a required "chunk" string`,
-    )
-  }
-
-  const invalidEntries = chunkData
-    .map((entry, idx) => {
-      if (!entry || typeof entry !== 'object') return idx
-      if (typeof entry.chunk !== 'string') return idx
-      return null
-    })
-    .filter((idx): idx is number => idx !== null)
-
-  if (invalidEntries.length > 0) {
-    throw new Error(
-      `[payloadcms-vectorize] toKnowledgePool returned ${invalidEntries.length} invalid entr${
-        invalidEntries.length === 1 ? 'y' : 'ies'
-      } for document ${sourceDoc.id} in collection "${collection}". Each entry must be an object with a "chunk" string. Invalid indices: ${invalidEntries.join(
-        ', ',
-      )}`,
-    )
-  }
+  validateChunkData(chunkData, String(sourceDoc.id), collection)
 
   // Extract chunk texts for embedding
   const chunkTexts = chunkData.map((item) => item.chunk)
@@ -145,32 +120,19 @@ async function runVectorizeTask(args: {
       const created = await payload.create({
         collection: poolName,
         data: {
-          sourceCollection: collection,
-          docId: String(sourceDoc.id),
           chunkIndex: index,
           chunkText: chunk,
+          docId: String(sourceDoc.id),
           embeddingVersion,
+          sourceCollection: collection,
           ...extensionFields,
           embedding: Array.isArray(vector) ? vector : Array.from(vector),
         },
       })
 
       const id = String(created.id)
-      const literal = `[${Array.from(vector).join(',')}]`
-      const postgresPayload = payload as PostgresPayload
-      const schemaName = postgresPayload.db.schemaName || 'public'
-      // Drizzle converts camelCase collection slugs to snake_case table names
-      const sql =
-        `UPDATE "${schemaName}"."${toSnakeCase(poolName)}" SET embedding = $1 WHERE id = $2` as string
-      try {
-        await runSQL(sql, [literal, id])
-      } catch (e) {
-        const errorMessage = (e as Error).message || (e as any).toString()
-        payload.logger.error(
-          `[payloadcms-vectorize] Failed to persist vector column: ${errorMessage}`,
-        )
-        throw new Error(`[payloadcms-vectorize] Failed to persist vector column: ${e}`)
-      }
+
+      await adapter.storeEmbedding(payload, poolName, collection, String(sourceDoc.id), id, vector)
     }),
   )
 }

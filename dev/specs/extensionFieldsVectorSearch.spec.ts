@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { makeDummyEmbedDocs, makeDummyEmbedQuery, testEmbeddingVersion } from 'helpers/embed.js'
-import { buildDummyConfig, DIMS, integration, plugin } from './constants.js'
+import { buildDummyConfig, DIMS } from './constants.js'
 import {
   createTestDb,
   destroyPayload,
@@ -11,12 +11,15 @@ import { postgresAdapter } from '@payloadcms/db-postgres'
 import { chunkRichText, chunkText } from 'helpers/chunkers.js'
 import { createVectorSearchHandlers } from '../../src/endpoints/vectorSearch.js'
 import type { KnowledgePoolDynamicConfig } from 'payloadcms-vectorize'
+import payloadcmsVectorize from 'payloadcms-vectorize'
+import { createMockAdapter } from 'helpers/mockAdapter.js'
 
 describe('extensionFields', () => {
   test('returns extensionFields in search results with correct types', async () => {
     // Create a new payload instance with extensionFields
     const dbName = 'endpoint_test_extension'
     await createTestDb({ dbName })
+    const adapter = createMockAdapter()
     const defaultKnowledgePool: KnowledgePoolDynamicConfig = {
       collections: {
         posts: {
@@ -35,7 +38,7 @@ describe('extensionFields', () => {
             }
             // Process content
             if (doc.content) {
-              const contentChunks = await chunkRichText(doc.content, payload)
+              const contentChunks = await chunkRichText(doc.content, payload.config)
               chunks.push(
                 ...contentChunks.map((chunk) => ({
                   chunk,
@@ -92,14 +95,13 @@ describe('extensionFields', () => {
         },
       ],
       db: postgresAdapter({
-        extensions: ['vector'],
-        afterSchemaInit: [integration.afterSchemaInitHook],
         pool: {
           connectionString: `postgresql://postgres:password@localhost:5433/${dbName}`,
         },
       }),
       plugins: [
-        plugin({
+        payloadcmsVectorize({
+          dbAdapter: adapter,
           knowledgePools: {
             default: defaultKnowledgePool,
           },
@@ -133,7 +135,7 @@ describe('extensionFields', () => {
       const knowledgePools: Record<string, KnowledgePoolDynamicConfig> = {
         default: defaultKnowledgePool,
       }
-      const searchHandler = createVectorSearchHandlers(knowledgePools).requestHandler
+      const searchHandler = createVectorSearchHandlers(knowledgePools, adapter).requestHandler
       const mockRequest = {
         json: async () => ({
           query: testQuery,

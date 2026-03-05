@@ -10,7 +10,8 @@ import {
 } from '@payloadcms/richtext-lexical/lexical'
 import { $createHeadingNode } from '@payloadcms/richtext-lexical/lexical/rich-text'
 import { editorConfigFactory, getEnabledNodes, lexicalEditor } from '@payloadcms/richtext-lexical'
-import { createVectorizeIntegration } from 'payloadcms-vectorize'
+import payloadcmsVectorize from 'payloadcms-vectorize'
+import { createMockAdapter } from 'helpers/mockAdapter.js'
 
 export const DIMS = 8
 
@@ -48,22 +49,16 @@ export const getInitialMarkdownContent = async (
 
 export const embeddingsCollection = 'default'
 
-export const integration = createVectorizeIntegration({
-  default: {
-    dims: DIMS,
-    ivfflatLists: 1,
-  },
-})
 export const vectorizeCronJob = { cron: '*/10 * * * * *', limit: 5, queue: 'default' }
-export const plugin = integration.payloadcmsVectorize
 
 export const dummyPluginOptions = {
+  dbAdapter: createMockAdapter(),
   knowledgePools: {
     default: {
       collections: {},
       embeddingConfig: {
         version: 'test',
-        queryFn: async (text: string) => [0, 0, 0, 0, 0, 0, 0, 0],
+        queryFn: async (_text: string) => [0, 0, 0, 0, 0, 0, 0, 0],
         realTimeIngestionFn: async (texts: string[]) => texts.map(() => [0, 0, 0, 0, 0, 0, 0, 0]),
       },
     },
@@ -78,7 +73,7 @@ export async function buildDummyConfig(cfg: Partial<Config>) {
     editor: lexicalEditor(),
     // Provide a dummy db adapter to satisfy types; not used by these tests
     db: {} as any,
-    plugins: [plugin(dummyPluginOptions)],
+    plugins: [payloadcmsVectorize(dummyPluginOptions)],
     ...cfg,
   })
   return built
