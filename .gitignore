@@ -53,5 +53,6 @@ yarn-error.log*
 # Secrets
 */secret
 
-# Cursor
+# Agent
 .cursor/
+.claude/
