@@ -207,7 +207,31 @@ export const embedQuery = async (text: string): Promise<number[]> => {
 
 ## Known Limitations
 
-- **Search `limit` with `where` filtering:** When a `where` clause is provided, filtering is applied after fetching results from Cloudflare Vectorize. This means you may receive fewer results than the requested `limit` even when more matching vectors exist.
+### Metadata Filtering
+
+The CF adapter uses Cloudflare Vectorize's native metadata filtering, which applies filters **before** the topK selection. This means filtering works correctly with the result limit for most operators.
+
+**Natively supported operators** (applied before topK — correct result counts):
+- `equals`, `not_equals`, `in`, `notIn`
+- `greater_than`, `greater_than_equal`, `less_than`, `less_than_equal`
+
+**Post-filtered operators** (applied after topK — may return fewer results than requested):
+- `like`, `contains`, `exists`
+
+### Vectorize Constraints
+
+| Constraint | Limit |
+|---|---|
+| topK maximum | 100 (or 20 when returning metadata) |
+| String metadata indexing | First 64 bytes only (truncated at UTF-8 boundaries) |
+| Filter object size | Under 2048 bytes JSON-encoded |
+| Range query accuracy | May be reduced on ~10M+ vectors |
+
+Metadata indexes must exist before vectors are inserted for filtering to work.
+
+### OR Queries
+
+Cloudflare Vectorize does not support OR at the filter level. All `or` clauses are evaluated as post-filters, subject to the topK constraint.
 
 ## License
 
