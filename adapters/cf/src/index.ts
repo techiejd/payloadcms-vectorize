@@ -61,9 +61,9 @@ export const createCloudflareVectorizeIntegration = (
 
     search,
 
-    storeEmbedding: embed,
+    storeChunk: embed,
 
-    deleteEmbeddings: async (payload, poolName, sourceCollection, docId) => {
+    deleteChunks: async (payload, poolName, sourceCollection, docId) => {
       const vectorizeBinding = getVectorizeBinding(payload)
 
       try {
@@ -116,6 +116,21 @@ export const createCloudflareVectorizeIntegration = (
         )
         throw new Error(`[@payloadcms-vectorize/cf] Failed to delete embeddings: ${errorMessage}`)
       }
+    },
+
+    hasEmbeddingVersion: async (payload, poolName, sourceCollection, docId, _embeddingVersion) => {
+      const result = await payload.find({
+        collection: CF_MAPPINGS_SLUG as CollectionSlug,
+        where: {
+          and: [
+            { poolName: { equals: poolName } },
+            { sourceCollection: { equals: sourceCollection } },
+            { docId: { equals: docId } },
+          ],
+        },
+        limit: 1,
+      })
+      return result.totalDocs > 0
     },
   }
 

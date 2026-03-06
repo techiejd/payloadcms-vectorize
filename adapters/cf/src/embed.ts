@@ -1,39 +1,41 @@
 import { CollectionSlug, Payload } from 'payload'
 import { getVectorizeBinding } from './types.js'
 import { CF_MAPPINGS_SLUG } from './collections/cfMappings.js'
+import type { StoreChunkData } from 'payloadcms-vectorize'
 
-/**
- * Store an embedding vector in Cloudflare Vectorize
- */
 export default async (
   payload: Payload,
   poolName: string,
-  sourceCollection: string,
-  sourceDocId: string,
-  id: string,
-  embedding: number[] | Float32Array,
+  data: StoreChunkData,
 ) => {
   const vectorizeBinding = getVectorizeBinding(payload)
 
   try {
-    const vector = Array.isArray(embedding) ? embedding : Array.from(embedding)
+    const vector = Array.isArray(data.embedding) ? data.embedding : Array.from(data.embedding)
+    const id = `${poolName}:${data.sourceCollection}:${data.docId}:${data.chunkIndex}`
 
-    // Upsert the vector in Cloudflare Vectorize
     await vectorizeBinding.upsert([
       {
         id,
         values: vector,
+        metadata: {
+          sourceCollection: data.sourceCollection,
+          docId: data.docId,
+          chunkIndex: data.chunkIndex,
+          chunkText: data.chunkText,
+          embeddingVersion: data.embeddingVersion,
+          ...data.extensionFields,
+        },
       },
     ])
 
-    // Create a mapping row so we can find this vector during deletion
     await payload.create({
       collection: CF_MAPPINGS_SLUG as CollectionSlug,
       data: {
         vectorId: id,
         poolName,
-        sourceCollection,
-        docId: sourceDocId,
+        sourceCollection: data.sourceCollection,
+        docId: data.docId,
       },
     })
   } catch (e) {
