@@ -2,6 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.6.0-beta.7 - 2026-03-06
+
+### Breaking Changes
+
+- **`DbAdapter` interface redesigned**: `storeEmbedding` and `deleteEmbeddings` replaced with `storeChunk`, `deleteChunks`, and `hasEmbeddingVersion`. Adapters now own all chunk storage, deletion, and version checking — the core plugin no longer calls `payload.create()` or `payload.delete()` directly for embeddings.
+- **New `StoreChunkData` type**: Adapters receive a single data object containing `sourceCollection`, `docId`, `chunkIndex`, `chunkText`, `embeddingVersion`, `embedding`, and `extensionFields`.
+
+### Improved
+
+- **CF adapter: native Vectorize metadata filtering**: Search now uses Cloudflare Vectorize's native `filter` parameter (applied before topK) for `equals`, `not_equals`, `in`, `notIn`, `greater_than`, `greater_than_equal`, `less_than`, `less_than_equal`. Operators `like`, `contains`, `exists`, and `or` clauses are post-filtered.
+- **CF adapter: deterministic vector IDs**: Vectors are now stored with deterministic IDs (`poolName:collection:docId:chunkIndex`), enabling reliable upserts and deletions.
+- **CF adapter: metadata on vectors**: All chunk metadata (including extension fields) is stored directly on Vectorize vectors, enabling filtered search without a separate metadata collection.
+
+### Migration
+
+Custom `DbAdapter` implementations must update to the new interface:
+
+```typescript
+// Before
+storeEmbedding(payload, poolName, collection, docId, embeddingId, embedding)
+deleteEmbeddings(payload, poolName, collection, docId)
+
+// After
+storeChunk(payload, poolName, data: StoreChunkData)
+deleteChunks(payload, poolName, sourceCollection, docId)
+hasEmbeddingVersion(payload, poolName, sourceCollection, docId, embeddingVersion)
+```
+
 ## 0.6.0-beta.5 - 2026-02-25
 
 - Merges main into split_db_adapter (per-batch polling, coordinator/worker architecture, destroyPayload cleanup).
