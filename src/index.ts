@@ -175,6 +175,7 @@ export default (pluginOptions: PayloadcmsVectorizeConfig) =>
     const prepareBulkEmbedTask = createPrepareBulkEmbeddingTask({
       knowledgePools: pluginOptions.knowledgePools,
       pollOrCompleteQueueName: pluginOptions.bulkQueueNames?.pollOrCompleteQueueName,
+      adapter: pluginOptions.dbAdapter,
     })
     tasks.push(prepareBulkEmbedTask)
 
