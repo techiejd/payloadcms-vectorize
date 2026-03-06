@@ -1,5 +1,5 @@
-import type { DbAdapter, KnowledgePoolName, VectorSearchResult } from 'payloadcms-vectorize'
-import type { Payload, BasePayload, Where, Config } from 'payload'
+import type { DbAdapter, KnowledgePoolName, StoreChunkData, VectorSearchResult } from 'payloadcms-vectorize'
+import type { CollectionSlug, Payload, BasePayload, Where, Config } from 'payload'
 
 type StoredEmbedding = {
   poolName: string
@@ -48,22 +48,84 @@ export const createMockAdapter = (options: MockAdapterOptions = {}): DbAdapter =
       custom: { _isMockAdapter: true, ...custom },
     }),
 
-    storeEmbedding: async (
-      _payload: Payload,
+    storeChunk: async (
+      payload: Payload,
       poolName: KnowledgePoolName,
-      _sourceCollection: string,
-      _sourceDocId: string,
-      id: string,
-      embedding: number[] | Float32Array,
+      data: StoreChunkData,
     ): Promise<void> => {
-      const key = `${poolName}:${id}`
-      const embeddingArray = Array.isArray(embedding) ? embedding : Array.from(embedding)
+      const embeddingArray = Array.isArray(data.embedding) ? data.embedding : Array.from(data.embedding)
 
+      const created = await payload.create({
+        collection: poolName as CollectionSlug,
+        data: {
+          sourceCollection: data.sourceCollection,
+          docId: data.docId,
+          chunkIndex: data.chunkIndex,
+          chunkText: data.chunkText,
+          embeddingVersion: data.embeddingVersion,
+          embedding: embeddingArray,
+          ...data.extensionFields,
+        },
+      })
+
+      const key = `${poolName}:${created.id}`
       storage.set(key, {
         poolName,
-        id,
+        id: String(created.id),
         embedding: embeddingArray,
       })
+    },
+
+    deleteChunks: async (
+      payload: Payload,
+      poolName: KnowledgePoolName,
+      sourceCollection: string,
+      docId: string,
+    ): Promise<void> => {
+      for (const [key, stored] of storage) {
+        if (stored.poolName === poolName) {
+          try {
+            const doc = await payload.findByID({
+              collection: poolName as CollectionSlug,
+              id: stored.id,
+            })
+            if (doc && (doc as any).sourceCollection === sourceCollection && (doc as any).docId === docId) {
+              storage.delete(key)
+            }
+          } catch (_e) {}
+        }
+      }
+
+      await payload.delete({
+        collection: poolName as CollectionSlug,
+        where: {
+          and: [
+            { sourceCollection: { equals: sourceCollection } },
+            { docId: { equals: docId } },
+          ],
+        },
+      })
+    },
+
+    hasEmbeddingVersion: async (
+      payload: Payload,
+      poolName: KnowledgePoolName,
+      sourceCollection: string,
+      docId: string,
+      embeddingVersion: string,
+    ): Promise<boolean> => {
+      const result = await payload.find({
+        collection: poolName as CollectionSlug,
+        where: {
+          and: [
+            { sourceCollection: { equals: sourceCollection } },
+            { docId: { equals: docId } },
+            { embeddingVersion: { equals: embeddingVersion } },
+          ],
+        },
+        limit: 1,
+      })
+      return result.totalDocs > 0
     },
 
     search: async (
