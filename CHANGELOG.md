@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## 0.6.0-beta.7 - 2026-03-06
+## 0.7.0-beta.1 - 2026-03-06
 
 ### Breaking Changes
 
