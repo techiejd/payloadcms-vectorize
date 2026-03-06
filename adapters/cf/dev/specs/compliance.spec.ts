@@ -172,7 +172,6 @@ describe('Cloudflare Adapter Compliance Tests', () => {
       const extension = adapter.getConfigExtension({} as any)
 
       expect(extension.custom).toBeDefined()
-      expect(extension.custom!._cfVectorizeAdapter).toBe(true)
       expect(extension.custom!._poolConfigs).toBeDefined()
       expect(extension.custom!._poolConfigs.default).toBeDefined()
       expect(extension.custom!._poolConfigs.default.dims).toBe(DIMS)

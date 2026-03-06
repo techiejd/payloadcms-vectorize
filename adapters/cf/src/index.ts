@@ -52,7 +52,6 @@ export const createCloudflareVectorizeIntegration = (
           [CF_MAPPINGS_SLUG]: cfMappingsCollection,
         },
         custom: {
-          _cfVectorizeAdapter: true,
           _poolConfigs: poolConfig,
           _vectorizeBinding: options.binding,
         },

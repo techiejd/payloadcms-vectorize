@@ -132,7 +132,6 @@ describe('createCloudflareVectorizeIntegration', () => {
       })
       const extension = adapter.getConfigExtension({} as any)
 
-      expect(extension.custom?._cfVectorizeAdapter).toBe(true)
       expect(extension.custom?._poolConfigs).toEqual(poolConfigs)
     })
 
