@@ -69,6 +69,7 @@ export type {
   BulkEmbeddingRunStatus,
   VectorizedPayload,
   DbAdapter,
+  StoreChunkData,
 
   // For adapters
   VectorSearchResult,
