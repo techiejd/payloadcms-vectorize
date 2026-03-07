@@ -69,6 +69,7 @@ export type {
   BulkEmbeddingRunStatus,
   VectorizedPayload,
   DbAdapter,
+  StoreChunkData,
 
   // For adapters
   VectorSearchResult,
@@ -174,6 +175,7 @@ export default (pluginOptions: PayloadcmsVectorizeConfig) =>
     const prepareBulkEmbedTask = createPrepareBulkEmbeddingTask({
       knowledgePools: pluginOptions.knowledgePools,
       pollOrCompleteQueueName: pluginOptions.bulkQueueNames?.pollOrCompleteQueueName,
+      adapter: pluginOptions.dbAdapter,
     })
     tasks.push(prepareBulkEmbedTask)
 

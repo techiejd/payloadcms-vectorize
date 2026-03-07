@@ -371,12 +371,40 @@ export interface BulkEmbeddingInputMetadataDoc extends TypeWithID {
   updatedAt: string
 }
 
+export type StoreChunkData = {
+  sourceCollection: string
+  docId: string
+  chunkIndex: number
+  chunkText: string
+  embeddingVersion: string
+  embedding: number[] | Float32Array
+  extensionFields: Record<string, any>
+}
+
 export type DbAdapter = {
   getConfigExtension: (payloadCmsConfig: Config) => {
     bins?: { key: string; scriptPath: string }[]
     custom?: Record<string, any>
     collections?: Record<string, CollectionConfig>
   }
+  storeChunk: (
+    payload: Payload,
+    poolName: KnowledgePoolName,
+    data: StoreChunkData,
+  ) => Promise<void>
+  deleteChunks: (
+    payload: Payload,
+    poolName: KnowledgePoolName,
+    sourceCollection: string,
+    docId: string,
+  ) => Promise<void>
+  hasEmbeddingVersion: (
+    payload: Payload,
+    poolName: KnowledgePoolName,
+    sourceCollection: string,
+    docId: string,
+    embeddingVersion: string,
+  ) => Promise<boolean>
   search: (
     payload: BasePayload,
     queryEmbedding: number[],
@@ -384,23 +412,4 @@ export type DbAdapter = {
     limit?: number,
     where?: Where,
   ) => Promise<Array<VectorSearchResult>>
-  storeEmbedding: (
-    payload: Payload,
-    poolName: KnowledgePoolName,
-    sourceCollection: string,
-    sourceDocId: string,
-    embeddingId: string,
-    embedding: number[] | Float32Array,
-  ) => Promise<void>
-  /**
-   * Delete embeddings for a source document
-   * Called when a document is deleted or re-indexed
-   * The adapter should delete all vectors associated with this document
-   */
-  deleteEmbeddings?: (
-    payload: Payload,
-    poolName: KnowledgePoolName,
-    sourceCollection: string,
-    docId: string,
-  ) => Promise<void>
 }

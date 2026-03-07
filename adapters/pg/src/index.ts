@@ -86,7 +86,52 @@ export const createPostgresVectorIntegration = (
       }
     },
     search,
-    storeEmbedding: embed,
+
+    storeChunk: async (payload, poolName, data) => {
+      const embeddingArray = Array.isArray(data.embedding) ? data.embedding : Array.from(data.embedding)
+
+      const created = await payload.create({
+        collection: poolName as any,
+        data: {
+          sourceCollection: data.sourceCollection,
+          docId: data.docId,
+          chunkIndex: data.chunkIndex,
+          chunkText: data.chunkText,
+          embeddingVersion: data.embeddingVersion,
+          ...data.extensionFields,
+          embedding: embeddingArray,
+        },
+      })
+
+      await embed(payload, poolName, data.sourceCollection, data.docId, String(created.id), embeddingArray)
+    },
+
+    deleteChunks: async (payload, poolName, sourceCollection, docId) => {
+      await payload.delete({
+        collection: poolName as any,
+        where: {
+          and: [
+            { sourceCollection: { equals: sourceCollection } },
+            { docId: { equals: String(docId) } },
+          ],
+        },
+      })
+    },
+
+    hasEmbeddingVersion: async (payload, poolName, sourceCollection, docId, embeddingVersion) => {
+      const existing = await payload.find({
+        collection: poolName as any,
+        where: {
+          and: [
+            { sourceCollection: { equals: sourceCollection } },
+            { docId: { equals: String(docId) } },
+            { embeddingVersion: { equals: embeddingVersion } },
+          ],
+        },
+        limit: 1,
+      })
+      return existing.totalDocs > 0
+    },
   }
 
   return { afterSchemaInitHook, adapter }
