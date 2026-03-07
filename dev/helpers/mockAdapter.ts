@@ -187,40 +187,50 @@ export const createMockAdapter = (options: MockAdapterOptions = {}): DbAdapter =
   }
 }
 
-/**
- * Simple WHERE clause matcher for basic filtering
- * Supports: equals, in, exists, and, or
- */
 function matchesWhere(doc: Record<string, any>, where: Where): boolean {
   if (!where || Object.keys(where).length === 0) return true
 
-  // Handle 'and' operator
   if ('and' in where && Array.isArray(where.and)) {
     return where.and.every((clause: Where) => matchesWhere(doc, clause))
   }
 
-  // Handle 'or' operator
   if ('or' in where && Array.isArray(where.or)) {
     return where.or.some((clause: Where) => matchesWhere(doc, clause))
   }
 
-  // Handle field-level conditions
   for (const [field, condition] of Object.entries(where)) {
     if (field === 'and' || field === 'or') continue
+    if (typeof condition !== 'object' || condition === null || Array.isArray(condition)) continue
 
     const value = doc[field]
+    const cond = condition as Record<string, unknown>
 
-    if (typeof condition === 'object' && condition !== null) {
-      if ('equals' in condition && value !== condition.equals) {
-        return false
-      }
-      if ('in' in condition && Array.isArray(condition.in) && !condition.in.includes(value)) {
-        return false
-      }
-      if ('exists' in condition) {
-        const exists = value !== undefined && value !== null
-        if (condition.exists !== exists) return false
-      }
+    if ('equals' in cond && value !== cond.equals) return false
+    if ('not_equals' in cond && value === cond.not_equals) return false
+    if ('notEquals' in cond && value === cond.notEquals) return false
+    if ('in' in cond && Array.isArray(cond.in)) {
+      if (cond.in.length === 0 || !cond.in.includes(value)) return false
+    }
+    if ('not_in' in cond && Array.isArray(cond.not_in) && cond.not_in.includes(value)) return false
+    if ('notIn' in cond && Array.isArray(cond.notIn) && (cond.notIn as any[]).includes(value)) return false
+    if ('like' in cond && typeof cond.like === 'string') {
+      const pattern = String(cond.like).replace(/%/g, '.*')
+      if (!new RegExp(`^${pattern}$`).test(String(value ?? ''))) return false
+    }
+    if ('contains' in cond && typeof cond.contains === 'string') {
+      if (!String(value ?? '').includes(String(cond.contains))) return false
+    }
+    if ('greater_than' in cond && !(value > (cond.greater_than as any))) return false
+    if ('greaterThan' in cond && !(value > (cond.greaterThan as any))) return false
+    if ('greater_than_equal' in cond && !(value >= (cond.greater_than_equal as any))) return false
+    if ('greaterThanEqual' in cond && !(value >= (cond.greaterThanEqual as any))) return false
+    if ('less_than' in cond && !(value < (cond.less_than as any))) return false
+    if ('lessThan' in cond && !(value < (cond.lessThan as any))) return false
+    if ('less_than_equal' in cond && !(value <= (cond.less_than_equal as any))) return false
+    if ('lessThanEqual' in cond && !(value <= (cond.lessThanEqual as any))) return false
+    if ('exists' in cond && typeof cond.exists === 'boolean') {
+      const exists = value !== undefined && value !== null
+      if (cond.exists !== exists) return false
     }
   }
 

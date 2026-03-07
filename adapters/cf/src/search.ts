@@ -64,9 +64,9 @@ export default async (
   }
 }
 
-type VectorizeFilter = Record<string, Record<string, unknown>>
+export type VectorizeFilter = Record<string, Record<string, unknown>>
 
-interface FilterSplit {
+export interface FilterSplit {
   nativeFilter: VectorizeFilter | null
   postFilter: Where | null
 }
@@ -88,7 +88,7 @@ const NATIVE_OPERATOR_MAP: Record<string, string> = {
   lessThanEqual: '$lte',
 }
 
-function splitWhere(where: Where): FilterSplit {
+export function splitWhere(where: Where): FilterSplit {
   const nativeFilter: VectorizeFilter = {}
   const postFilterClauses: Where[] = []
 
@@ -142,7 +142,7 @@ function splitWhere(where: Where): FilterSplit {
   }
 }
 
-function matchesPostFilter(doc: Record<string, any>, where: Where): boolean {
+export function matchesPostFilter(doc: Record<string, any>, where: Where): boolean {
   if (!where || Object.keys(where).length === 0) return true
 
   if ('and' in where && Array.isArray(where.and)) {

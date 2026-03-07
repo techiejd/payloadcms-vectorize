@@ -22,6 +22,7 @@ export default defineConfig(() => {
         '@shared-test/helpers/chunkers': path.resolve(dirname, '../../dev/helpers/chunkers.ts'),
         '@shared-test/helpers/embed': path.resolve(dirname, '../../dev/helpers/embed.ts'),
         '@shared-test/constants': path.resolve(dirname, '../../dev/specs/constants.ts'),
+        '@shared-test/endpoints/vectorSearch': path.resolve(dirname, '../../src/endpoints/vectorSearch.ts'),
       },
     },
     test: {
