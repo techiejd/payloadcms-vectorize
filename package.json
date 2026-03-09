@@ -49,7 +49,7 @@
     "test:e2e": "playwright test",
     "test:int": "cross-env DOTENV_CONFIG_PATH=dev/.env.test NODE_OPTIONS='--require=dotenv/config --import=tsx --max-old-space-size=8192' vitest",
     "test:adapters:pg": "cross-env DOTENV_CONFIG_PATH=dev/.env.test NODE_OPTIONS='--require=dotenv/config --import=tsx --max-old-space-size=8192' vitest --config adapters/pg/vitest.config.js",
-    "test:adapters:cf": "cross-env DOTENV_CONFIG_PATH=dev/.env.test NODE_OPTIONS='--require=dotenv/config --import=tsx --max-old-space-size=8192' vitest --config adapters/cf/vitest.config.js"
+    "test:adapters:cf": "cross-env DOTENV_CONFIG_PATH=dev/.env.test NODE_OPTIONS='--require=dotenv/config --import=tsx --max-old-space-size=8192' vitest --config adapters/cf/vitest.config.ts"
   },
   "devDependencies": {
     "@changesets/changelog-github": "^0.5.2",
