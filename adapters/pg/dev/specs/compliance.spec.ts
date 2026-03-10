@@ -17,7 +17,6 @@ import type { DbAdapter } from 'payloadcms-vectorize'
 const DIMS = 8
 const dbName = `pg_compliance_test_${Date.now()}`
 
-// Helper to create test database
 async function createTestDb(name: string) {
   const adminUri =
     process.env.DATABASE_ADMIN_URI || 'postgresql://postgres:password@localhost:5433/postgres'
@@ -83,7 +82,6 @@ describe('Postgres Adapter Compliance Tests', () => {
   })
 
   afterAll(async () => {
-    // Cleanup is handled by test isolation
   })
 
   describe('getConfigExtension()', () => {
@@ -116,26 +114,24 @@ describe('Postgres Adapter Compliance Tests', () => {
     })
   })
 
-  describe('storeEmbedding()', () => {
+  describe('storeChunk()', () => {
     test('persists embedding without error (number[])', async () => {
       const embedding = Array(DIMS)
         .fill(0)
         .map(() => Math.random())
 
-      // Create a document first
-      const doc = await payload.create({
-        collection: 'default' as any,
-        data: {
+      const sourceDocId = `test-embed-1-${Date.now()}`
+
+      await expect(
+        adapter.storeChunk(payload, 'default', {
           sourceCollection: 'test-collection',
-          docId: `test-embed-1-${Date.now()}`,
+          docId: sourceDocId,
           chunkIndex: 0,
           chunkText: 'test text for embedding',
           embeddingVersion: 'v1-test',
-        },
-      })
-
-      await expect(
-        adapter.storeEmbedding(payload, 'default', String(doc.id), embedding),
+          embedding,
+          extensionFields: {},
+        }),
       ).resolves.not.toThrow()
     })
 
@@ -146,47 +142,42 @@ describe('Postgres Adapter Compliance Tests', () => {
           .map(() => Math.random()),
       )
 
-      const doc = await payload.create({
-        collection: 'default' as any,
-        data: {
+      const sourceDocId = `test-embed-2-${Date.now()}`
+
+      await expect(
+        adapter.storeChunk(payload, 'default', {
           sourceCollection: 'test-collection',
-          docId: `test-embed-2-${Date.now()}`,
+          docId: sourceDocId,
           chunkIndex: 0,
           chunkText: 'test text for Float32Array',
           embeddingVersion: 'v1-test',
-        },
-      })
-
-      await expect(
-        adapter.storeEmbedding(payload, 'default', String(doc.id), embedding),
+          embedding,
+          extensionFields: {},
+        }),
       ).resolves.not.toThrow()
     })
   })
 
   describe('search()', () => {
     let targetEmbedding: number[]
-    let similarDocId: string
 
     beforeAll(async () => {
-      // Create test documents with known embeddings
       targetEmbedding = Array(DIMS).fill(0.5)
       const similarEmbedding = Array(DIMS)
         .fill(0.5)
         .map((v) => v + Math.random() * 0.05)
 
-      // Create and embed a document
-      const similarDoc = await payload.create({
-        collection: 'default' as any,
-        data: {
-          sourceCollection: 'test-collection',
-          docId: `test-search-similar-${Date.now()}`,
-          chunkIndex: 0,
-          chunkText: 'similar document for search test',
-          embeddingVersion: 'v1-test',
-        },
+      const sourceDocId = `test-search-similar-${Date.now()}`
+
+      await adapter.storeChunk(payload, 'default', {
+        sourceCollection: 'test-collection',
+        docId: sourceDocId,
+        chunkIndex: 0,
+        chunkText: 'similar document for search test',
+        embeddingVersion: 'v1-test',
+        embedding: similarEmbedding,
+        extensionFields: {},
       })
-      similarDocId = String(similarDoc.id)
-      await adapter.storeEmbedding(payload, 'default', similarDocId, similarEmbedding)
     })
 
     test('returns an array of results', async () => {
@@ -229,6 +220,80 @@ describe('Postgres Adapter Compliance Tests', () => {
       const results = await adapter.search(payload, targetEmbedding, 'default', 1)
 
       expect(results.length).toBeLessThanOrEqual(1)
+    })
+  })
+
+  describe('deleteChunks()', () => {
+    test('removes chunks for a document', async () => {
+      const sourceDocId = `doc-to-delete-${Date.now()}`
+
+      await adapter.storeChunk(payload, 'default', {
+        sourceCollection: 'delete-test',
+        docId: sourceDocId,
+        chunkIndex: 0,
+        chunkText: 'document to delete',
+        embeddingVersion: 'v1-test',
+        embedding: Array(DIMS).fill(0.7),
+        extensionFields: {},
+      })
+
+      const beforeResults = await payload.find({
+        collection: 'default' as any,
+        where: {
+          and: [
+            { sourceCollection: { equals: 'delete-test' } },
+            { docId: { equals: sourceDocId } },
+          ],
+        },
+      })
+      expect(beforeResults.totalDocs).toBeGreaterThan(0)
+
+      await adapter.deleteChunks(payload, 'default', 'delete-test', sourceDocId)
+
+      const afterResults = await payload.find({
+        collection: 'default' as any,
+        where: {
+          and: [
+            { sourceCollection: { equals: 'delete-test' } },
+            { docId: { equals: sourceDocId } },
+          ],
+        },
+      })
+      expect(afterResults.totalDocs).toBe(0)
+    })
+
+    test('handles non-existent documents gracefully', async () => {
+      await expect(
+        adapter.deleteChunks(payload, 'default', 'non-existent', 'fake-id'),
+      ).resolves.not.toThrow()
+    })
+  })
+
+  describe('hasEmbeddingVersion()', () => {
+    test('returns true when chunks exist for document', async () => {
+      const sourceDocId = `test-has-version-${Date.now()}`
+
+      await adapter.storeChunk(payload, 'default', {
+        sourceCollection: 'test-collection',
+        docId: sourceDocId,
+        chunkIndex: 0,
+        chunkText: 'test text',
+        embeddingVersion: 'v1-test',
+        embedding: Array(DIMS).fill(0.5),
+        extensionFields: {},
+      })
+
+      const result = await adapter.hasEmbeddingVersion(
+        payload, 'default', 'test-collection', sourceDocId, 'v1-test',
+      )
+      expect(result).toBe(true)
+    })
+
+    test('returns false when no chunks exist for document', async () => {
+      const result = await adapter.hasEmbeddingVersion(
+        payload, 'default', 'test-collection', 'non-existent-doc', 'v1-test',
+      )
+      expect(result).toBe(false)
     })
   })
 })

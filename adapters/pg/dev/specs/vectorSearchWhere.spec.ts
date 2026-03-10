@@ -479,7 +479,7 @@ describe('PG adapter - WHERE clause operators', () => {
 
   describe('edge cases', () => {
     test('filter by docId (reserved field)', async () => {
-      const allResults = await performVectorSearch(payload, 'Article', 'default', {})
+      const allResults = await performVectorSearch(payload, 'Article', 'default')
       expect(allResults.length).toBeGreaterThan(0)
 
       const targetDocId = allResults[0].docId
