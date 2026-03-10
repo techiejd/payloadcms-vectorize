@@ -25,6 +25,7 @@ export default defineConfig(() => {
       },
     },
     test: {
+      root: dirname,
       environment: 'node',
       hookTimeout: 30_000,
       testTimeout: 30_000,
