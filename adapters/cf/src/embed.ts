@@ -36,6 +36,7 @@ export default async (
         poolName,
         sourceCollection: data.sourceCollection,
         docId: data.docId,
+        embeddingVersion: data.embeddingVersion,
       },
     })
   } catch (e) {

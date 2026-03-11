@@ -117,7 +117,7 @@ export const createCloudflareVectorizeIntegration = (
       }
     },
 
-    hasEmbeddingVersion: async (payload, poolName, sourceCollection, docId, _embeddingVersion) => {
+    hasEmbeddingVersion: async (payload, poolName, sourceCollection, docId, embeddingVersion) => {
       const result = await payload.find({
         collection: CF_MAPPINGS_SLUG as CollectionSlug,
         where: {
@@ -125,6 +125,7 @@ export const createCloudflareVectorizeIntegration = (
             { poolName: { equals: poolName } },
             { sourceCollection: { equals: sourceCollection } },
             { docId: { equals: docId } },
+            { embeddingVersion: { equals: embeddingVersion } },
           ],
         },
         limit: 1,

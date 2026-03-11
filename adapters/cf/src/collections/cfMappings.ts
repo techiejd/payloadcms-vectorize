@@ -42,6 +42,12 @@ const CFMappingsCollection: CollectionConfig = {
       required: true,
       index: true,
     },
+    {
+      name: 'embeddingVersion',
+      type: 'text',
+      required: true,
+      index: true,
+    },
   ],
   timestamps: true,
 }
