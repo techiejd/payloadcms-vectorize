@@ -186,7 +186,7 @@ describe('endpoints: /vector-search, /vector-bulk-embed', () => {
   })
 
   test('plugin does not create embeddings collection when adapter does not provide one', async () => {
-    const dbAdapter = createMockAdapter()
+    const dbAdapter = createMockAdapter({ includeEmbeddingsCollections: false })
 
     const cfg = await buildConfig({
       secret: 'test-secret',

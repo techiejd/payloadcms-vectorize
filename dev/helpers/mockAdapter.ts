@@ -1,4 +1,5 @@
-import type { DbAdapter, KnowledgePoolName, StoreChunkData, VectorSearchResult } from 'payloadcms-vectorize'
+import type { DbAdapter, KnowledgePoolName, KnowledgePoolDynamicConfig, StoreChunkData, VectorSearchResult } from 'payloadcms-vectorize'
+import { createEmbeddingsCollection } from 'payloadcms-vectorize'
 import type { CollectionSlug, Payload, BasePayload, Where, Config } from 'payload'
 
 type StoredEmbedding = {
@@ -12,6 +13,8 @@ type MockAdapterOptions = {
   bins?: { key: string; scriptPath: string }[]
   /** Custom data to return from getConfigExtension */
   custom?: Record<string, any>
+  /** Whether to create embeddings collections (default: true) */
+  includeEmbeddingsCollections?: boolean
 }
 
 /**
@@ -38,15 +41,23 @@ function cosineSimilarity(a: number[], b: number[]): number {
  * This allows testing the core plugin without requiring a database.
  */
 export const createMockAdapter = (options: MockAdapterOptions = {}): DbAdapter => {
-  const { bins = [], custom = {} } = options
-  // In-memory storage for embeddings, keyed by `${poolName}:${id}`
+  const { bins = [], custom = {}, includeEmbeddingsCollections = true } = options
   const storage = new Map<string, StoredEmbedding>()
 
   return {
-    getConfigExtension: (_config: Config) => ({
-      bins,
-      custom: { _isMockAdapter: true, ...custom },
-    }),
+    getConfigExtension: (_config: Config, knowledgePools?: Record<string, KnowledgePoolDynamicConfig>) => {
+      const collections: Record<string, any> = {}
+      if (includeEmbeddingsCollections && knowledgePools) {
+        for (const poolName of Object.keys(knowledgePools)) {
+          collections[poolName] = createEmbeddingsCollection(poolName, knowledgePools[poolName].extensionFields)
+        }
+      }
+      return {
+        bins,
+        custom: { _isMockAdapter: true, ...custom },
+        collections,
+      }
+    },
 
     storeChunk: async (
       payload: Payload,

@@ -3,7 +3,8 @@ import type { PostgresAdapterArgs } from '@payloadcms/db-postgres'
 import { clearEmbeddingsTables, registerEmbeddingsTable } from './drizzle.js'
 import { customType, index } from '@payloadcms/db-postgres/drizzle/pg-core'
 import toSnakeCase from 'to-snake-case'
-import type { DbAdapter } from 'payloadcms-vectorize'
+import type { DbAdapter, KnowledgePoolDynamicConfig } from 'payloadcms-vectorize'
+import { createEmbeddingsCollection } from 'payloadcms-vectorize'
 import { fileURLToPath } from 'url'
 import { dirname, resolve } from 'path'
 import embed from './embed.js'
@@ -66,16 +67,21 @@ export const createPostgresVectorIntegration = (
   }
 
   const adapter: DbAdapter = {
-    getConfigExtension: () => {
-      // Register bin script for migration helper
+    getConfigExtension: (_payloadCmsConfig, knowledgePools) => {
       const __filename = fileURLToPath(import.meta.url)
       const __dirname = dirname(__filename)
       const binScriptPath = resolve(__dirname, 'bin-vectorize-migrate.js')
 
+      const collections: Record<string, any> = {}
+      if (knowledgePools) {
+        for (const poolName of Object.keys(knowledgePools)) {
+          collections[poolName] = createEmbeddingsCollection(poolName, knowledgePools[poolName].extensionFields)
+        }
+      }
+
       return {
         bins: [
           {
-            // Register bin script for migration helper
             key: 'vectorize:migrate',
             scriptPath: binScriptPath,
           },
@@ -83,6 +89,7 @@ export const createPostgresVectorIntegration = (
         custom: {
           _staticConfigs: config,
         },
+        collections,
       }
     },
     search,

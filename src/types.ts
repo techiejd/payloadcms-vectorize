@@ -382,7 +382,10 @@ export type StoreChunkData = {
 }
 
 export type DbAdapter = {
-  getConfigExtension: (payloadCmsConfig: Config) => {
+  getConfigExtension: (
+    payloadCmsConfig: Config,
+    knowledgePools?: Record<string, KnowledgePoolDynamicConfig>,
+  ) => {
     bins?: { key: string; scriptPath: string }[]
     custom?: Record<string, any>
     collections?: Record<string, CollectionConfig>

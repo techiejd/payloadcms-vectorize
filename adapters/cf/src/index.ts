@@ -46,7 +46,7 @@ export const createCloudflareVectorizeIntegration = (
   const poolConfig = options.config
 
   const adapter: DbAdapter = {
-    getConfigExtension: () => {
+    getConfigExtension: (_payloadCmsConfig, _knowledgePools) => {
       return {
         collections: {
           [CF_MAPPINGS_SLUG]: cfMappingsCollection,
