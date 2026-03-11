@@ -212,6 +212,7 @@ describe('createCloudflareVectorizeIntegration', () => {
           poolName: 'default',
           sourceCollection: 'test-collection',
           docId: 'doc-1',
+          embeddingVersion: 'v1',
         },
       })
     })
@@ -411,6 +412,7 @@ describe('createCloudflareVectorizeIntegration', () => {
             { poolName: { equals: 'default' } },
             { sourceCollection: { equals: 'test-collection' } },
             { docId: { equals: 'doc-1' } },
+            { embeddingVersion: { equals: 'v1' } },
           ],
         },
         limit: 1,
