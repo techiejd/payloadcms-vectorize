@@ -8,7 +8,6 @@ import type {
 } from '../types.js'
 import { TASK_SLUG_VECTORIZE } from '../constants.js'
 import { validateChunkData } from '../utils/validateChunkData.js'
-import { deleteDocumentEmbeddings } from '../utils/deleteDocumentEmbeddings.js'
 
 type VectorizeTaskInput = {
   collection: string
@@ -96,13 +95,7 @@ async function runVectorizeTask(args: {
   // Delete all existing embeddings for this document before creating new ones
   // This ensures we replace old embeddings (potentially with a different embeddingVersion)
   // and prevents duplicates when a document is updated
-  await deleteDocumentEmbeddings({
-    payload,
-    poolName,
-    collection,
-    docId: String(sourceDoc.id),
-    adapter,
-  })
+  await adapter.deleteChunks(payload, poolName, collection, String(sourceDoc.id))
 
   // Get chunks from toKnowledgePoolFn
   const chunkData = await toKnowledgePoolFn(sourceDoc, payload)
@@ -117,22 +110,15 @@ async function runVectorizeTask(args: {
   await Promise.all(
     vectors.map(async (vector, index) => {
       const { chunk, ...extensionFields } = chunkData[index]
-      const created = await payload.create({
-        collection: poolName,
-        data: {
-          chunkIndex: index,
-          chunkText: chunk,
-          docId: String(sourceDoc.id),
-          embeddingVersion,
-          sourceCollection: collection,
-          ...extensionFields,
-          embedding: Array.isArray(vector) ? vector : Array.from(vector),
-        },
+      await adapter.storeChunk(payload, poolName, {
+        sourceCollection: collection,
+        docId: String(sourceDoc.id),
+        chunkIndex: index,
+        chunkText: chunk,
+        embeddingVersion,
+        embedding: vector,
+        extensionFields,
       })
-
-      const id = String(created.id)
-
-      await adapter.storeEmbedding(payload, poolName, collection, String(sourceDoc.id), id, vector)
     }),
   )
 }

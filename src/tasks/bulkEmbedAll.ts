@@ -245,10 +245,12 @@ export const createPrepareBulkEmbeddingTask = ({
   knowledgePools,
   pollOrCompleteQueueName,
   prepareBulkEmbedQueueName,
+  adapter,
 }: {
   knowledgePools: Record<KnowledgePoolName, KnowledgePoolDynamicConfig>
   pollOrCompleteQueueName?: string
   prepareBulkEmbedQueueName?: string
+  adapter: DbAdapter
 }): TaskConfig<PrepareBulkEmbeddingTaskInputOutput> => {
   const task: TaskConfig<PrepareBulkEmbeddingTaskInputOutput> = {
     slug: TASK_SLUG_PREPARE_BULK_EMBEDDING,
@@ -399,6 +401,7 @@ export const createPrepareBulkEmbeddingTask = ({
           includeAll,
           lastCompletedAtDate,
           addChunk: callbacks.addChunk,
+          adapter,
         })
       } catch (error) {
         // Ingestion failed - mark run as failed
@@ -597,6 +600,7 @@ async function streamAndBatchDocs(args: {
     chunk: BulkEmbeddingInput
     isLastChunk: boolean
   }) => Promise<BatchSubmission | null>
+  adapter: DbAdapter
 }): Promise<{ batchCount: number; totalInputs: number; batchIds: (string | number)[] }> {
   const {
     payload,
@@ -609,6 +613,7 @@ async function streamAndBatchDocs(args: {
     includeAll,
     lastCompletedAtDate,
     addChunk,
+    adapter,
   } = args
 
   // Async generator that yields chunks one at a time from pre-fetched docs
@@ -619,13 +624,9 @@ async function streamAndBatchDocs(args: {
       // If !includeAll, we still need to check if document has current embedding
       // (can't filter this in the where clause since it's a cross-collection check)
       if (!includeAll && !lastCompletedAtDate) {
-        const hasCurrentEmbedding = await docHasEmbeddingVersion({
-          payload,
-          poolName,
-          sourceCollection: collectionSlug,
-          docId: String(doc.id),
-          embeddingVersion,
-        })
+        const hasCurrentEmbedding = await adapter.hasEmbeddingVersion(
+          payload, poolName, collectionSlug, String(doc.id), embeddingVersion,
+        )
         if (hasCurrentEmbedding) continue
       }
 
@@ -879,13 +880,9 @@ async function pollAndCompleteSingleBatch(args: {
       if (isFirstChunkForDoc) {
         processedDocs.add(docKey)
         // Check if embeddings already exist for this document+version (from a previous batch)
-        const hasCurrentEmbedding = await docHasEmbeddingVersion({
-          payload,
-          poolName,
-          sourceCollection: meta.sourceCollection,
-          docId: meta.docId,
-          embeddingVersion: meta.embeddingVersion,
-        })
+        const hasCurrentEmbedding = await adapter.hasEmbeddingVersion(
+          payload, poolName, meta.sourceCollection, meta.docId, meta.embeddingVersion,
+        )
 
         // Only delete if no embeddings exist for this version (they're from an old version)
         if (!hasCurrentEmbedding) {
@@ -904,27 +901,15 @@ async function pollAndCompleteSingleBatch(args: {
         ? output.embedding
         : Array.from(output.embedding)
 
-      const created = await payload.create({
-        collection: poolName as CollectionSlug,
-        data: {
-          sourceCollection: meta.sourceCollection,
-          docId: String(meta.docId),
-          chunkIndex: meta.chunkIndex,
-          chunkText: meta.text,
-          embeddingVersion: meta.embeddingVersion,
-          ...(meta.extensionFields || {}),
-          embedding: embeddingArray,
-        },
+      await adapter.storeChunk(payload, poolName, {
+        sourceCollection: meta.sourceCollection,
+        docId: String(meta.docId),
+        chunkIndex: meta.chunkIndex,
+        chunkText: meta.text,
+        embeddingVersion: meta.embeddingVersion,
+        embedding: embeddingArray,
+        extensionFields: (meta.extensionFields || {}) as Record<string, any>,
       })
-
-      await adapter.storeEmbedding(
-        payload,
-        poolName,
-        meta.sourceCollection,
-        String(meta.docId),
-        String(created.id),
-        embeddingArray,
-      )
 
       succeededCount++
     },
@@ -937,28 +922,6 @@ async function pollAndCompleteSingleBatch(args: {
     failedCount,
     failedChunkData,
   }
-}
-
-async function docHasEmbeddingVersion(args: {
-  payload: Payload
-  poolName: KnowledgePoolName
-  sourceCollection: string
-  docId: string
-  embeddingVersion: string
-}): Promise<boolean> {
-  const { payload, poolName, sourceCollection, docId, embeddingVersion } = args
-  const existing = await payload.find({
-    collection: poolName as CollectionSlug,
-    where: {
-      and: [
-        { sourceCollection: { equals: sourceCollection } },
-        { docId: { equals: String(docId) } },
-        { embeddingVersion: { equals: embeddingVersion } },
-      ],
-    },
-    limit: 1,
-  })
-  return existing.totalDocs > 0
 }
 
 /**

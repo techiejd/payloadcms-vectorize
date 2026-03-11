@@ -1,6 +1,7 @@
 import type { CollectionSlug, Config, Payload, PayloadRequest } from 'payload'
 
 import { createEmbeddingsCollection } from './collections/embeddings.js'
+export { createEmbeddingsCollection }
 import type {
   PayloadcmsVectorizeConfig,
   KnowledgePoolName,
@@ -69,6 +70,7 @@ export type {
   BulkEmbeddingRunStatus,
   VectorizedPayload,
   DbAdapter,
+  StoreChunkData,
 
   // For adapters
   VectorSearchResult,
@@ -122,15 +124,6 @@ export default (pluginOptions: PayloadcmsVectorizeConfig) =>
     for (const poolName in pluginOptions.knowledgePools) {
       const dynamicConfig = pluginOptions.knowledgePools[poolName]
 
-      // Add the embeddings collection for this knowledge pool with extensionFields
-      const embeddingsCollection = createEmbeddingsCollection(
-        poolName,
-        dynamicConfig.extensionFields,
-      )
-      if (!config.collections.find((c) => c.slug === poolName)) {
-        config.collections.push(embeddingsCollection)
-      }
-
       // Build reverse mapping for hooks
       const collectionSlugs = Object.keys(dynamicConfig.collections)
       for (const collectionSlug of collectionSlugs) {
@@ -174,6 +167,7 @@ export default (pluginOptions: PayloadcmsVectorizeConfig) =>
     const prepareBulkEmbedTask = createPrepareBulkEmbeddingTask({
       knowledgePools: pluginOptions.knowledgePools,
       pollOrCompleteQueueName: pluginOptions.bulkQueueNames?.pollOrCompleteQueueName,
+      adapter: pluginOptions.dbAdapter,
     })
     tasks.push(prepareBulkEmbedTask)
 
@@ -324,7 +318,7 @@ export default (pluginOptions: PayloadcmsVectorizeConfig) =>
       config.endpoints = endpoints
     }
 
-    const configExtension = pluginOptions.dbAdapter.getConfigExtension(config)
+    const configExtension = pluginOptions.dbAdapter.getConfigExtension(config, pluginOptions.knowledgePools)
 
     // Create vectorized payload object factory that creates methods bound to a payload instance
     const createVectorizedPayloadObject = (payload: Payload): VectorizedPayload => {

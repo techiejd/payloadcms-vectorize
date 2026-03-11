@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:developers.cloudflare.com)"
+    ],
+    "additionalDirectories": [
+      "/Users/juandominguez/development/payloadcms-vectorize/adapters/cf",
+      "/Users/juandominguez/development/payloadcms-vectorize/docs"
+    ]
+  }
+}

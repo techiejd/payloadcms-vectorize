@@ -6,7 +6,7 @@
   ],
   "commit": false,
   "fixed": [
-    ["payloadcms-vectorize", "@payloadcms-vectorize/pg"]
+    ["payloadcms-vectorize", "@payloadcms-vectorize/pg", "@payloadcms-vectorize/cf"]
   ],
   "access": "public",
   "baseBranch": "main",
