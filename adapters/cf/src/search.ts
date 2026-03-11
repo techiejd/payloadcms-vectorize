@@ -161,7 +161,10 @@ export function matchesPostFilter(doc: Record<string, any>, where: Where): boole
     const cond = condition as Record<string, unknown>
 
     if ('like' in cond && typeof cond.like === 'string') {
-      const pattern = String(cond.like).replace(/%/g, '.*')
+      const pattern = String(cond.like)
+        .replace(/%/g, '\x00')
+        .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        .replace(/\x00/g, '.*')
       if (!new RegExp(`^${pattern}$`, 'i').test(String(value ?? ''))) return false
     }
 
