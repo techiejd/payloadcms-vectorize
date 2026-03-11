@@ -233,6 +233,11 @@ describe('CF adapter - matchesPostFilter', () => {
       expect(matchesPostFilter(doc, { tags: { like: '%JavaScript%' } })).toBe(true)
     })
 
+    test('like treats regex special characters as literals', () => {
+      expect(matchesPostFilter(doc, { tags: { like: '%node.s%' } })).toBe(false)
+      expect(matchesPostFilter(doc, { tags: { like: '%nodejs%' } })).toBe(true)
+    })
+
     test('contains matches substring', () => {
       expect(matchesPostFilter(doc, { category: { contains: 'tech' } })).toBe(true)
     })
