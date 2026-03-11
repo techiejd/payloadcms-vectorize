@@ -185,6 +185,35 @@ describe('endpoints: /vector-search, /vector-bulk-embed', () => {
     expect(collectionSlugs).toContain('vector-bulk-embedding-input-metadata')
   })
 
+  test('plugin does not create embeddings collection when adapter does not provide one', async () => {
+    const dbAdapter = createMockAdapter()
+
+    const cfg = await buildConfig({
+      secret: 'test-secret',
+      collections: [],
+      editor: lexicalEditor(),
+      db: {} as any,
+      plugins: [
+        payloadcmsVectorize({
+          dbAdapter,
+          knowledgePools: {
+            myPool: {
+              collections: {},
+              embeddingConfig: {
+                version: 'test',
+                queryFn: async () => [0, 0, 0, 0, 0, 0, 0, 0],
+                realTimeIngestionFn: async (texts) => texts.map(() => [0, 0, 0, 0, 0, 0, 0, 0]),
+              },
+            },
+          },
+        }),
+      ],
+    })
+
+    const collectionSlugs = cfg.collections.map((c) => c.slug)
+    expect(collectionSlugs).not.toContain('myPool')
+  })
+
   test('embedding collection w/ extensionFields are added to list of collections', async () => {
     const dbAdapter = createMockAdapter()
 
