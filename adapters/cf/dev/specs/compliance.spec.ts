@@ -388,5 +388,24 @@ describe('Cloudflare Adapter Compliance Tests', () => {
       )
       expect(result).toBe(false)
     })
+
+    test('returns false when chunks exist but with different embeddingVersion', async () => {
+      const sourceDocId = `test-version-mismatch-${Date.now()}`
+
+      await adapter.storeChunk(payload, 'default', {
+        sourceCollection: 'test-collection',
+        docId: sourceDocId,
+        chunkIndex: 0,
+        chunkText: 'test text',
+        embeddingVersion: 'v1-old',
+        embedding: Array(DIMS).fill(0.5),
+        extensionFields: {},
+      })
+
+      const result = await adapter.hasEmbeddingVersion(
+        payload, 'default', 'test-collection', sourceDocId, 'v2-new',
+      )
+      expect(result).toBe(false)
+    })
   })
 })
