@@ -74,7 +74,7 @@ describe('Migration CLI integration tests', () => {
         },
       })
 
-      payload = await getPayload({ config, cron: true })
+      payload = await getPayload({ config, cron: false })
     })
 
     afterAll(async () => {
@@ -278,7 +278,7 @@ describe('Migration CLI integration tests', () => {
 
       autoPayload = await getPayload({
         config: autoConfig,
-        cron: true,
+        cron: false,
         key: `migration-auto-test-${Date.now()}`,
       })
 
@@ -368,7 +368,7 @@ describe('Migration CLI integration tests', () => {
 
       autoPayload = await getPayload({
         config: autoConfig,
-        cron: true,
+        cron: false,
         key: `migration-auto-test-2-${Date.now()}`,
       })
 
@@ -499,7 +499,7 @@ describe('Migration CLI integration tests', () => {
 
       dimsPayload = await getPayload({
         config: dimsConfig,
-        cron: true,
+        cron: false,
         key: `migration-dims-test-${Date.now()}`,
       })
 
@@ -590,7 +590,7 @@ describe('Migration CLI integration tests', () => {
 
       dimsPayload = await getPayload({
         config: dimsConfig,
-        cron: true,
+        cron: false,
         key: `migration-dims-test-2-${Date.now()}`,
       })
 
@@ -821,7 +821,7 @@ describe('Migration CLI integration tests', () => {
 
       multiPayload = await getPayload({
         config: multiConfig,
-        cron: true,
+        cron: false,
         key: `migration-multi-test-${Date.now()}`,
       })
 

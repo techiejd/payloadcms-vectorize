@@ -3,7 +3,8 @@ import type { PostgresAdapterArgs } from '@payloadcms/db-postgres'
 import { clearEmbeddingsTables, registerEmbeddingsTable } from './drizzle.js'
 import { customType, index } from '@payloadcms/db-postgres/drizzle/pg-core'
 import toSnakeCase from 'to-snake-case'
-import type { DbAdapter } from 'payloadcms-vectorize'
+import type { DbAdapter, KnowledgePoolDynamicConfig } from 'payloadcms-vectorize'
+import { createEmbeddingsCollection } from 'payloadcms-vectorize'
 import { fileURLToPath } from 'url'
 import { dirname, resolve } from 'path'
 import embed from './embed.js'
@@ -66,16 +67,21 @@ export const createPostgresVectorIntegration = (
   }
 
   const adapter: DbAdapter = {
-    getConfigExtension: () => {
-      // Register bin script for migration helper
+    getConfigExtension: (_payloadCmsConfig, knowledgePools) => {
       const __filename = fileURLToPath(import.meta.url)
       const __dirname = dirname(__filename)
       const binScriptPath = resolve(__dirname, 'bin-vectorize-migrate.js')
 
+      const collections: Record<string, any> = {}
+      if (knowledgePools) {
+        for (const poolName of Object.keys(knowledgePools)) {
+          collections[poolName] = createEmbeddingsCollection(poolName, knowledgePools[poolName].extensionFields)
+        }
+      }
+
       return {
         bins: [
           {
-            // Register bin script for migration helper
             key: 'vectorize:migrate',
             scriptPath: binScriptPath,
           },
@@ -83,10 +89,56 @@ export const createPostgresVectorIntegration = (
         custom: {
           _staticConfigs: config,
         },
+        collections,
       }
     },
     search,
-    storeEmbedding: embed,
+
+    storeChunk: async (payload, poolName, data) => {
+      const embeddingArray = Array.isArray(data.embedding) ? data.embedding : Array.from(data.embedding)
+
+      const created = await payload.create({
+        collection: poolName as any,
+        data: {
+          sourceCollection: data.sourceCollection,
+          docId: data.docId,
+          chunkIndex: data.chunkIndex,
+          chunkText: data.chunkText,
+          embeddingVersion: data.embeddingVersion,
+          ...data.extensionFields,
+          embedding: embeddingArray,
+        },
+      })
+
+      await embed(payload, poolName, data.sourceCollection, data.docId, String(created.id), embeddingArray)
+    },
+
+    deleteChunks: async (payload, poolName, sourceCollection, docId) => {
+      await payload.delete({
+        collection: poolName as any,
+        where: {
+          and: [
+            { sourceCollection: { equals: sourceCollection } },
+            { docId: { equals: String(docId) } },
+          ],
+        },
+      })
+    },
+
+    hasEmbeddingVersion: async (payload, poolName, sourceCollection, docId, embeddingVersion) => {
+      const existing = await payload.find({
+        collection: poolName as any,
+        where: {
+          and: [
+            { sourceCollection: { equals: sourceCollection } },
+            { docId: { equals: String(docId) } },
+            { embeddingVersion: { equals: embeddingVersion } },
+          ],
+        },
+        limit: 1,
+      })
+      return existing.totalDocs > 0
+    },
   }
 
   return { afterSchemaInitHook, adapter }

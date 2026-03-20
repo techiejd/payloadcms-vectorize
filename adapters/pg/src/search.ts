@@ -70,7 +70,7 @@ export default async (
 
   // Convert WHERE clause to Drizzle conditions
   let drizzleWhere: any = undefined
-  if (where) {
+  if (where && Object.keys(where).length > 0) {
     drizzleWhere = convertWhereToDrizzle(where, table, collectionConfig.flattenedFields)
     if (drizzleWhere === null) {
       // WHERE clause resulted in an empty condition (e.g., empty 'and' or 'or' array)

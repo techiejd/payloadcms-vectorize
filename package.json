@@ -1,6 +1,6 @@
 {
   "name": "payloadcms-vectorize",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "A plugin to vectorize collections for RAG in Payload 3.0",
   "license": "MIT",
   "type": "module",
@@ -24,11 +24,12 @@
   "scripts": {
     "build": "pnpm copyfiles && pnpm build:types && pnpm build:swc && pnpm build:adapters",
     "build:swc": "swc ./src -d ./dist --config-file .swcrc --strip-leading-paths",
-    "build:adapters": "pnpm build:adapters:pg",
+    "build:adapters": "pnpm build:adapters:pg && pnpm build:adapters:cf",
     "build:adapters:pg": "cd ./adapters/pg && swc ./src -d ./dist --config-file ../../.swcrc --strip-leading-paths",
+    "build:adapters:cf": "cd ./adapters/cf && swc ./src -d ./dist --config-file ../../.swcrc --strip-leading-paths",
     "build:types": "tsc -p tsconfig.build.json --outDir dist --rootDir ./src",
     "build:types:all": "pnpm build:types && tsc --noEmit",
-    "clean": "rimraf {dist,*.tsbuildinfo,adapters/pg/dist}",
+    "clean": "rimraf {dist,*.tsbuildinfo,adapters/pg/dist,adapters/cf/dist}",
     "copyfiles": "copyfiles -u 1 \"src/**/*.{html,css,scss,ttf,woff,woff2,eot,svg,jpg,png,json}\" dist/",
     "dev": "cross-env DOTENV_CONFIG_PATH=dev/.env.development NODE_OPTIONS=--require=dotenv/config next dev dev --turbo",
     "dev:generate-importmap": "pnpm dev:payload generate:importmap",
@@ -47,7 +48,8 @@
     "test": "pnpm test:int && pnpm test:e2e",
     "test:e2e": "playwright test",
     "test:int": "cross-env DOTENV_CONFIG_PATH=dev/.env.test NODE_OPTIONS='--require=dotenv/config --import=tsx --max-old-space-size=8192' vitest",
-    "test:adapters:pg": "cross-env DOTENV_CONFIG_PATH=dev/.env.test NODE_OPTIONS='--require=dotenv/config --import=tsx --max-old-space-size=8192' vitest --config adapters/pg/vitest.config.js"
+    "test:adapters:pg": "cross-env DOTENV_CONFIG_PATH=dev/.env.test NODE_OPTIONS='--require=dotenv/config --import=tsx --max-old-space-size=8192' vitest --config adapters/pg/vitest.config.js",
+    "test:adapters:cf": "cross-env DOTENV_CONFIG_PATH=dev/.env.test NODE_OPTIONS='--require=dotenv/config --import=tsx --max-old-space-size=8192' vitest --config adapters/cf/vitest.config.ts"
   },
   "devDependencies": {
     "@changesets/changelog-github": "^0.5.2",
@@ -68,7 +70,6 @@
     "@types/pg": "^8.15.5",
     "@types/react": "19.1.8",
     "@types/react-dom": "19.1.6",
-    "@types/to-snake-case": "^1.0.2",
     "ai": "^5.0.72",
     "autoprefixer": "^10.4.21",
     "copyfiles": "2.4.1",
@@ -130,7 +131,5 @@
   },
   "registry": "https://registry.npmjs.org/",
   "packageManager": "pnpm@10.17.1+sha512.17c560fca4867ae9473a3899ad84a88334914f379be46d455cbf92e5cf4b39d34985d452d2583baf19967fa76cb5c17bc9e245529d0b98745721aa7200ecaf7a",
-  "dependencies": {
-    "to-snake-case": "1.0.0"
-  }
+  "dependencies": {}
 }

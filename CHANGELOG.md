@@ -2,19 +2,47 @@
 
 All notable changes to this project will be documented in this file.
 
-## 0.7.0
+## 0.7.1 - 2026-03-20
+
+### Fixed
+
+- **CF adapter: `hasEmbeddingVersion` now filters on version**: Previously ignored the `embeddingVersion` parameter and only checked if any mapping existed, meaning model version bumps wouldn't trigger re-embedding.
+- **CF adapter: `like` operator escapes regex special characters**: Characters like `.`, `+`, `(` in `like` patterns are now treated as literals, not regex wildcards.
+- **PG adapter: empty WHERE object no longer throws**: Passing `{}` as a WHERE clause now correctly returns unfiltered results instead of erroring.
+- **PG adapter: migration CLI tests no longer race on teardown**: Disabled unnecessary cron in migration tests that caused spurious errors when the test database was torn down.
+- **Embeddings collection creation delegated to adapter**: Adapters now own collection creation, fixing an issue where the core plugin could create collections before the adapter was ready.
+
+### Changed
+
+- Removed `to-snake-case` dependency from root package (only needed in `@payloadcms-vectorize/pg`).
+
+## 0.7.0 - 2026-03-06
 
 ### Breaking Changes
 
-- **Database Adapter Architecture**: The plugin now uses a pluggable database adapter system. You must install a database adapter package (e.g., `@payloadcms-vectorize/pg`) separately from the core plugin.
-- **`dbAdapter` option required**: The `payloadcmsVectorize()` plugin now requires a `dbAdapter` option pointing to your adapter's implementation.
-- **`similarity` renamed to `score`**: The `VectorSearchResult.similarity` field has been renamed to `score` to be more generic across different distance metrics.
+- **`DbAdapter` interface redesigned**: `storeEmbedding` and `deleteEmbeddings` replaced with `storeChunk`, `deleteChunks`, and `hasEmbeddingVersion`. Adapters now own all chunk storage, deletion, and version checking — the core plugin no longer calls `payload.create()` or `payload.delete()` directly for embeddings.
+- **New `StoreChunkData` type**: Adapters receive a single data object containing `sourceCollection`, `docId`, `chunkIndex`, `chunkText`, `embeddingVersion`, `embedding`, and `extensionFields`.
 
-### Added
+### Improved
 
-- **`@payloadcms-vectorize/pg` package**: PostgreSQL adapter for pgvector, extracted from the core plugin.
-- **`DbAdapter` interface**: New interface for implementing custom database adapters. See `adapters/README.md`.
-- **`deleteEmbeddings` on `DbAdapter`**: Adapters can now delete vectors when a document is deleted or re-indexed.
+- **CF adapter: native Vectorize metadata filtering**: Search now uses Cloudflare Vectorize's native `filter` parameter (applied before topK) for `equals`, `not_equals`, `in`, `notIn`, `greater_than`, `greater_than_equal`, `less_than`, `less_than_equal`. Operators `like`, `contains`, `exists`, and `or` clauses are post-filtered.
+- **CF adapter: deterministic vector IDs**: Vectors are now stored with deterministic IDs (`poolName:collection:docId:chunkIndex`), enabling reliable upserts and deletions.
+- **CF adapter: metadata on vectors**: All chunk metadata (including extension fields) is stored directly on Vectorize vectors, enabling filtered search without a separate metadata collection.
+
+### Migration
+
+Custom `DbAdapter` implementations must update to the new interface:
+
+```typescript
+// Before
+storeEmbedding(payload, poolName, collection, docId, embeddingId, embedding)
+deleteEmbeddings(payload, poolName, collection, docId)
+
+// After
+storeChunk(payload, poolName, data: StoreChunkData)
+deleteChunks(payload, poolName, sourceCollection, docId)
+hasEmbeddingVersion(payload, poolName, sourceCollection, docId, embeddingVersion)
+```
 
 ## 0.6.0-beta.5 - 2026-02-25
 
@@ -36,8 +64,9 @@ All notable changes to this project will be documented in this file.
 ### Added
 
 - **`@payloadcms-vectorize/pg` package**: PostgreSQL adapter for pgvector, extracted from the core plugin.
+- **`@payloadcms-vectorize/cf` package**: Cloudflare Vectorize adapter for edge-native vector search.
 - **`DbAdapter` interface**: New interface for implementing custom database adapters. See `adapters/README.md`.
-- **`deleteEmbeddings` on `DbAdapter`**: Adapters can now delete vectors when a document is deleted or re-indexed.
+- **`deleteEmbeddings` on `DbAdapter`**: Adapters can now delete vectors when a document is deleted or re-indexed. Implemented in both the `pg` and `cf` adapters.
 - **Adapter documentation**: Added `adapters/README.md` explaining how to create custom adapters.
 
 ### Migration

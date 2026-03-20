@@ -21,6 +21,7 @@ node_modules/
 /build
 /dist
 /adapters/pg/dist
+/adapters/cf/dist
 
 # misc
 .DS_Store
@@ -53,6 +54,5 @@ yarn-error.log*
 # Secrets
 */secret
 
-# Agent
+# Cursor
 .cursor/
-.claude/

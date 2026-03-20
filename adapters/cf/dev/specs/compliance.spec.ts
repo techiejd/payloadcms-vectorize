@@ -1,21 +1,87 @@
 /**
- * Adapter compliance tests for the Postgres adapter.
+ * Adapter compliance tests for the Cloudflare Vectorize adapter.
  *
- * These tests verify that the Postgres adapter correctly implements
+ * These tests verify that the Cloudflare adapter correctly implements
  * the DbAdapter interface as defined in payloadcms-vectorize.
+ *
+ * Note: Uses mocked Cloudflare bindings since there's no local Vectorize emulator.
  */
-import { beforeAll, afterAll, describe, expect, test } from 'vitest'
+import { beforeAll, afterAll, describe, expect, test, vi } from 'vitest'
 import type { Payload, SanitizedConfig } from 'payload'
 import { buildConfig, getPayload } from 'payload'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { lexicalEditor } from '@payloadcms/richtext-lexical'
 import { Client } from 'pg'
-import { createPostgresVectorIntegration } from '../../src/index.js'
+import { createCloudflareVectorizeIntegration } from '../../src/index.js'
 import payloadcmsVectorize from 'payloadcms-vectorize'
 import type { DbAdapter } from 'payloadcms-vectorize'
 
 const DIMS = 8
-const dbName = `pg_compliance_test_${Date.now()}`
+const dbName = `cf_compliance_test_${Date.now()}`
+
+function createMockVectorizeBinding() {
+  const storage = new Map<
+    string,
+    { id: string; values: number[]; metadata?: Record<string, any> }
+  >()
+
+  return {
+    query: vi.fn(async (vector: number[], options?: any) => {
+      const topK = options?.topK || 10
+      const allVectors = Array.from(storage.values())
+
+      let filtered = allVectors
+      if (options?.where?.and) {
+        filtered = allVectors.filter((vec) => {
+          return options.where.and.every((condition: any) => {
+            return vec.metadata?.[condition.key] === condition.value
+          })
+        })
+      }
+
+      const results = filtered.map((vec) => {
+        let dotProduct = 0
+        let normA = 0
+        let normB = 0
+
+        for (let i = 0; i < vector.length; i++) {
+          dotProduct += vector[i] * vec.values[i]
+          normA += vector[i] * vector[i]
+          normB += vec.values[i] * vec.values[i]
+        }
+
+        const similarity = dotProduct / (Math.sqrt(normA) * Math.sqrt(normB))
+
+        return {
+          id: vec.id,
+          score: similarity,
+          metadata: vec.metadata,
+        }
+      })
+
+      results.sort((a, b) => b.score - a.score)
+      return { matches: results.slice(0, topK) }
+    }),
+
+    upsert: vi.fn(async (vectors: Array<{ id: string; values: number[]; metadata?: any }>) => {
+      for (const vec of vectors) {
+        storage.set(vec.id, vec)
+      }
+    }),
+
+    deleteByIds: vi.fn(async (ids: string[]) => {
+      for (const id of ids) {
+        storage.delete(id)
+      }
+    }),
+
+    list: vi.fn(async () => {
+      return Array.from(storage.values())
+    }),
+
+    __getStorage: () => storage,
+  }
+}
 
 async function createTestDb(name: string) {
   const adminUri =
@@ -30,29 +96,32 @@ async function createTestDb(name: string) {
   await client.end()
 }
 
-describe('Postgres Adapter Compliance Tests', () => {
+describe('Cloudflare Adapter Compliance Tests', () => {
   let adapter: DbAdapter
   let payload: Payload
   let config: SanitizedConfig
+  let mockVectorize: ReturnType<typeof createMockVectorizeBinding>
 
   beforeAll(async () => {
     await createTestDb(dbName)
 
-    const { afterSchemaInitHook, adapter: pgAdapter } = createPostgresVectorIntegration({
-      default: {
-        dims: DIMS,
-        ivfflatLists: 1,
+    mockVectorize = createMockVectorizeBinding()
+
+    const { adapter: cfAdapter } = createCloudflareVectorizeIntegration({
+      config: {
+        default: {
+          dims: DIMS,
+        },
       },
+      binding: mockVectorize as any,
     })
-    adapter = pgAdapter
+    adapter = cfAdapter
 
     config = await buildConfig({
       secret: 'test-secret',
       editor: lexicalEditor(),
       collections: [],
       db: postgresAdapter({
-        extensions: ['vector'],
-        afterSchemaInit: [afterSchemaInitHook],
         pool: {
           connectionString: `postgresql://postgres:password@localhost:5433/${dbName}`,
         },
@@ -76,12 +145,13 @@ describe('Postgres Adapter Compliance Tests', () => {
 
     payload = await getPayload({
       config,
-      key: `pg-compliance-${Date.now()}`,
+      key: `cf-compliance-${Date.now()}`,
       cron: false,
     })
   })
 
   afterAll(async () => {
+    // Cleanup is handled by test isolation
   })
 
   describe('getConfigExtension()', () => {
@@ -92,25 +162,21 @@ describe('Postgres Adapter Compliance Tests', () => {
       expect(typeof extension).toBe('object')
     })
 
-    test('bins property contains vectorize:migrate script', () => {
-      const extension = adapter.getConfigExtension({} as any)
-
-      expect(extension.bins).toBeDefined()
-      expect(Array.isArray(extension.bins)).toBe(true)
-      expect(extension.bins!.length).toBeGreaterThan(0)
-
-      const migrateScript = extension.bins!.find((b) => b.key === 'vectorize:migrate')
-      expect(migrateScript).toBeDefined()
-      expect(migrateScript!.scriptPath).toBeTruthy()
-    })
-
-    test('custom property contains _staticConfigs', () => {
+    test('custom property contains adapter metadata', () => {
       const extension = adapter.getConfigExtension({} as any)
 
       expect(extension.custom).toBeDefined()
-      expect(extension.custom!._staticConfigs).toBeDefined()
-      expect(extension.custom!._staticConfigs.default).toBeDefined()
-      expect(extension.custom!._staticConfigs.default.dims).toBe(DIMS)
+      expect(extension.custom!._poolConfigs).toBeDefined()
+      expect(extension.custom!._poolConfigs.default).toBeDefined()
+      expect(extension.custom!._poolConfigs.default.dims).toBe(DIMS)
+    })
+
+    test('collections property contains cfMappings collection', () => {
+      const extension = adapter.getConfigExtension({} as any)
+
+      expect(extension.collections).toBeDefined()
+      expect(extension.collections!['vector-cf-mappings']).toBeDefined()
+      expect(extension.collections!['vector-cf-mappings'].slug).toBe('vector-cf-mappings')
     })
   })
 
@@ -133,6 +199,8 @@ describe('Postgres Adapter Compliance Tests', () => {
           extensionFields: {},
         }),
       ).resolves.not.toThrow()
+
+      expect(mockVectorize.upsert).toHaveBeenCalled()
     })
 
     test('persists embedding without error (Float32Array)', async () => {
@@ -155,6 +223,28 @@ describe('Postgres Adapter Compliance Tests', () => {
           extensionFields: {},
         }),
       ).resolves.not.toThrow()
+
+      expect(mockVectorize.upsert).toHaveBeenCalled()
+    })
+
+    test('stores embedding in Vectorize with correct ID', async () => {
+      const embedding = Array(DIMS).fill(0.5)
+      const sourceDocId = `test-embed-id-${Date.now()}`
+
+      await adapter.storeChunk(payload, 'default', {
+        sourceCollection: 'test-collection',
+        docId: sourceDocId,
+        chunkIndex: 0,
+        chunkText: 'test text',
+        embeddingVersion: 'v1-test',
+        embedding,
+        extensionFields: {},
+      })
+
+      const expectedId = `default:test-collection:${sourceDocId}:0`
+      const storage = mockVectorize.__getStorage()
+      expect(storage.has(expectedId)).toBe(true)
+      expect(storage.get(expectedId)?.values).toEqual(embedding)
     })
   })
 
@@ -221,10 +311,17 @@ describe('Postgres Adapter Compliance Tests', () => {
 
       expect(results.length).toBeLessThanOrEqual(1)
     })
+
+    test('calls Vectorize query with correct parameters', async () => {
+      await adapter.search(payload, targetEmbedding, 'default', 5)
+
+      expect(mockVectorize.query).toHaveBeenCalledWith(targetEmbedding, expect.any(Object))
+    })
   })
 
   describe('deleteChunks()', () => {
-    test('removes chunks for a document', async () => {
+    test('removes embeddings from Vectorize via mapping', async () => {
+      const embedding = Array(DIMS).fill(0.7)
       const sourceDocId = `doc-to-delete-${Date.now()}`
 
       await adapter.storeChunk(payload, 'default', {
@@ -233,36 +330,32 @@ describe('Postgres Adapter Compliance Tests', () => {
         chunkIndex: 0,
         chunkText: 'document to delete',
         embeddingVersion: 'v1-test',
-        embedding: Array(DIMS).fill(0.7),
+        embedding,
         extensionFields: {},
       })
 
-      const beforeResults = await payload.find({
-        collection: 'default' as any,
-        where: {
-          and: [
-            { sourceCollection: { equals: 'delete-test' } },
-            { docId: { equals: sourceDocId } },
-          ],
-        },
-      })
-      expect(beforeResults.totalDocs).toBeGreaterThan(0)
+      const expectedVectorId = `default:delete-test:${sourceDocId}:0`
+      const storage = mockVectorize.__getStorage()
+      expect(storage.has(expectedVectorId)).toBe(true)
 
       await adapter.deleteChunks(payload, 'default', 'delete-test', sourceDocId)
 
-      const afterResults = await payload.find({
-        collection: 'default' as any,
+      expect(mockVectorize.deleteByIds).toHaveBeenCalledWith([expectedVectorId])
+
+      const remainingMappings = await payload.find({
+        collection: 'vector-cf-mappings' as any,
         where: {
           and: [
+            { poolName: { equals: 'default' } },
             { sourceCollection: { equals: 'delete-test' } },
             { docId: { equals: sourceDocId } },
           ],
         },
       })
-      expect(afterResults.totalDocs).toBe(0)
+      expect(remainingMappings.totalDocs).toBe(0)
     })
 
-    test('handles non-existent documents gracefully', async () => {
+    test('handles non-existent embeddings gracefully', async () => {
       await expect(
         adapter.deleteChunks(payload, 'default', 'non-existent', 'fake-id'),
       ).resolves.not.toThrow()
@@ -292,6 +385,25 @@ describe('Postgres Adapter Compliance Tests', () => {
     test('returns false when no chunks exist for document', async () => {
       const result = await adapter.hasEmbeddingVersion(
         payload, 'default', 'test-collection', 'non-existent-doc', 'v1-test',
+      )
+      expect(result).toBe(false)
+    })
+
+    test('returns false when chunks exist but with different embeddingVersion', async () => {
+      const sourceDocId = `test-version-mismatch-${Date.now()}`
+
+      await adapter.storeChunk(payload, 'default', {
+        sourceCollection: 'test-collection',
+        docId: sourceDocId,
+        chunkIndex: 0,
+        chunkText: 'test text',
+        embeddingVersion: 'v1-old',
+        embedding: Array(DIMS).fill(0.5),
+        extensionFields: {},
+      })
+
+      const result = await adapter.hasEmbeddingVersion(
+        payload, 'default', 'test-collection', sourceDocId, 'v2-new',
       )
       expect(result).toBe(false)
     })

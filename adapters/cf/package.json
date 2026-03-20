@@ -1,7 +1,7 @@
 {
-  "name": "@payloadcms-vectorize/pg",
+  "name": "@payloadcms-vectorize/cf",
   "version": "0.7.1",
-  "description": "PostgreSQL adapter for payloadcms-vectorize",
+  "description": "Cloudflare Vectorize adapter for payloadcms-vectorize",
   "license": "MIT",
   "type": "module",
   "files": [
@@ -11,15 +11,10 @@
   "types": "./dist/index.d.ts",
   "peerDependencies": {
     "payload": ">=3.0.0 <4.0.0",
-    "payloadcms-vectorize": ">=0.7.0",
-    "@payloadcms/db-postgres": ">=3.0.0 <4.0.0"
+    "payloadcms-vectorize": ">=0.7.0"
   },
   "devDependencies": {
-    "@types/to-snake-case": "^1.0.2",
     "payloadcms-vectorize": "workspace:*"
-  },
-  "dependencies": {
-    "to-snake-case": "1.0.0"
   },
   "engines": {
     "node": "^18.20.2 || >=20.9.0",
