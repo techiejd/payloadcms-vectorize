@@ -15,6 +15,7 @@
     "@payloadcms/db-postgres": ">=3.0.0 <4.0.0"
   },
   "devDependencies": {
+    "@types/to-snake-case": "^1.0.2",
     "payloadcms-vectorize": "workspace:*"
   },
   "dependencies": {
