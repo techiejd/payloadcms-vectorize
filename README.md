@@ -18,8 +18,8 @@ A Payload CMS plugin that adds vector search capabilities to your collections. P
 
 This plugin requires a database adapter for vector storage. Available adapters:
 
-| Adapter | Package | Database | Documentation |
-|---------|---------|----------|---------------|
+| Adapter    | Package                    | Database                 | Documentation                     |
+| ---------- | -------------------------- | ------------------------ | --------------------------------- |
 | PostgreSQL | `@payloadcms-vectorize/pg` | PostgreSQL with pgvector | [README](./adapters/pg/README.md) |
 
 See [adapters/README.md](./adapters/README.md) for information on creating custom adapters.
@@ -257,6 +257,7 @@ Knowledge pools are configured in two steps:
 **1. Static Config** (passed to your database adapter's integration factory):
 
 Static configuration options vary by database adapter. See your adapter's documentation for available options:
+
 - **PostgreSQL**: `dims`, `ivfflatLists` - See [@payloadcms-vectorize/pg README](./adapters/pg/README.md#static-configuration)
 
 The embeddings collection name will be the same as the knowledge pool name.
@@ -967,10 +968,10 @@ Thank you for the stars! The following updates have been completed:
 - **Database Adapter Architecture**: Pluggable adapter system allowing support for different database backends.
 - **More expressive queries**: Added ability to change query limit, search on certain collections or certain fields
 - **Bulk embed all**: Batch backfills with admin button, provider callbacks, and run tracking.
+- **Vercel support**: Optimized jobs for Vercel and serverless hosting
 
 The following features are planned for future releases based on community interest and stars:
 
 - **MongoDB adapter**: Add a `@payloadcms-vectorize/mongodb` adapter for MongoDB Atlas Vector Search
-- **Vercel support**: Optimized deployment and configuration for Vercel hosting
 
 **Want to see these features sooner?** Star this repository and open issues for the features you need most!
