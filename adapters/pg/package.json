@@ -9,6 +9,13 @@
   ],
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
   "peerDependencies": {
     "payload": ">=3.0.0 <4.0.0",
     "payloadcms-vectorize": ">=0.7.0",
@@ -26,6 +33,13 @@
     "pnpm": "^9 || ^10"
   },
   "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      }
+    },
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts"
   }
