@@ -3,6 +3,14 @@
   "version": "0.7.2",
   "description": "A plugin to vectorize collections for RAG in Payload 3.0",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/techiejd/payloadcms-vectorize.git"
+  },
+  "homepage": "https://github.com/techiejd/payloadcms-vectorize#readme",
+  "bugs": {
+    "url": "https://github.com/techiejd/payloadcms-vectorize/issues"
+  },
   "type": "module",
   "exports": {
     ".": {
