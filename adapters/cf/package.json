@@ -1,6 +1,6 @@
 {
   "name": "@payloadcms-vectorize/cf",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "description": "Cloudflare Vectorize adapter for payloadcms-vectorize",
   "license": "MIT",
   "type": "module",
@@ -18,7 +18,7 @@
   },
   "peerDependencies": {
     "payload": ">=3.0.0 <4.0.0",
-    "payloadcms-vectorize": ">=0.7.0"
+    "payloadcms-vectorize": ">=0.7.2"
   },
   "devDependencies": {
     "payloadcms-vectorize": "workspace:*"
