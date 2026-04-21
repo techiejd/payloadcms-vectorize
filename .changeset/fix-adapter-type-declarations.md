@@ -1,4 +1,5 @@
 ---
+"payloadcms-vectorize": patch
 "@payloadcms-vectorize/pg": patch
 "@payloadcms-vectorize/cf": patch
 ---
