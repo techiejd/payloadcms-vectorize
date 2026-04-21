@@ -3,6 +3,15 @@
   "version": "0.7.2",
   "description": "PostgreSQL adapter for payloadcms-vectorize",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/techiejd/payloadcms-vectorize.git",
+    "directory": "adapters/pg"
+  },
+  "homepage": "https://github.com/techiejd/payloadcms-vectorize/tree/main/adapters/pg#readme",
+  "bugs": {
+    "url": "https://github.com/techiejd/payloadcms-vectorize/issues"
+  },
   "type": "module",
   "files": [
     "dist"
