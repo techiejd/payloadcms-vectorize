@@ -1500,9 +1500,14 @@ function mapDocToResult(
   doc: Record<string, unknown>,
   filterable: string[],
 ): VectorSearchResult {
+  if (typeof doc.score !== 'number') {
+    throw new Error(
+      `[@payloadcms-vectorize/mongodb] Search result is missing numeric "score" field; ensure $project includes { score: { $meta: 'vectorSearchScore' } }`,
+    )
+  }
   const result: Record<string, unknown> = {
     id: String(doc._id),
-    score: typeof doc.score === 'number' ? doc.score : Number(doc.score),
+    score: doc.score,
     sourceCollection: String(doc.sourceCollection ?? ''),
     docId: String(doc.docId ?? ''),
     chunkIndex:
