@@ -2180,8 +2180,10 @@ async function performVectorSearch(
   payload: BasePayload,
   adapter: DbAdapter,
   where?: Where,
-  limit = 100,
+  limit = 10,
 ): Promise<VectorSearchResult[]> {
+  // Atlas Vector Search rejects limit > numCandidates. Pool is numCandidates: 50,
+  // and the WHERE-suite fixture is 4 articles, so limit=10 is effectively unlimited.
   const queryEmbedding = Array(DIMS).fill(0.5)
   return adapter.search(payload, queryEmbedding, 'default', limit, where)
 }
@@ -2227,7 +2229,10 @@ describe('Mongo adapter — WHERE clause operators', () => {
         },
       })
     }
-  })
+    // Atlas Local has ~1s lag between insertOne and $vectorSearch visibility,
+    // even after the index is READY. Empirically: 0 results at 750ms, 4 at 1000ms.
+    await new Promise((r) => setTimeout(r, 1200))
+  }, 90_000)
 
   afterAll(async () => {
     await dropTestDb(MONGO_URI, TEST_DB)
@@ -2536,7 +2541,7 @@ describe('Mongo-specific integration tests', () => {
     const matches = indexes.filter((i) => i.name === 'vectorize_default_idx')
     expect(matches.length).toBe(1)
     await c.close()
-  })
+  }, 90_000)
 
   test('storeChunk → immediate search returns the inserted doc', async () => {
     const docId = `imm-${Date.now()}`
@@ -2550,6 +2555,8 @@ describe('Mongo-specific integration tests', () => {
       embedding: target,
       extensionFields: {},
     })
+    // Atlas Local lag — see WHERE suite beforeAll for measurements.
+    await new Promise((r) => setTimeout(r, 1200))
     const r = await adapter.search(payload, target, 'default', 5)
     const found = r.some((x) => x.docId === docId)
     expect(found).toBe(true)
@@ -2597,6 +2604,17 @@ describe('Mongo-specific integration tests', () => {
         ],
       },
     })
+
+    // createSearchIndex returns while the index is in PENDING; ensureSearchIndex
+    // treats anything not READY|BUILDING as "unexpected state". Wait for transition
+    // so the conflict path (different definition) is the one that fires.
+    const deadline = Date.now() + 30_000
+    while (Date.now() < deadline) {
+      const list = (await coll.listSearchIndexes('vectorize_default_idx').toArray()) as Array<{ name: string; status: string }>
+      const status = list.find((i) => i.name === 'vectorize_default_idx')?.status
+      if (status === 'BUILDING' || status === 'READY') break
+      await new Promise((r) => setTimeout(r, 200))
+    }
 
     const { adapter: badAdapter } = createMongoVectorIntegration({
       uri: MONGO_URI,
