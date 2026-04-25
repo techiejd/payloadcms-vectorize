@@ -371,6 +371,8 @@ Files mirror PG's responsibility split (`embed.ts`, `search.ts`, `types.ts`, `in
 
 Match existing adapter versioning: `0.x` aligned with the rest of the repo. Mark as `experimental` in keywords until MongoDB Community vector search GAs. Atlas behavior is GA-quality; the experimental label is about Mongo's labelling of self-hosted, not adapter maturity.
 
+**Changesets registration:** Add `"@payloadcms-vectorize/mongodb"` to the `fixed` array in [`.changeset/config.json`](../../../.changeset/config.json) (line 9) so it stays version-locked with `payloadcms-vectorize`, `@payloadcms-vectorize/pg`, and `@payloadcms-vectorize/cf`. `pnpm-workspace.yaml` already includes `adapters/*` so no workspace change is needed.
+
 ---
 
 ## 13. Acceptance criteria
