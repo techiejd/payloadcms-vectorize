@@ -1,4 +1,3 @@
-// adapters/mongodb/src/convertWhere.ts
 import type { Where } from 'payload'
 import { RESERVED_FILTER_FIELDS } from './types.js'
 
@@ -54,32 +53,74 @@ function leafToPre(field: string, cond: Record<string, unknown>): Record<string,
   return { $and: clauses }
 }
 
+function convertLeaf(
+  where: Where,
+  filterable: string[],
+  poolName: string,
+): ConvertResult {
+  const keys = Object.keys(where)
+  if (keys.length !== 1) {
+    const synthetic: Where = { and: keys.map((k) => ({ [k]: where[k] }) as Where) }
+    return convertWhereToMongo(synthetic, filterable, poolName)
+  }
+  const field = keys[0]
+  const cond = where[field] as Record<string, unknown>
+  if (!isFilterable(field, filterable)) {
+    throw new Error(
+      `[@payloadcms-vectorize/mongodb] Field "${field}" is not configured as filterableFields for pool "${poolName}"`,
+    )
+  }
+  for (const op of Object.keys(cond)) {
+    if (UNSUPPORTED_OPS.has(op)) {
+      throw new Error(`[@payloadcms-vectorize/mongodb] Operator "${op}" is not supported`)
+    }
+  }
+  const hasPostOp = Object.keys(cond).some((op) => POST_OPS.has(op))
+  if (hasPostOp) {
+    return { preFilter: null, postFilter: { [field]: cond } as Where }
+  }
+  return { preFilter: leafToPre(field, cond), postFilter: null }
+}
+
 export function convertWhereToMongo(
   where: Where,
   filterable: string[],
   poolName: string,
 ): ConvertResult {
-  const keys = Object.keys(where).filter((k) => k !== 'and' && k !== 'or')
-  if (keys.length === 1 && !('and' in where) && !('or' in where)) {
-    const field = keys[0]
-    const cond = where[field] as Record<string, unknown>
-    if (!isFilterable(field, filterable)) {
-      throw new Error(
-        `[@payloadcms-vectorize/mongodb] Field "${field}" is not configured as filterableFields for pool "${poolName}"`,
-      )
-    }
-    for (const op of Object.keys(cond)) {
-      if (UNSUPPORTED_OPS.has(op)) {
-        throw new Error(
-          `[@payloadcms-vectorize/mongodb] Operator "${op}" is not supported`,
-        )
-      }
-    }
-    const hasPostOp = Object.keys(cond).some((op) => POST_OPS.has(op))
-    if (hasPostOp) {
-      return { preFilter: null, postFilter: { [field]: cond } as Where }
-    }
-    return { preFilter: leafToPre(field, cond), postFilter: null }
+  if ('and' in where && Array.isArray(where.and)) {
+    const branches = where.and.map((b) => convertWhereToMongo(b, filterable, poolName))
+    const preBranches = branches.filter((b) => b.preFilter).map((b) => b.preFilter!)
+    const postBranches = branches.filter((b) => b.postFilter).map((b) => b.postFilter!)
+    const preFilter =
+      preBranches.length === 0
+        ? null
+        : preBranches.length === 1
+          ? preBranches[0]
+          : { $and: preBranches }
+    const postFilter =
+      postBranches.length === 0
+        ? null
+        : postBranches.length === 1
+          ? postBranches[0]
+          : ({ and: postBranches } as Where)
+    return { preFilter, postFilter }
   }
-  throw new Error('[@payloadcms-vectorize/mongodb] convertWhereToMongo: and/or not implemented yet')
+
+  if ('or' in where && Array.isArray(where.or)) {
+    const branches = where.or.map((b) => convertWhereToMongo(b, filterable, poolName))
+    const anyPost = branches.some((b) => b.postFilter !== null)
+    if (anyPost) {
+      return { preFilter: null, postFilter: where }
+    }
+    const preBranches = branches.map((b) => b.preFilter!).filter((p) => p)
+    const preFilter =
+      preBranches.length === 0
+        ? null
+        : preBranches.length === 1
+          ? preBranches[0]
+          : { $or: preBranches }
+    return { preFilter, postFilter: null }
+  }
+
+  return convertLeaf(where, filterable, poolName)
 }

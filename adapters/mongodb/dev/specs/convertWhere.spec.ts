@@ -141,3 +141,112 @@ describe('convertWhereToMongo — post-filter operators', () => {
     ).toThrowError(/not supported/)
   })
 })
+
+describe('convertWhereToMongo — and/or composition', () => {
+  test('and: all branches pre → combined preFilter via $and', () => {
+    const result = convertWhereToMongo(
+      {
+        and: [
+          { status: { equals: 'published' } },
+          { views: { greater_than: 100 } },
+        ],
+      },
+      FILTERABLE,
+      'p1',
+    )
+    expect(result).toEqual({
+      preFilter: {
+        $and: [
+          { status: { $eq: 'published' } },
+          { views: { $gt: 100 } },
+        ],
+      },
+      postFilter: null,
+    })
+  })
+
+  test('and: mix of pre + post → pre kept native, post in {and:[...]}', () => {
+    const result = convertWhereToMongo(
+      {
+        and: [
+          { status: { equals: 'published' } },
+          { tags: { like: 'javascript' } },
+        ],
+      },
+      FILTERABLE,
+      'p1',
+    )
+    expect(result).toEqual({
+      preFilter: { status: { $eq: 'published' } },
+      postFilter: { tags: { like: 'javascript' } },
+    })
+  })
+
+  test('or: all branches pre → combined preFilter via $or', () => {
+    const result = convertWhereToMongo(
+      {
+        or: [
+          { status: { equals: 'draft' } },
+          { status: { equals: 'archived' } },
+        ],
+      },
+      FILTERABLE,
+      'p1',
+    )
+    expect(result).toEqual({
+      preFilter: {
+        $or: [
+          { status: { $eq: 'draft' } },
+          { status: { $eq: 'archived' } },
+        ],
+      },
+      postFilter: null,
+    })
+  })
+
+  test('or: any branch is post → entire or goes to post-filter', () => {
+    const where: any = {
+      or: [
+        { status: { equals: 'published' } },
+        { tags: { like: 'javascript' } },
+      ],
+    }
+    const result = convertWhereToMongo(where, FILTERABLE, 'p1')
+    expect(result.preFilter).toBeNull()
+    expect(result.postFilter).toEqual(where)
+  })
+
+  test('nested and/or: (published AND tech) OR (archived)', () => {
+    const where: any = {
+      or: [
+        {
+          and: [
+            { status: { equals: 'published' } },
+            { category: { equals: 'tech' } },
+          ],
+        },
+        { status: { equals: 'archived' } },
+      ],
+    }
+    const result = convertWhereToMongo(where, FILTERABLE, 'p1')
+    expect(result.preFilter).toEqual({
+      $or: [
+        { $and: [{ status: { $eq: 'published' } }, { category: { $eq: 'tech' } }] },
+        { status: { $eq: 'archived' } },
+      ],
+    })
+    expect(result.postFilter).toBeNull()
+  })
+
+  test('and with single condition reduces to that condition', () => {
+    const result = convertWhereToMongo(
+      { and: [{ status: { equals: 'published' } }] },
+      FILTERABLE,
+      'p1',
+    )
+    expect(result).toEqual({
+      preFilter: { status: { $eq: 'published' } },
+      postFilter: null,
+    })
+  })
+})
