@@ -1235,10 +1235,12 @@ git commit -m "feat(mongodb): add evaluatePostFilter for runtime post-filter mat
 
 This is verified end-to-end via the integration suite (Task 16). No unit test here because the function is a thin wrapper around the Mongo driver's `listSearchIndexes` / `createSearchIndex`, both of which require a live `mongot`.
 
+Atlas Local rejects `createSearchIndex` if the target collection does not yet exist (`Collection 'X' does not exist`), so we materialize the collection idempotently with `db.createCollection` before the first index creation. Atlas Cloud is more lenient about this, but the adapter must work in both environments.
+
 - [ ] **Step 1: Write `adapters/mongodb/src/indexes.ts`**
 
 ```ts
-import type { MongoClient } from 'mongodb'
+import type { Db, MongoClient } from 'mongodb'
 import type { ResolvedPoolConfig } from './types.js'
 
 const ensureCache = new Set<string>()
@@ -1266,6 +1268,13 @@ function buildDefinition(pool: ResolvedPoolConfig): Record<string, unknown> {
 
 function definitionsEqual(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b)
+}
+
+async function ensureCollectionExists(db: Db, name: string): Promise<void> {
+  const existing = await db.listCollections({ name }, { nameOnly: true }).toArray()
+  if (existing.length === 0) {
+    await db.createCollection(name)
+  }
 }
 
 export async function ensureSearchIndex(
@@ -1311,6 +1320,7 @@ export async function ensureSearchIndex(
       )
     }
   } else {
+    await ensureCollectionExists(db, pool.collectionName)
     await collection.createSearchIndex({
       name: pool.indexName,
       type: 'vectorSearch',

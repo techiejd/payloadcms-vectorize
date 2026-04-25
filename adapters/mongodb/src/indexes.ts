@@ -1,4 +1,4 @@
-import type { MongoClient } from 'mongodb'
+import type { Db, MongoClient } from 'mongodb'
 import type { ResolvedPoolConfig } from './types.js'
 
 const ensureCache = new Set<string>()
@@ -26,6 +26,13 @@ function buildDefinition(pool: ResolvedPoolConfig): Record<string, unknown> {
 
 function definitionsEqual(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b)
+}
+
+async function ensureCollectionExists(db: Db, name: string): Promise<void> {
+  const existing = await db.listCollections({ name }, { nameOnly: true }).toArray()
+  if (existing.length === 0) {
+    await db.createCollection(name)
+  }
 }
 
 export async function ensureSearchIndex(
@@ -71,6 +78,7 @@ export async function ensureSearchIndex(
       )
     }
   } else {
+    await ensureCollectionExists(db, pool.collectionName)
     await collection.createSearchIndex({
       name: pool.indexName,
       type: 'vectorSearch',
