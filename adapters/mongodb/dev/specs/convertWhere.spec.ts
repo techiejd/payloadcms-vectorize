@@ -93,3 +93,51 @@ describe('convertWhereToMongo — pre-filter operators', () => {
     })
   })
 })
+
+describe('convertWhereToMongo — post-filter operators', () => {
+  test('like routes the whole leaf to post-filter (verbatim Where)', () => {
+    expect(
+      convertWhereToMongo({ tags: { like: 'javascript' } }, FILTERABLE, 'p1'),
+    ).toEqual({
+      preFilter: null,
+      postFilter: { tags: { like: 'javascript' } },
+    })
+  })
+
+  test('contains routes the whole leaf to post-filter', () => {
+    expect(
+      convertWhereToMongo({ category: { contains: 'tech' } }, FILTERABLE, 'p1'),
+    ).toEqual({
+      preFilter: null,
+      postFilter: { category: { contains: 'tech' } },
+    })
+  })
+
+  test('mixed pre + post operators on same leaf → entire leaf goes to post', () => {
+    expect(
+      convertWhereToMongo(
+        { tags: { equals: 'a', like: 'javascript' } },
+        FILTERABLE,
+        'p1',
+      ),
+    ).toEqual({
+      preFilter: null,
+      postFilter: { tags: { equals: 'a', like: 'javascript' } },
+    })
+  })
+
+  test('all routes to post-filter', () => {
+    expect(
+      convertWhereToMongo({ tags: { all: ['a', 'b'] } }, FILTERABLE, 'p1'),
+    ).toEqual({
+      preFilter: null,
+      postFilter: { tags: { all: ['a', 'b'] } },
+    })
+  })
+
+  test('unsupported geo op throws', () => {
+    expect(() =>
+      convertWhereToMongo({ loc: { near: [0, 0] } }, ['loc'], 'p1'),
+    ).toThrowError(/not supported/)
+  })
+})

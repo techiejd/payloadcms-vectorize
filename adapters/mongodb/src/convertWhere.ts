@@ -59,9 +59,8 @@ export function convertWhereToMongo(
   filterable: string[],
   poolName: string,
 ): ConvertResult {
-  // Single-field leaf with only pre-filter operators (the simple, most-common path).
   const keys = Object.keys(where).filter((k) => k !== 'and' && k !== 'or')
-  if (keys.length === 1) {
+  if (keys.length === 1 && !('and' in where) && !('or' in where)) {
     const field = keys[0]
     const cond = where[field] as Record<string, unknown>
     if (!isFilterable(field, filterable)) {
@@ -76,16 +75,11 @@ export function convertWhereToMongo(
         )
       }
     }
-    const onlyPreOps = Object.keys(cond).every(
-      (op) => PRE_OPS.has(op) || op === 'exists',
-    )
-    if (onlyPreOps) {
-      return { preFilter: leafToPre(field, cond), postFilter: null }
+    const hasPostOp = Object.keys(cond).some((op) => POST_OPS.has(op))
+    if (hasPostOp) {
+      return { preFilter: null, postFilter: { [field]: cond } as Where }
     }
+    return { preFilter: leafToPre(field, cond), postFilter: null }
   }
-  // Tasks 6–8 expand this; for now, throw for unimplemented paths.
-  throw new Error('[@payloadcms-vectorize/mongodb] convertWhereToMongo: path not implemented yet')
+  throw new Error('[@payloadcms-vectorize/mongodb] convertWhereToMongo: and/or not implemented yet')
 }
-
-// POST_OPS is referenced by Task 6 — silences TS unused-symbol warnings until then.
-void POST_OPS
