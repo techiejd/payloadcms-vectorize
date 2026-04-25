@@ -1026,4 +1026,4 @@ See [CHANGELOG.md](./CHANGELOG.md) for release history, migration notes, and upg
 
 ## License
 
-MIT
+[MIT](./LICENSE)

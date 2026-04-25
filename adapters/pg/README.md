@@ -1,12 +1,35 @@
 # @payloadcms-vectorize/pg
 
-PostgreSQL adapter for [payloadcms-vectorize](https://github.com/your-repo/payloadcms-vectorize). Enables vector search capabilities using PostgreSQL's pgvector extension.
+[![npm version](https://img.shields.io/npm/v/@payloadcms-vectorize/pg.svg)](https://www.npmjs.com/package/@payloadcms-vectorize/pg)
+[![npm downloads](https://img.shields.io/npm/dm/@payloadcms-vectorize/pg.svg)](https://www.npmjs.com/package/@payloadcms-vectorize/pg)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](#license)
+[![Payload CMS](https://img.shields.io/badge/Payload-3.x-000000.svg)](https://payloadcms.com)
+
+PostgreSQL adapter for [payloadcms-vectorize](https://github.com/techiejd/payloadcms-vectorize). Enables vector search capabilities using PostgreSQL's pgvector extension.
+
+> **Status:** `0.x` — pre-1.0. The public API is stabilizing but may still have breaking changes between minor releases. Track the [CHANGELOG](./CHANGELOG.md) before upgrading.
+
+## Table of Contents
+
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Static Configuration](#static-configuration)
+- [Integration Return Value](#integration-return-value)
+- [Migrations](#migrations)
+- [PostgreSQL Custom Schema Support](#postgresql-custom-schema-support)
+- [Multiple Knowledge Pools](#multiple-knowledge-pools)
+- [Using with Voyage AI](#using-with-voyage-ai)
+- [Contributing](#contributing)
+- [Changelog](#changelog)
+- [License](#license)
 
 ## Prerequisites
 
-- PostgreSQL with pgvector extension
-- Payload CMS 3.x with `@payloadcms/db-postgres`
-- Node.js 18+
+- PostgreSQL with the [pgvector](https://github.com/pgvector/pgvector) extension available.
+- Payload CMS `3.x` with `@payloadcms/db-postgres` (peer-dep range: `>=3.0.0 <4.0.0`).
+- `payloadcms-vectorize` matching this adapter's version (peer-dep range: `>=0.7.2`).
+- Node.js `^18.20.2` or `>=20.9.0`.
 
 ## Installation
 
@@ -26,13 +49,18 @@ CREATE EXTENSION IF NOT EXISTS vector;
 
 **Note:** Most managed PostgreSQL services (like AWS RDS, Supabase, etc.) require superuser privileges or specific extension permissions. If you encounter permission errors, contact your database administrator or check your service's documentation.
 
-### 2. Configure the Plugin
+### 2. Define your embedding functions
+
+The plugin needs two functions: `embedQuery` (used at search time) and `embedDocs` (used at ingestion time). They must produce vectors whose length matches the `dims` you configure below. See [Using with Voyage AI](#using-with-voyage-ai) for a complete example, or supply any function with the same shape.
+
+### 3. Configure the Plugin
 
 ```typescript
 import { buildConfig } from 'payload'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { createPostgresVectorIntegration } from '@payloadcms-vectorize/pg'
 import payloadcmsVectorize from 'payloadcms-vectorize'
+import { embedQuery, embedDocs } from './embeddings' // see "Using with Voyage AI" below
 
 // Create the integration with static configs (dims, ivfflatLists)
 const integration = createPostgresVectorIntegration({
@@ -249,6 +277,16 @@ export const embedQuery = async (text: string): Promise<number[]> => {
 }
 ```
 
+## Contributing
+
+Issues and PRs are welcome. The repo lives at [github.com/techiejd/payloadcms-vectorize](https://github.com/techiejd/payloadcms-vectorize) — please open an issue before sending a non-trivial PR so we can align on the approach.
+
+For local development, see the root [README](../../README.md) and [docs/](../../docs/).
+
+## Changelog
+
+See [CHANGELOG.md](./CHANGELOG.md) for release notes. Releases are managed by [Changesets](https://github.com/changesets/changesets) — when contributing, run `pnpm changeset` to describe your change.
+
 ## License
 
-MIT
+[MIT](../../LICENSE)
