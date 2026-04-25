@@ -100,12 +100,12 @@ export const createPostgresVectorIntegration = (
       const created = await payload.create({
         collection: poolName as any,
         data: {
+          ...data.extensionFields,
           sourceCollection: data.sourceCollection,
           docId: data.docId,
           chunkIndex: data.chunkIndex,
           chunkText: data.chunkText,
           embeddingVersion: data.embeddingVersion,
-          ...data.extensionFields,
           embedding: embeddingArray,
         },
       })

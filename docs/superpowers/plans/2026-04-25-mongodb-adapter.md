@@ -1390,12 +1390,12 @@ export default async function storeChunk(
   const now = new Date()
   const collection = client.db(cfg.dbName).collection(pool.collectionName)
   await collection.insertOne({
+    ...data.extensionFields,
     sourceCollection: data.sourceCollection,
     docId: String(data.docId),
     chunkIndex: data.chunkIndex,
     chunkText: data.chunkText,
     embeddingVersion: data.embeddingVersion,
-    ...data.extensionFields,
     embedding: embeddingArray,
     createdAt: now,
     updatedAt: now,
