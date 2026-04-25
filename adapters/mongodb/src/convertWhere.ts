@@ -60,6 +60,7 @@ function convertLeaf(
 ): ConvertResult {
   const keys = Object.keys(where)
   if (keys.length !== 1) {
+    // Multiple top-level fields on the same object: treat as implicit AND.
     const synthetic: Where = { and: keys.map((k) => ({ [k]: where[k] }) as Where) }
     return convertWhereToMongo(synthetic, filterable, poolName)
   }
@@ -110,6 +111,8 @@ export function convertWhereToMongo(
     const branches = where.or.map((b) => convertWhereToMongo(b, filterable, poolName))
     const anyPost = branches.some((b) => b.postFilter !== null)
     if (anyPost) {
+      // Entire OR goes post — semantics require the whole disjunction to apply
+      // to the post-vectorSearch document set.
       return { preFilter: null, postFilter: where }
     }
     const preBranches = branches.map((b) => b.preFilter!).filter((p) => p)
