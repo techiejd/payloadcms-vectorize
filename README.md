@@ -40,14 +40,13 @@ A Payload CMS plugin that adds vector search capabilities to your collections. P
   - [REST Endpoints](#rest-endpoints)
   - [Local API](#local-api)
 - [Troubleshooting](#troubleshooting)
-- [Examples](#examples)
 - [Videos](#videos)
-- [Changelog](#changelog)
-- [License](#license)
 - [Architecture](#architecture)
 - [Community](#community)
   - [Development](#development)
   - [Roadmap](#roadmap)
+- [Changelog](#changelog)
+- [License](#license)
 
 ## Database Adapters
 
@@ -183,7 +182,7 @@ export default buildConfig({
         },
       },
       // Optional plugin options:
-      // realtimeQueueName: 'vectorize-realtime',
+      realtimeQueueName: 'vectorize-realtime',
       // endpointOverrides: { path: '/custom-vector-search', enabled: true },
       // disabled: false,
       // bulkQueueNames: { // Required only if `bulkEmbeddingsFns` is set
@@ -308,6 +307,8 @@ Static configuration changes (like vector dimensions) may require migrations. Se
 - **Cloudflare Vectorize**: dimension changes require recreating the Vectorize index.
 
 ### CollectionVectorizeOption
+
+> **See also:** [reserved field names](#knowledge-pool-config) — don't use them as keys in the entries returned by `toKnowledgePool`.
 
 | Option            | Type                                                  | Required | Description                                                                                                                                                                  |
 | ----------------- | ----------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -919,39 +920,6 @@ if ('error' in result) {
 **Cause:** The Vectorize binding isn't wired up.
 **Fix:** Check `wrangler.toml` and the `binding` you pass to `createCloudflareVectorizeIntegration`. See [@payloadcms-vectorize/cf README](./adapters/cf/README.md#cloudflare-bindings).
 
-## Examples
-
-### Using with Voyage AI
-
-```typescript
-import { embed, embedMany } from 'ai'
-import { voyage } from 'voyage-ai-provider'
-
-export const embedDocs = async (texts: string[]): Promise<number[][]> => {
-  const embedResult = await embedMany({
-    model: voyage.textEmbeddingModel('voyage-3.5-lite'),
-    values: texts,
-    providerOptions: {
-      voyage: { inputType: 'document' },
-    },
-  })
-  return embedResult.embeddings
-}
-
-export const embedQuery = async (text: string): Promise<number[]> => {
-  const embedResult = await embed({
-    model: voyage.textEmbeddingModel('voyage-3.5-lite'),
-    value: text,
-    providerOptions: {
-      voyage: { inputType: 'query' },
-    },
-  })
-  return embedResult.embedding
-}
-```
-
-You can see more examples in `dev/helpers/embed.ts`.
-
 ## Videos
 
 > **Heads up — these videos are stale.** They were recorded against an older version of the plugin and predate the database adapter split. They are still useful as an end-to-end walkthrough for **wiring up the PostgreSQL adapter** (real-time ingestion, bulk embedding flow, admin UI), but the import paths, package names, and a few config shapes shown on screen have moved. Cross-reference what you see with the current Quick Start and `@payloadcms-vectorize/pg` README.
@@ -963,14 +931,6 @@ You can see more examples in `dev/helpers/embed.ts`.
 ### Save 50% on Bulk Embeddings and Migrations in Payload CMS (Part 2)
 
 [![Bulk embedding](https://img.youtube.com/vi/oIcqu08k1Ok/0.jpg)](https://youtu.be/oIcqu08k1Ok)
-
-## Changelog
-
-See [CHANGELOG.md](./CHANGELOG.md) for release history, migration notes, and upgrade guides.
-
-## License
-
-MIT
 
 ## Architecture
 
@@ -1059,3 +1019,11 @@ Common scripts:
 - **Vercel CI matrix** — exercising the serverless job model end-to-end on Vercel preview deployments.
 
 Want one of these sooner? Star the repo and open an issue.
+
+## Changelog
+
+See [CHANGELOG.md](./CHANGELOG.md) for release history, migration notes, and upgrade guides.
+
+## License
+
+MIT
