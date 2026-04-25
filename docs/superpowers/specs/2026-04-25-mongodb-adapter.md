@@ -278,9 +278,25 @@ services:
 
 **Connection string:** `mongodb://localhost:27018/?directConnection=true`.
 
+**Root `package.json` scripts** (insert adjacent to existing `test:setup`/`test:teardown` at [package.json:54-55](../../../package.json#L54-L55), NOT appended at the bottom):
+
+```jsonc
+"test:setup:mongodb": "docker-compose -f adapters/mongodb/dev/docker-compose.yml up -d",
+"test:teardown:mongodb": "docker-compose -f adapters/mongodb/dev/docker-compose.yml down",
+```
+
+Plus the test-runner and build scripts grouped with their PG/CF siblings (after [package.json:60](../../../package.json#L60) `test:adapters:cf` and after [package.json:37](../../../package.json#L37) `build:adapters:cf` respectively):
+
+```jsonc
+"build:adapters:mongodb": "cd ./adapters/mongodb && tsc -p tsconfig.build.json && swc ./src -d ./dist --config-file ../../.swcrc --strip-leading-paths",
+"test:adapters:mongodb": "cross-env DOTENV_CONFIG_PATH=dev/.env.test NODE_OPTIONS='--require=dotenv/config --import=tsx --max-old-space-size=8192' vitest --config adapters/mongodb/vitest.config.ts",
+```
+
+`build:adapters` (line 35) is updated to chain the new `build:adapters:mongodb`.
+
 **Test setup helper** waits for `$vectorSearch` readiness by attempting a no-op vector search against a temp collection (with retry/backoff up to ~30s).
 
-**CI:** new `test_adapters_mongodb` job in `.github/workflows/ci.yml` runs the container as a service via `docker run` + healthcheck loop (GitHub-hosted ubuntu has Docker preinstalled). No secrets, no Atlas account.
+**CI:** new `test_adapters_mongodb` job in `.github/workflows/ci.yml` runs `pnpm test:setup:mongodb`, polls the healthcheck, runs `pnpm test:adapters:mongodb`, then `pnpm test:teardown:mongodb`. No secrets, no Atlas account.
 
 ---
 
