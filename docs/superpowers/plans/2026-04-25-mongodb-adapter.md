@@ -2920,6 +2920,29 @@ Append to `.github/workflows/ci.yml`, after the `test_adapters_cf` job and befor
           TEST_ENV: 1
 ```
 
+Also wire the new job into the aggregate `test` gate so PR-merge protection actually depends on it. Find the final `test:` job and update its `needs:` array and the conditional check script:
+
+```diff
+   test:
+     runs-on: ubuntu-latest
+-    needs: [typecheck, build, test_int, test_adapters_pg, test_adapters_cf, test_e2e]
++    needs: [typecheck, build, test_int, test_adapters_pg, test_adapters_cf, test_adapters_mongodb, test_e2e]
+     if: always()
+     steps:
+       - name: Check required jobs
+         run: |
+           if [ "${{ needs.typecheck.result }}" != "success" ] || \
+              [ "${{ needs.build.result }}" != "success" ] || \
+              [ "${{ needs.test_int.result }}" != "success" ] || \
+              [ "${{ needs.test_adapters_pg.result }}" != "success" ] || \
+              [ "${{ needs.test_adapters_cf.result }}" != "success" ] || \
++             [ "${{ needs.test_adapters_mongodb.result }}" != "success" ] || \
+              [ "${{ needs.test_e2e.result }}" != "success" ]; then
+             echo "One or more required jobs failed"
+             exit 1
+           fi
+```
+
 - [ ] **Step 2: Validate the workflow file**
 
 Run: `cd /Users/juandominguez/development/payloadcms-vectorize/.worktrees/mongodb-adapter && python3 -c "import yaml; yaml.safe_load(open('.github/workflows/ci.yml'))"`
