@@ -1,4 +1,5 @@
 import type { Where } from 'payload'
+import { escapeRegExp } from './escapeRegExp.js'
 import { RESERVED_FILTER_FIELDS } from './types.js'
 
 export interface ConvertResult {
@@ -126,4 +127,71 @@ export function convertWhereToMongo(
   }
 
   return convertLeaf(where, filterable, poolName)
+}
+
+function valueMatchesOp(value: unknown, op: string, operand: unknown): boolean {
+  switch (op) {
+    case 'equals':
+      return value === operand
+    case 'not_equals':
+    case 'notEquals':
+      return value !== operand
+    case 'in':
+      return Array.isArray(operand) && operand.includes(value as never)
+    case 'not_in':
+    case 'notIn':
+      return Array.isArray(operand) && !operand.includes(value as never)
+    case 'greater_than':
+    case 'greaterThan':
+      return typeof value === 'number' && typeof operand === 'number' && value > operand
+    case 'greater_than_equal':
+    case 'greaterThanEqual':
+      return typeof value === 'number' && typeof operand === 'number' && value >= operand
+    case 'less_than':
+    case 'lessThan':
+      return typeof value === 'number' && typeof operand === 'number' && value < operand
+    case 'less_than_equal':
+    case 'lessThanEqual':
+      return typeof value === 'number' && typeof operand === 'number' && value <= operand
+    case 'exists':
+      return operand
+        ? value !== undefined && value !== null
+        : value === undefined || value === null
+    case 'like':
+    case 'contains': {
+      if (typeof operand !== 'string') return false
+      const re = new RegExp(escapeRegExp(operand), 'i')
+      if (Array.isArray(value)) {
+        return value.some((v) => typeof v === 'string' && re.test(v))
+      }
+      return typeof value === 'string' && re.test(value)
+    }
+    case 'all':
+      return (
+        Array.isArray(value) &&
+        Array.isArray(operand) &&
+        operand.every((o) => value.includes(o as never))
+      )
+    default:
+      return false
+  }
+}
+
+export function evaluatePostFilter(doc: Record<string, unknown>, where: Where): boolean {
+  if (!where || Object.keys(where).length === 0) return true
+  if ('and' in where && Array.isArray(where.and)) {
+    return where.and.every((c: Where) => evaluatePostFilter(doc, c))
+  }
+  if ('or' in where && Array.isArray(where.or)) {
+    return where.or.some((c: Where) => evaluatePostFilter(doc, c))
+  }
+  for (const [field, condition] of Object.entries(where)) {
+    if (field === 'and' || field === 'or') continue
+    if (typeof condition !== 'object' || condition === null) continue
+    const cond = condition as Record<string, unknown>
+    for (const [op, operand] of Object.entries(cond)) {
+      if (!valueMatchesOp(doc[field], op, operand)) return false
+    }
+  }
+  return true
 }

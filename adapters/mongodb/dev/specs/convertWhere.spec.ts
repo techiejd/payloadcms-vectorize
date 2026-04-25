@@ -250,3 +250,92 @@ describe('convertWhereToMongo — and/or composition', () => {
     })
   })
 })
+
+import { evaluatePostFilter } from '../../src/convertWhere.js'
+
+describe('evaluatePostFilter', () => {
+  test('like with case-insensitive substring match', () => {
+    expect(
+      evaluatePostFilter({ tags: 'JavaScript' }, { tags: { like: 'javascript' } }),
+    ).toBe(true)
+    expect(
+      evaluatePostFilter({ tags: 'python' }, { tags: { like: 'javascript' } }),
+    ).toBe(false)
+  })
+
+  test('contains works on scalar string', () => {
+    expect(
+      evaluatePostFilter({ category: 'technology' }, { category: { contains: 'tech' } }),
+    ).toBe(true)
+    expect(
+      evaluatePostFilter({ category: 'design' }, { category: { contains: 'tech' } }),
+    ).toBe(false)
+  })
+
+  test('contains on array uses elemMatch-style', () => {
+    expect(
+      evaluatePostFilter({ tags: ['react', 'javascript'] }, { tags: { contains: 'java' } }),
+    ).toBe(true)
+    expect(
+      evaluatePostFilter({ tags: ['python'] }, { tags: { contains: 'java' } }),
+    ).toBe(false)
+  })
+
+  test('like with regex special chars does NOT match unintended values', () => {
+    // Pattern "foo.bar" must match the literal dot, not any char.
+    expect(
+      evaluatePostFilter({ tags: 'fooXbar' }, { tags: { like: 'foo.bar' } }),
+    ).toBe(false)
+    expect(
+      evaluatePostFilter({ tags: 'foo.bar' }, { tags: { like: 'foo.bar' } }),
+    ).toBe(true)
+  })
+
+  test('all on array', () => {
+    expect(
+      evaluatePostFilter({ tags: ['a', 'b', 'c'] }, { tags: { all: ['a', 'b'] } }),
+    ).toBe(true)
+    expect(
+      evaluatePostFilter({ tags: ['a'] }, { tags: { all: ['a', 'b'] } }),
+    ).toBe(false)
+  })
+
+  test('and combinator', () => {
+    const w: any = {
+      and: [
+        { status: { equals: 'published' } },
+        { tags: { like: 'javascript' } },
+      ],
+    }
+    expect(
+      evaluatePostFilter({ status: 'published', tags: 'JavaScript,react' }, w),
+    ).toBe(true)
+    expect(
+      evaluatePostFilter({ status: 'draft', tags: 'JavaScript,react' }, w),
+    ).toBe(false)
+  })
+
+  test('or combinator', () => {
+    const w: any = {
+      or: [
+        { status: { equals: 'published' } },
+        { tags: { like: 'javascript' } },
+      ],
+    }
+    expect(evaluatePostFilter({ status: 'published', tags: 'python' }, w)).toBe(true)
+    expect(evaluatePostFilter({ status: 'draft', tags: 'JavaScript' }, w)).toBe(true)
+    expect(evaluatePostFilter({ status: 'draft', tags: 'python' }, w)).toBe(false)
+  })
+
+  test('pre-filter operators also evaluable in post path (for OR mixed branches)', () => {
+    expect(
+      evaluatePostFilter({ status: 'published' }, { status: { equals: 'published' } }),
+    ).toBe(true)
+    expect(
+      evaluatePostFilter({ views: 150 }, { views: { greater_than: 100 } }),
+    ).toBe(true)
+    expect(
+      evaluatePostFilter({ views: 50 }, { views: { greater_than: 100 } }),
+    ).toBe(false)
+  })
+})
