@@ -1,0 +1,64 @@
+{
+  "name": "@payloadcms-vectorize/mongodb",
+  "version": "0.7.2",
+  "description": "MongoDB Atlas + self-hosted vectorSearch adapter for payloadcms-vectorize",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/techiejd/payloadcms-vectorize.git",
+    "directory": "adapters/mongodb"
+  },
+  "homepage": "https://github.com/techiejd/payloadcms-vectorize/tree/main/adapters/mongodb#readme",
+  "bugs": {
+    "url": "https://github.com/techiejd/payloadcms-vectorize/issues"
+  },
+  "type": "module",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "test:setup": "docker-compose -f dev/docker-compose.yml up -d",
+    "test:teardown": "docker-compose -f dev/docker-compose.yml down"
+  },
+  "keywords": [
+    "payloadcms",
+    "mongodb",
+    "vector-search",
+    "rag",
+    "experimental"
+  ],
+  "peerDependencies": {
+    "mongodb": ">=6.0.0",
+    "payload": ">=3.0.0 <4.0.0",
+    "payloadcms-vectorize": ">=0.7.2"
+  },
+  "devDependencies": {
+    "mongodb": "^6.10.0",
+    "payloadcms-vectorize": "workspace:*"
+  },
+  "engines": {
+    "node": "^18.20.2 || >=20.9.0",
+    "pnpm": "^9 || ^10"
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
+  }
+}
