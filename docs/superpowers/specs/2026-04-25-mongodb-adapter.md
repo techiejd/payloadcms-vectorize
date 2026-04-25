@@ -278,14 +278,14 @@ services:
 
 **Connection string:** `mongodb://localhost:27018/?directConnection=true`.
 
-**Root `package.json` scripts** (insert adjacent to existing `test:setup`/`test:teardown` at [package.json:54-55](../../../package.json#L54-L55), NOT appended at the bottom):
+**Adapter `package.json` scripts** (in `adapters/mongodb/package.json` — analogous to root [package.json:54-55](../../../package.json#L54-L55) but local to the adapter so contributors can `cd adapters/mongodb && pnpm test:setup`):
 
 ```jsonc
-"test:setup:mongodb": "docker-compose -f adapters/mongodb/dev/docker-compose.yml up -d",
-"test:teardown:mongodb": "docker-compose -f adapters/mongodb/dev/docker-compose.yml down",
+"test:setup": "docker-compose -f dev/docker-compose.yml up -d",
+"test:teardown": "docker-compose -f dev/docker-compose.yml down",
 ```
 
-Plus the test-runner and build scripts grouped with their PG/CF siblings (after [package.json:60](../../../package.json#L60) `test:adapters:cf` and after [package.json:37](../../../package.json#L37) `build:adapters:cf` respectively):
+**Root `package.json` scripts** (test-runner and build scripts grouped with their PG/CF siblings — after [package.json:60](../../../package.json#L60) `test:adapters:cf` and after [package.json:37](../../../package.json#L37) `build:adapters:cf`):
 
 ```jsonc
 "build:adapters:mongodb": "cd ./adapters/mongodb && tsc -p tsconfig.build.json && swc ./src -d ./dist --config-file ../../.swcrc --strip-leading-paths",
