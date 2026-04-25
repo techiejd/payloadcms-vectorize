@@ -1,4 +1,5 @@
 import type { Where } from 'payload'
+import { ObjectId } from 'mongodb'
 import { escapeRegExp } from './escapeRegExp.js'
 import { RESERVED_FILTER_FIELDS } from './types.js'
 
@@ -27,7 +28,22 @@ const PRE_OPS = new Map<string, string>([
 const POST_OPS = new Set(['like', 'contains', 'all'])
 const UNSUPPORTED_OPS = new Set(['near', 'within', 'intersects'])
 
+const HEX24 = /^[a-f\d]{24}$/i
+
+function castIdValue(v: unknown): unknown {
+  if (typeof v === 'string' && HEX24.test(v)) return new ObjectId(v)
+  return v
+}
+
+function castIdOperand(op: string, v: unknown): unknown {
+  if (op === 'in' || op === 'not_in' || op === 'notIn') {
+    return Array.isArray(v) ? v.map(castIdValue) : v
+  }
+  return castIdValue(v)
+}
+
 function isFilterable(field: string, filterable: string[]): boolean {
+  if (field === 'id') return true
   return (
     (RESERVED_FILTER_FIELDS as readonly string[]).includes(field) ||
     filterable.includes(field)
@@ -35,19 +51,26 @@ function isFilterable(field: string, filterable: string[]): boolean {
 }
 
 function leafToPre(field: string, cond: Record<string, unknown>): Record<string, unknown> {
+  const targetField = field === 'id' ? '_id' : field
   const clauses: Record<string, unknown>[] = []
   for (const [op, val] of Object.entries(cond)) {
     if (op === 'exists') {
       if (val === true) {
-        clauses.push({ [field]: { $exists: true, $ne: null } })
+        clauses.push({ [targetField]: { $exists: true, $ne: null } })
       } else {
-        clauses.push({ $or: [{ [field]: { $exists: false } }, { [field]: { $eq: null } }] })
+        clauses.push({
+          $or: [
+            { [targetField]: { $exists: false } },
+            { [targetField]: { $eq: null } },
+          ],
+        })
       }
       continue
     }
     const mongoOp = PRE_OPS.get(op)
     if (!mongoOp) continue
-    clauses.push({ [field]: { [mongoOp]: val } })
+    const operand = field === 'id' ? castIdOperand(op, val) : val
+    clauses.push({ [targetField]: { [mongoOp]: operand } })
   }
   if (clauses.length === 0) return {}
   if (clauses.length === 1) return clauses[0]

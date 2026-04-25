@@ -1,5 +1,6 @@
 // adapters/mongodb/dev/specs/convertWhere.spec.ts
 import { describe, expect, test } from 'vitest'
+import { ObjectId } from 'mongodb'
 import { convertWhereToMongo } from '../../src/convertWhere.js'
 
 const FILTERABLE = ['status', 'category', 'views', 'rating', 'published', 'tags']
@@ -337,5 +338,28 @@ describe('evaluatePostFilter', () => {
     expect(
       evaluatePostFilter({ views: 50 }, { views: { greater_than: 100 } }),
     ).toBe(false)
+  })
+})
+
+describe('convertWhereToMongo — id mapping', () => {
+  test('id with 24-hex string maps to _id with ObjectId cast', () => {
+    const hex = '507f1f77bcf86cd799439011'
+    const result = convertWhereToMongo({ id: { equals: hex } }, [], 'p1')
+    expect(result.preFilter).toEqual({ _id: { $eq: new ObjectId(hex) } })
+    expect(result.postFilter).toBeNull()
+  })
+
+  test('id with non-hex string maps to _id with raw value', () => {
+    const result = convertWhereToMongo({ id: { equals: 'not-an-objectid' } }, [], 'p1')
+    expect(result.preFilter).toEqual({ _id: { $eq: 'not-an-objectid' } })
+  })
+
+  test('id with in array casts each 24-hex string', () => {
+    const a = '507f1f77bcf86cd799439011'
+    const b = 'plain-string-id'
+    const result = convertWhereToMongo({ id: { in: [a, b] } }, [], 'p1')
+    expect(result.preFilter).toEqual({
+      _id: { $in: [new ObjectId(a), b] },
+    })
   })
 })
