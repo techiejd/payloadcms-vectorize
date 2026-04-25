@@ -140,19 +140,21 @@ describe('Mongo-specific integration tests', () => {
     const badExt = badAdapter.getConfigExtension({} as any)
     const badPayload = makeFakePayload(badExt.custom!)
 
-    await expect(
-      badAdapter.storeChunk(badPayload, 'default', {
-        sourceCollection: 'x',
-        docId: 'x-1',
-        chunkIndex: 0,
-        chunkText: 'should fail',
-        embeddingVersion: 'v1',
-        embedding: Array(DIMS).fill(0.5),
-        extensionFields: {},
-      }),
-    ).rejects.toThrowError(/different definition/)
-
-    await c.db(dbName).dropDatabase()
-    await c.close()
+    try {
+      await expect(
+        badAdapter.storeChunk(badPayload, 'default', {
+          sourceCollection: 'x',
+          docId: 'x-1',
+          chunkIndex: 0,
+          chunkText: 'should fail',
+          embeddingVersion: 'v1',
+          embedding: Array(DIMS).fill(0.5),
+          extensionFields: {},
+        }),
+      ).rejects.toThrowError(/different definition/)
+    } finally {
+      await c.db(dbName).dropDatabase()
+      await c.close()
+    }
   }, 90_000)
 })

@@ -2310,22 +2310,27 @@ describe('Mongo adapter — WHERE clause operators', () => {
     })
     test('greaterThan variant', async () => {
       const r = await performVectorSearch(payload, adapter, { views: { greaterThan: 100 } })
+      expect(r.length).toBeGreaterThan(0)
       r.forEach((x) => expect(x.views).toBeGreaterThan(100))
     })
     test('greater_than_equal', async () => {
       const r = await performVectorSearch(payload, adapter, { views: { greater_than_equal: 150 } })
+      expect(r.length).toBeGreaterThan(0)
       r.forEach((x) => expect(x.views).toBeGreaterThanOrEqual(150))
     })
     test('less_than', async () => {
       const r = await performVectorSearch(payload, adapter, { views: { less_than: 200 } })
+      expect(r.length).toBeGreaterThan(0)
       r.forEach((x) => expect(x.views).toBeLessThan(200))
     })
     test('less_than_equal', async () => {
       const r = await performVectorSearch(payload, adapter, { views: { less_than_equal: 150 } })
+      expect(r.length).toBeGreaterThan(0)
       r.forEach((x) => expect(x.views).toBeLessThanOrEqual(150))
     })
     test('lessThan variant on float', async () => {
       const r = await performVectorSearch(payload, adapter, { rating: { lessThan: 4.6 } })
+      expect(r.length).toBeGreaterThan(0)
       r.forEach((x) => expect(x.rating).toBeLessThan(4.6))
     })
     test('range via and', async () => {
@@ -2366,6 +2371,7 @@ describe('Mongo adapter — WHERE clause operators', () => {
       const r = await performVectorSearch(payload, adapter, {
         and: [{ status: { equals: 'published' } }, { views: { greater_than: 100 } }],
       })
+      expect(r.length).toBeGreaterThan(0)
       r.forEach((x) => {
         expect(x.status).toBe('published')
         expect(x.views).toBeGreaterThan(100)
@@ -2375,12 +2381,14 @@ describe('Mongo adapter — WHERE clause operators', () => {
       const r = await performVectorSearch(payload, adapter, {
         and: [{ status: { equals: 'published' } }],
       })
+      expect(r.length).toBeGreaterThan(0)
       r.forEach((x) => expect(x.status).toBe('published'))
     })
     test('and with one pre + one post operator', async () => {
       const r = await performVectorSearch(payload, adapter, {
         and: [{ status: { equals: 'published' } }, { tags: { like: 'javascript' } }],
       })
+      expect(r.length).toBeGreaterThan(0)
       r.forEach((x) => {
         expect(x.status).toBe('published')
         expect((x.tags as string).toLowerCase()).toContain('javascript')
@@ -2393,12 +2401,14 @@ describe('Mongo adapter — WHERE clause operators', () => {
       const r = await performVectorSearch(payload, adapter, {
         or: [{ status: { equals: 'draft' } }, { status: { equals: 'archived' } }],
       })
+      expect(r.length).toBeGreaterThan(0)
       r.forEach((x) => expect(['draft', 'archived']).toContain(x.status))
     })
     test('two numeric branches', async () => {
       const r = await performVectorSearch(payload, adapter, {
         or: [{ views: { greater_than: 200 } }, { rating: { greater_than: 4.7 } }],
       })
+      expect(r.length).toBeGreaterThan(0)
       r.forEach((x) => {
         const a = (x.views as number) > 200
         const b = (x.rating as number) > 4.7
@@ -2409,12 +2419,14 @@ describe('Mongo adapter — WHERE clause operators', () => {
       const r = await performVectorSearch(payload, adapter, {
         or: [{ status: { equals: 'published' } }],
       })
+      expect(r.length).toBeGreaterThan(0)
       r.forEach((x) => expect(x.status).toBe('published'))
     })
     test('or with one post-filter branch routes whole or to post', async () => {
       const r = await performVectorSearch(payload, adapter, {
         or: [{ status: { equals: 'published' } }, { tags: { like: 'python' } }],
       })
+      expect(r.length).toBeGreaterThan(0)
       r.forEach((x) => {
         const a = x.status === 'published'
         const b = (x.tags as string).toLowerCase().includes('python')
@@ -2436,6 +2448,7 @@ describe('Mongo adapter — WHERE clause operators', () => {
           { status: { equals: 'archived' } },
         ],
       })
+      expect(r.length).toBeGreaterThan(0)
       r.forEach((x) => {
         const tech = x.status === 'published' && x.category === 'tech'
         const arch = x.status === 'archived'
@@ -2449,6 +2462,7 @@ describe('Mongo adapter — WHERE clause operators', () => {
       const r = await performVectorSearch(payload, adapter, {
         sourceCollection: { equals: 'articles' },
       })
+      expect(r.length).toBeGreaterThan(0)
       r.forEach((x) => expect(x.sourceCollection).toBe('articles'))
     })
   })
@@ -2624,20 +2638,22 @@ describe('Mongo-specific integration tests', () => {
     const badExt = badAdapter.getConfigExtension({} as any)
     const badPayload = makeFakePayload(badExt.custom!)
 
-    await expect(
-      badAdapter.storeChunk(badPayload, 'default', {
-        sourceCollection: 'x',
-        docId: 'x-1',
-        chunkIndex: 0,
-        chunkText: 'should fail',
-        embeddingVersion: 'v1',
-        embedding: Array(DIMS).fill(0.5),
-        extensionFields: {},
-      }),
-    ).rejects.toThrowError(/different definition/)
-
-    await c.db(dbName).dropDatabase()
-    await c.close()
+    try {
+      await expect(
+        badAdapter.storeChunk(badPayload, 'default', {
+          sourceCollection: 'x',
+          docId: 'x-1',
+          chunkIndex: 0,
+          chunkText: 'should fail',
+          embeddingVersion: 'v1',
+          embedding: Array(DIMS).fill(0.5),
+          extensionFields: {},
+        }),
+      ).rejects.toThrowError(/different definition/)
+    } finally {
+      await c.db(dbName).dropDatabase()
+      await c.close()
+    }
   })
 })
 ```
