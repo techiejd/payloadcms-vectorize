@@ -1385,9 +1385,7 @@ export default async function storeChunk(
   const client = await getMongoClient(cfg.uri)
   await ensureSearchIndex(client, cfg.dbName, pool)
 
-  const embeddingArray = Array.isArray(data.embedding)
-    ? Array.from(data.embedding)
-    : Array.from(data.embedding)
+  const embeddingArray = Array.from(data.embedding)
 
   const now = new Date()
   const collection = client.db(cfg.dbName).collection(pool.collectionName)
