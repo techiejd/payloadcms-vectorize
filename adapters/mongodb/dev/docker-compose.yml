@@ -1,0 +1,11 @@
+services:
+  mongodb-atlas:
+    image: mongodb/mongodb-atlas-local:latest
+    container_name: vectorize-mongodb-test
+    ports:
+      - "27018:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ping:1})"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
