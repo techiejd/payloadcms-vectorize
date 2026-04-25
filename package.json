@@ -32,9 +32,10 @@
   "scripts": {
     "build": "pnpm copyfiles && pnpm build:types && pnpm build:swc && pnpm build:adapters",
     "build:swc": "swc ./src -d ./dist --config-file .swcrc --strip-leading-paths",
-    "build:adapters": "pnpm build:adapters:pg && pnpm build:adapters:cf",
+    "build:adapters": "pnpm build:adapters:pg && pnpm build:adapters:cf && pnpm build:adapters:mongodb",
     "build:adapters:pg": "cd ./adapters/pg && tsc -p tsconfig.build.json && swc ./src -d ./dist --config-file ../../.swcrc --strip-leading-paths",
     "build:adapters:cf": "cd ./adapters/cf && tsc -p tsconfig.build.json && swc ./src -d ./dist --config-file ../../.swcrc --strip-leading-paths",
+    "build:adapters:mongodb": "cd ./adapters/mongodb && tsc -p tsconfig.build.json && swc ./src -d ./dist --config-file ../../.swcrc --strip-leading-paths",
     "build:types": "tsc -p tsconfig.build.json --outDir dist --rootDir ./src",
     "build:types:all": "pnpm build:types && tsc --noEmit",
     "clean": "rimraf {dist,*.tsbuildinfo,adapters/*/dist,adapters/*/*.tsbuildinfo}",
@@ -57,7 +58,8 @@
     "test:e2e": "playwright test",
     "test:int": "cross-env DOTENV_CONFIG_PATH=dev/.env.test NODE_OPTIONS='--require=dotenv/config --import=tsx --max-old-space-size=8192' vitest",
     "test:adapters:pg": "cross-env DOTENV_CONFIG_PATH=dev/.env.test NODE_OPTIONS='--require=dotenv/config --import=tsx --max-old-space-size=8192' vitest --config adapters/pg/vitest.config.js",
-    "test:adapters:cf": "cross-env DOTENV_CONFIG_PATH=dev/.env.test NODE_OPTIONS='--require=dotenv/config --import=tsx --max-old-space-size=8192' vitest --config adapters/cf/vitest.config.ts"
+    "test:adapters:cf": "cross-env DOTENV_CONFIG_PATH=dev/.env.test NODE_OPTIONS='--require=dotenv/config --import=tsx --max-old-space-size=8192' vitest --config adapters/cf/vitest.config.ts",
+    "test:adapters:mongodb": "cross-env DOTENV_CONFIG_PATH=dev/.env.test NODE_OPTIONS='--require=dotenv/config --import=tsx --max-old-space-size=8192' vitest --config adapters/mongodb/vitest.config.ts"
   },
   "devDependencies": {
     "@changesets/changelog-github": "^0.5.2",
