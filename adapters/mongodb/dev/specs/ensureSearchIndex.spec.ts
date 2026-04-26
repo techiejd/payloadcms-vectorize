@@ -34,13 +34,14 @@ describe('ensureSearchIndex', () => {
   })
 
   test('concurrent ensureSearchIndex calls share one createSearchIndex call', async () => {
-    const create = vi.fn(async () => undefined)
-    let listCallNo = 0
+    let createCount = 0
+    const create = vi.fn(async () => {
+      createCount += 1
+    })
     const collection = {
       listSearchIndexes: () => ({
         toArray: async () => {
-          listCallNo += 1
-          if (listCallNo === 1) return []
+          if (createCount === 0) return []
           return [
             {
               name: POOL.indexName,
