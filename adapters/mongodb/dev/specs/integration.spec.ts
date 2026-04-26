@@ -3,7 +3,7 @@ import { MongoClient } from 'mongodb'
 import type { BasePayload } from 'payload'
 import type { DbAdapter } from 'payloadcms-vectorize'
 import { DIMS, MONGO_URI } from './constants.js'
-import { buildMongoTestPayload, dropTestDb, teardownDbs } from './utils.js'
+import { buildMongoTestPayload, teardownDbs } from './utils.js'
 import {
   makeDummyEmbedDocs,
   makeDummyEmbedQuery,

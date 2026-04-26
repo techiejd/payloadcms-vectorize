@@ -58,13 +58,24 @@ export async function buildMongoTestPayload(args: BuildMongoTestPayloadArgs): Pr
 
 /**
  * Insert a database name into a Mongo connection string between the host
- * and the optional query string. Handles URIs with or without a trailing slash
- * and with or without a `?query` portion (e.g. `?directConnection=true`).
+ * and the optional query string. Requires a path-less URI (host[:port] only,
+ * optionally followed by `?query`). Throws on URIs that already carry a path
+ * component (e.g. `mongodb+srv://cluster/myapp`) — concatenating onto those
+ * silently produces an invalid double-path URI like `.../myapp/test`.
  */
 function injectDbName(uri: string, dbName: string): string {
   const queryIdx = uri.indexOf('?')
   const base = queryIdx === -1 ? uri : uri.slice(0, queryIdx)
   const query = queryIdx === -1 ? '' : uri.slice(queryIdx)
+  const schemeEnd = base.indexOf('://')
+  const afterScheme = schemeEnd === -1 ? base : base.slice(schemeEnd + 3)
+  const slashIdx = afterScheme.indexOf('/')
+  if (slashIdx !== -1 && afterScheme.slice(slashIdx + 1).replace(/\/+$/, '').length > 0) {
+    throw new Error(
+      `[buildMongoTestPayload] Mongo URI must be path-less (host[:port] only); got ${uri}. ` +
+        `Strip the default-DB path before passing in.`,
+    )
+  }
   const baseNoSlash = base.replace(/\/+$/, '')
   return `${baseNoSlash}/${dbName}${query}`
 }
@@ -95,9 +106,7 @@ export async function teardownDbs(
   dbName: string,
 ): Promise<void> {
   try {
-    if (typeof (payload as any).destroy === 'function') {
-      await (payload as any).destroy()
-    }
+    await payload.destroy()
   } catch {
     // ignore — destroy is best-effort during teardown
   }
