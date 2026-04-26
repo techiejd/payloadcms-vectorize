@@ -25,6 +25,11 @@ export async function searchImpl(
       `[@payloadcms-vectorize/mongodb] Unknown pool "${poolName}". Configured pools: ${Object.keys(ctx.pools).join(', ')}`,
     )
   }
+  if (!Number.isInteger(limit) || limit <= 0) {
+    throw new Error(
+      `[@payloadcms-vectorize/mongodb] limit must be a positive integer; got ${limit}`,
+    )
+  }
   const client = await getMongoClient(ctx.uri)
   await ensureSearchIndex(client, ctx.dbName, pool)
 

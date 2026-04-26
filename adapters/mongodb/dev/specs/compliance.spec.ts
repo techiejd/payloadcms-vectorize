@@ -223,4 +223,15 @@ describe('Mongo Adapter Compliance Tests', () => {
       ).rejects.toThrow(/Unknown pool/)
     })
   })
+
+  describe('search input validation', () => {
+    test.each([0, -1, 1.5, NaN])(
+      'search rejects non-positive-integer limit (%s)',
+      async (limit) => {
+        await expect(
+          adapter.search(payload, Array(DIMS).fill(0.0), 'default', limit),
+        ).rejects.toThrow(/limit must be a positive integer/)
+      },
+    )
+  })
 })
