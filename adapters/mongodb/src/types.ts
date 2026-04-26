@@ -1,6 +1,3 @@
-import type { BasePayload } from 'payload'
-import { getVectorizedPayload } from 'payloadcms-vectorize'
-
 export type Similarity = 'cosine' | 'euclidean' | 'dotProduct'
 
 export interface MongoPoolConfig {
@@ -41,11 +38,11 @@ export interface ResolvedPoolConfig {
 }
 
 /**
- * Stored in `getConfigExtension().custom._mongoConfig` so `search()` can
- * recover the same config from a `BasePayload` instance.
+ * Stored on `getConfigExtension().custom._mongoConfig` for introspection.
+ * The connection URI is intentionally NOT included — credentials live in
+ * the adapter closure, never on `payload.config`.
  */
 export interface MongoConfigCustom {
-  uri: string
   dbName: string
   pools: Record<string, ResolvedPoolConfig>
 }
@@ -81,11 +78,3 @@ export function resolvePoolConfig(
   }
 }
 
-export function getMongoConfig(payload: BasePayload): MongoConfigCustom {
-  const cfg = getVectorizedPayload(payload)?.getDbAdapterCustom()
-    ?._mongoConfig as MongoConfigCustom | undefined
-  if (!cfg) {
-    throw new Error('[@payloadcms-vectorize/mongodb] _mongoConfig not found on payload — did you register the adapter?')
-  }
-  return cfg
-}

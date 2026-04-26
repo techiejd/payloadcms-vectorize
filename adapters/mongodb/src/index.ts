@@ -1,7 +1,7 @@
 import type { DbAdapter } from 'payloadcms-vectorize'
 import { getMongoClient } from './client.js'
-import storeChunk from './embed.js'
-import search from './search.js'
+import { storeChunkImpl } from './embed.js'
+import { searchImpl } from './search.js'
 import {
   resolvePoolConfig,
   type MongoVectorIntegrationConfig,
@@ -17,12 +17,8 @@ export type {
 export const createMongoVectorIntegration = (
   options: MongoVectorIntegrationConfig,
 ): { adapter: DbAdapter } => {
-  if (!options.uri) {
-    throw new Error('[@payloadcms-vectorize/mongodb] `uri` is required')
-  }
-  if (!options.dbName) {
-    throw new Error('[@payloadcms-vectorize/mongodb] `dbName` is required')
-  }
+  if (!options.uri) throw new Error('[@payloadcms-vectorize/mongodb] `uri` is required')
+  if (!options.dbName) throw new Error('[@payloadcms-vectorize/mongodb] `dbName` is required')
   if (!options.pools || Object.keys(options.pools).length === 0) {
     throw new Error('[@payloadcms-vectorize/mongodb] `pools` must contain at least one pool')
   }
@@ -37,49 +33,44 @@ export const createMongoVectorIntegration = (
     resolvedPools[name] = resolvePoolConfig(name, p)
   }
 
+  const ctx = { uri: options.uri, dbName: options.dbName, pools: resolvedPools }
+
   const adapter: DbAdapter = {
     getConfigExtension: () => ({
       custom: {
-        _mongoConfig: {
-          uri: options.uri,
-          dbName: options.dbName,
-          pools: resolvedPools,
-        },
+        _mongoConfig: { dbName: options.dbName, pools: resolvedPools },
       },
     }),
 
-    storeChunk,
+    storeChunk: (payload, poolName, chunk) =>
+      storeChunkImpl(ctx, payload, poolName, chunk),
 
-    deleteChunks: async (payload, poolName, sourceCollection, docId) => {
-      const cfg = resolvedPools[poolName]
+    deleteChunks: async (_payload, poolName, sourceCollection, docId) => {
+      const cfg = ctx.pools[poolName]
       if (!cfg) {
-        throw new Error(
-          `[@payloadcms-vectorize/mongodb] Unknown pool "${poolName}"`,
-        )
+        throw new Error(`[@payloadcms-vectorize/mongodb] Unknown pool "${poolName}"`)
       }
-      const client = await getMongoClient(options.uri)
+      const client = await getMongoClient(ctx.uri)
       await client
-        .db(options.dbName)
+        .db(ctx.dbName)
         .collection(cfg.collectionName)
         .deleteMany({ sourceCollection, docId: String(docId) })
     },
 
     hasEmbeddingVersion: async (
-      payload,
+      _payload,
       poolName,
       sourceCollection,
       docId,
       embeddingVersion,
     ) => {
-      const cfg = resolvedPools[poolName]
+      const cfg = ctx.pools[poolName]
       if (!cfg) {
-        throw new Error(
-          `[@payloadcms-vectorize/mongodb] Unknown pool "${poolName}"`,
-        )
+        throw new Error(`[@payloadcms-vectorize/mongodb] Unknown pool "${poolName}"`)
       }
-      const client = await getMongoClient(options.uri)
+      const client = await getMongoClient(ctx.uri)
       const count = await client
-        .db(options.dbName)
+        .db(ctx.dbName)
         .collection(cfg.collectionName)
         .countDocuments(
           { sourceCollection, docId: String(docId), embeddingVersion },
@@ -88,7 +79,8 @@ export const createMongoVectorIntegration = (
       return count > 0
     },
 
-    search,
+    search: (payload, queryEmbedding, poolName, limit, where) =>
+      searchImpl(ctx, payload, queryEmbedding, poolName, limit, where),
   }
 
   return { adapter }

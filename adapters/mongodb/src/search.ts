@@ -3,24 +3,30 @@ import type { VectorSearchResult } from 'payloadcms-vectorize'
 import { getMongoClient } from './client.js'
 import { convertWhereToMongo, evaluatePostFilter } from './convertWhere.js'
 import { ensureSearchIndex } from './indexes.js'
-import { getMongoConfig, RESERVED_FIELDS } from './types.js'
+import { RESERVED_FIELDS, type ResolvedPoolConfig } from './types.js'
 
-export default async function search(
-  payload: BasePayload,
+export interface MongoSearchCtx {
+  uri: string
+  dbName: string
+  pools: Record<string, ResolvedPoolConfig>
+}
+
+export async function searchImpl(
+  ctx: MongoSearchCtx,
+  _payload: BasePayload,
   queryEmbedding: number[],
   poolName: string,
   limit: number = 10,
   where?: Where,
 ): Promise<VectorSearchResult[]> {
-  const cfg = getMongoConfig(payload)
-  const pool = cfg.pools[poolName]
+  const pool = ctx.pools[poolName]
   if (!pool) {
     throw new Error(
-      `[@payloadcms-vectorize/mongodb] Unknown pool "${poolName}". Configured pools: ${Object.keys(cfg.pools).join(', ')}`,
+      `[@payloadcms-vectorize/mongodb] Unknown pool "${poolName}". Configured pools: ${Object.keys(ctx.pools).join(', ')}`,
     )
   }
-  const client = await getMongoClient(cfg.uri)
-  await ensureSearchIndex(client, cfg.dbName, pool)
+  const client = await getMongoClient(ctx.uri)
+  await ensureSearchIndex(client, ctx.dbName, pool)
 
   let preFilter: Record<string, unknown> | null = null
   let postFilter: Where | null = null
@@ -58,7 +64,7 @@ export default async function search(
     { $project: projection },
   ]
 
-  const collection = client.db(cfg.dbName).collection(pool.collectionName)
+  const collection = client.db(ctx.dbName).collection(pool.collectionName)
   const rawDocs = await collection.aggregate(pipeline).toArray()
 
   const filtered = postFilter
