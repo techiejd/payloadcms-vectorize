@@ -26,7 +26,7 @@ describe('Mongo Adapter Compliance Tests', () => {
     test('returns object with custom._mongoConfig', () => {
       const ext = adapter.getConfigExtension({} as any)
       expect(ext.custom?._mongoConfig).toBeDefined()
-      expect(ext.custom!._mongoConfig.uri).toBe(MONGO_URI)
+      expect(ext.custom!._mongoConfig).not.toHaveProperty('uri')
       expect(ext.custom!._mongoConfig.dbName).toBe(TEST_DB)
       expect(ext.custom!._mongoConfig.pools.default.dimensions).toBe(DIMS)
     })
