@@ -1,9 +1,13 @@
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import type { BasePayload, Where } from 'payload'
 import type { DbAdapter, VectorSearchResult } from 'payloadcms-vectorize'
-import { createMongoVectorIntegration } from '../../src/index.js'
 import { DIMS, MONGO_URI } from './constants.js'
-import { dropTestDb, makeFakePayload, teardown } from './utils.js'
+import { buildMongoTestPayload, teardownDbs } from './utils.js'
+import {
+  makeDummyEmbedDocs,
+  makeDummyEmbedQuery,
+  testEmbeddingVersion,
+} from '@shared-test/helpers/embed'
 
 const TEST_DB = `vectorize_mongo_where_${Date.now()}`
 const FILTERABLE = ['status', 'category', 'views', 'rating', 'published', 'tags']
@@ -46,8 +50,7 @@ describe('Mongo adapter — WHERE clause operators', () => {
   let payload: BasePayload
 
   beforeAll(async () => {
-    await dropTestDb(MONGO_URI, TEST_DB)
-    const { adapter: a } = createMongoVectorIntegration({
+    const built = await buildMongoTestPayload({
       uri: MONGO_URI,
       dbName: TEST_DB,
       pools: {
@@ -57,10 +60,19 @@ describe('Mongo adapter — WHERE clause operators', () => {
           numCandidates: 50,
         },
       },
+      knowledgePools: {
+        default: {
+          collections: {},
+          embeddingConfig: {
+            version: testEmbeddingVersion,
+            queryFn: makeDummyEmbedQuery(DIMS),
+            realTimeIngestionFn: makeDummyEmbedDocs(DIMS),
+          },
+        },
+      },
     })
-    adapter = a
-    const ext = adapter.getConfigExtension({} as any)
-    payload = makeFakePayload(ext.custom!)
+    adapter = built.adapter
+    payload = built.payload
 
     let i = 0
     for (const a of articles) {
@@ -86,8 +98,7 @@ describe('Mongo adapter — WHERE clause operators', () => {
   }, 90_000)
 
   afterAll(async () => {
-    await dropTestDb(MONGO_URI, TEST_DB)
-    await teardown()
+    await teardownDbs(payload, MONGO_URI, TEST_DB)
   })
 
   describe('equals operator', () => {

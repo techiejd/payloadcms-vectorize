@@ -2,24 +2,40 @@ import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { MongoClient } from 'mongodb'
 import type { BasePayload } from 'payload'
 import type { DbAdapter } from 'payloadcms-vectorize'
-import { DIMS, MONGO_URI, TEST_DB, makeIntegration } from './constants.js'
-import { dropTestDb, makeFakePayload, teardown } from './utils.js'
+import { DIMS, MONGO_URI, TEST_DB } from './constants.js'
+import { buildMongoTestPayload, teardownDbs } from './utils.js'
+import {
+  makeDummyEmbedDocs,
+  makeDummyEmbedQuery,
+  testEmbeddingVersion,
+} from '@shared-test/helpers/embed'
 
 describe('Mongo Adapter Compliance Tests', () => {
   let adapter: DbAdapter
   let payload: BasePayload
 
   beforeAll(async () => {
-    await dropTestDb(MONGO_URI, TEST_DB)
-    const integration = makeIntegration()
-    adapter = integration.adapter
-    const ext = adapter.getConfigExtension({} as any)
-    payload = makeFakePayload(ext.custom!)
+    const built = await buildMongoTestPayload({
+      uri: MONGO_URI,
+      dbName: TEST_DB,
+      pools: { default: { dimensions: DIMS, filterableFields: [] } },
+      knowledgePools: {
+        default: {
+          collections: {},
+          embeddingConfig: {
+            version: testEmbeddingVersion,
+            queryFn: makeDummyEmbedQuery(DIMS),
+            realTimeIngestionFn: makeDummyEmbedDocs(DIMS),
+          },
+        },
+      },
+    })
+    payload = built.payload
+    adapter = built.adapter
   })
 
   afterAll(async () => {
-    await dropTestDb(MONGO_URI, TEST_DB)
-    await teardown()
+    await teardownDbs(payload, MONGO_URI, TEST_DB)
   })
 
   describe('getConfigExtension()', () => {
@@ -27,7 +43,7 @@ describe('Mongo Adapter Compliance Tests', () => {
       const ext = adapter.getConfigExtension({} as any)
       expect(ext.custom?._mongoConfig).toBeDefined()
       expect(ext.custom!._mongoConfig).not.toHaveProperty('uri')
-      expect(ext.custom!._mongoConfig.dbName).toBe(TEST_DB)
+      expect(ext.custom!._mongoConfig.dbName).toBe(`${TEST_DB}_vectors`)
       expect(ext.custom!._mongoConfig.pools.default.dimensions).toBe(DIMS)
     })
 
@@ -138,7 +154,7 @@ describe('Mongo Adapter Compliance Tests', () => {
       const c = new MongoClient(MONGO_URI)
       await c.connect()
       const before = await c
-        .db(TEST_DB)
+        .db(`${TEST_DB}_vectors`)
         .collection('vectorize_default')
         .countDocuments({ sourceCollection: 'delete-test', docId })
       expect(before).toBeGreaterThan(0)
@@ -146,7 +162,7 @@ describe('Mongo Adapter Compliance Tests', () => {
       await adapter.deleteChunks(payload, 'default', 'delete-test', docId)
 
       const after = await c
-        .db(TEST_DB)
+        .db(`${TEST_DB}_vectors`)
         .collection('vectorize_default')
         .countDocuments({ sourceCollection: 'delete-test', docId })
       expect(after).toBe(0)
@@ -183,6 +199,28 @@ describe('Mongo Adapter Compliance Tests', () => {
         payload, 'default', 'test-collection', 'never-existed', 'v1',
       )
       expect(r).toBe(false)
+    })
+  })
+
+  describe('unknown pool errors', () => {
+    test('search throws Unknown pool', async () => {
+      await expect(
+        adapter.search(payload, Array(DIMS).fill(0.0), 'pool_does_not_exist', 5),
+      ).rejects.toThrow(/Unknown pool/)
+    })
+
+    test('storeChunk throws Unknown pool', async () => {
+      await expect(
+        adapter.storeChunk(payload, 'pool_does_not_exist', {
+          sourceCollection: 'src',
+          docId: 'x',
+          chunkIndex: 0,
+          chunkText: 'x',
+          embeddingVersion: 'v',
+          embedding: Array(DIMS).fill(0.0),
+          extensionFields: {},
+        }),
+      ).rejects.toThrow(/Unknown pool/)
     })
   })
 })

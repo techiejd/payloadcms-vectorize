@@ -1,46 +1,108 @@
 import { MongoClient } from 'mongodb'
-import type { BasePayload } from 'payload'
+import { buildConfig, getPayload } from 'payload'
+import { mongooseAdapter } from '@payloadcms/db-mongodb'
+import { lexicalEditor } from '@payloadcms/richtext-lexical'
+import payloadcmsVectorize from 'payloadcms-vectorize'
+import type { BasePayload, CollectionConfig } from 'payload'
+import type { KnowledgePoolDynamicConfig } from 'payloadcms-vectorize'
+
+export type KnowledgePoolsConfig = Record<string, KnowledgePoolDynamicConfig>
 import { __closeForTests } from '../../src/client.js'
 import { __resetIndexCacheForTests } from '../../src/indexes.js'
+import { createMongoVectorIntegration } from '../../src/index.js'
+import type { MongoVectorIntegrationConfig } from '../../src/types.js'
 
-/**
- * Minimal payload-shaped object that satisfies `getVectorizedPayload(payload).getDbAdapterCustom()`.
- *
- * `getVectorizedPayload` (src/types.ts) reads `payload.config.custom.createVectorizedPayloadObject`
- * and calls it with the payload to produce a `VectorizedPayload` whose `getDbAdapterCustom()`
- * returns the adapter's `getConfigExtension().custom`. We mirror that contract exactly.
- */
-export function makeFakePayload(custom: Record<string, unknown>): BasePayload {
-  const payload = {
-    config: {
-      custom: {
-        createVectorizedPayloadObject: () => ({
-          getDbAdapterCustom: () => custom,
-        }),
-      },
-    },
-    logger: {
-      error: console.error.bind(console),
-      info: console.log.bind(console),
-    },
-  } as unknown as BasePayload
-  return payload
+export interface BuildMongoTestPayloadArgs {
+  uri: string
+  dbName: string
+  pools: MongoVectorIntegrationConfig['pools']
+  collections?: CollectionConfig[]
+  knowledgePools: KnowledgePoolsConfig
 }
 
-/** Spin up an admin client and drop the test DB. */
+export async function buildMongoTestPayload(args: BuildMongoTestPayloadArgs): Promise<{
+  payload: BasePayload
+  adapter: ReturnType<typeof createMongoVectorIntegration>['adapter']
+}> {
+  const vectorDbName = `${args.dbName}_vectors`
+
+  await dropTestDb(args.uri, args.dbName)
+  await dropTestDb(args.uri, vectorDbName)
+
+  const { adapter } = createMongoVectorIntegration({
+    uri: args.uri,
+    dbName: vectorDbName,
+    pools: args.pools,
+  })
+
+  const config = await buildConfig({
+    secret: 'test-secret',
+    editor: lexicalEditor(),
+    collections: args.collections ?? [],
+    db: mongooseAdapter({ url: injectDbName(args.uri, args.dbName) }),
+    plugins: [
+      payloadcmsVectorize({
+        dbAdapter: adapter,
+        knowledgePools: args.knowledgePools,
+      }),
+    ],
+  })
+
+  const payload = await getPayload({
+    config,
+    key: `mongodb-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    cron: false,
+  })
+  return { payload, adapter }
+}
+
+/**
+ * Insert a database name into a Mongo connection string between the host
+ * and the optional query string. Handles URIs with or without a trailing slash
+ * and with or without a `?query` portion (e.g. `?directConnection=true`).
+ */
+function injectDbName(uri: string, dbName: string): string {
+  const queryIdx = uri.indexOf('?')
+  const base = queryIdx === -1 ? uri : uri.slice(0, queryIdx)
+  const query = queryIdx === -1 ? '' : uri.slice(queryIdx)
+  const baseNoSlash = base.replace(/\/+$/, '')
+  return `${baseNoSlash}/${dbName}${query}`
+}
+
 export async function dropTestDb(uri: string, dbName: string): Promise<void> {
   const c = new MongoClient(uri)
   try {
     await c.connect()
     await c.db(dbName).dropDatabase()
   } catch {
-    // ignore — DB may not exist
+    // ignore
   } finally {
     await c.close()
   }
 }
 
-export async function teardown(): Promise<void> {
+/**
+ * Tear down a booted test payload + both databases + module caches.
+ *
+ * Mirrors the pg adapter's `destroyPayload` pattern: destroying the payload
+ * instance closes the Mongoose connection opened by `mongooseAdapter`. Without
+ * this, each spec leaks a live Mongoose connection and the suite eventually
+ * exhausts the pool.
+ */
+export async function teardownDbs(
+  payload: BasePayload,
+  uri: string,
+  dbName: string,
+): Promise<void> {
+  try {
+    if (typeof (payload as any).destroy === 'function') {
+      await (payload as any).destroy()
+    }
+  } catch {
+    // ignore — destroy is best-effort during teardown
+  }
+  await dropTestDb(uri, dbName)
+  await dropTestDb(uri, `${dbName}_vectors`)
   __resetIndexCacheForTests()
   await __closeForTests()
 }

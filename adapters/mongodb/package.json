@@ -43,6 +43,8 @@
     "payloadcms-vectorize": ">=0.7.2"
   },
   "devDependencies": {
+    "@payloadcms/db-mongodb": "3.69.0",
+    "@payloadcms/richtext-lexical": "3.69.0",
     "mongodb": "^6.10.0",
     "payloadcms-vectorize": "workspace:*"
   },
