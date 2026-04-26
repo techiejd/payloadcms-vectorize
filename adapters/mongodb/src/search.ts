@@ -30,8 +30,7 @@ export default async function search(
     postFilter = split.postFilter
   }
 
-  const numCandidates =
-    pool.numCandidates ?? Math.max(limit * 20, 100)
+  const numCandidates = pool.numCandidates ?? limit * 10
 
   const vectorSearchStage: Record<string, unknown> = {
     index: pool.indexName,

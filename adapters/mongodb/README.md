@@ -50,7 +50,7 @@ const { adapter } = createMongoVectorIntegration({
 |---|---|---|---|
 | `dimensions` | yes | — | Embedding vector dimensions; must match your model. |
 | `similarity` | no | `'cosine'` | `'cosine' \| 'euclidean' \| 'dotProduct'`. |
-| `numCandidates` | no | `max(limit*20, 100)` | ANN candidate set size for HNSW. |
+| `numCandidates` | no | `limit * 10` | ANN candidate set size for HNSW; Atlas docs recommend 10×–20× of `limit`. |
 | `filterableFields` | no | `[]` | Extension fields you'll filter on in `where` clauses. |
 | `forceExact` | no | `false` | Use ENN exact full-scan instead of ANN. |
 | `collectionName` | no | `vectorize_<pool>` | Override Mongo collection name. |
