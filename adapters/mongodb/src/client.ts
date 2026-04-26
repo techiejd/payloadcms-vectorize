@@ -5,7 +5,10 @@ const clientCache = new Map<string, Promise<MongoClient>>()
 export function getMongoClient(uri: string): Promise<MongoClient> {
   let p = clientCache.get(uri)
   if (!p) {
-    p = MongoClient.connect(uri)
+    p = MongoClient.connect(uri).catch((err) => {
+      clientCache.delete(uri)
+      throw err
+    })
     clientCache.set(uri, p)
   }
   return p
