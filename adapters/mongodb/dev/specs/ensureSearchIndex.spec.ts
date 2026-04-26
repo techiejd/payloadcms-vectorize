@@ -33,6 +33,52 @@ describe('ensureSearchIndex', () => {
     await expect(ensureSearchIndex(client, 'db', POOL)).rejects.toThrow('boom')
   })
 
+  test('polls until status transitions from BUILDING to READY', async () => {
+    vi.useFakeTimers()
+    try {
+      const definition = {
+        fields: [
+          { type: 'vector', path: 'embedding', numDimensions: 4, similarity: 'cosine' },
+          { type: 'filter', path: 'sourceCollection' },
+          { type: 'filter', path: 'docId' },
+          { type: 'filter', path: 'embeddingVersion' },
+        ],
+      }
+      let listCount = 0
+      const list = vi.fn(() => ({
+        toArray: async () => {
+          listCount += 1
+          if (listCount === 1) return []
+          if (listCount <= 3) {
+            return [{ name: POOL.indexName, status: 'BUILDING', latestDefinition: definition }]
+          }
+          return [{ name: POOL.indexName, status: 'READY', latestDefinition: definition }]
+        },
+      }))
+      const create = vi.fn(async () => undefined)
+      const collection = {
+        listSearchIndexes: list,
+        createSearchIndex: create,
+      }
+      const client = {
+        db: () => ({
+          collection: () => collection,
+          listCollections: () => ({ toArray: async () => [] }),
+          createCollection: async () => undefined,
+        }),
+      } as any
+
+      const promise = ensureSearchIndex(client, 'db', POOL)
+      await vi.advanceTimersByTimeAsync(3000)
+      await promise
+
+      expect(create).toHaveBeenCalledTimes(1)
+      expect(list).toHaveBeenCalledTimes(4)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   test('concurrent ensureSearchIndex calls share one createSearchIndex call', async () => {
     let createCount = 0
     const create = vi.fn(async () => {
