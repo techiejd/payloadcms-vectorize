@@ -267,6 +267,7 @@ jobs:
           test -f dist/index.d.ts
           test -f adapters/pg/dist/index.d.ts
           test -f adapters/cf/dist/index.d.ts
+          test -f adapters/mongodb/dist/index.d.ts
 
   test:
     runs-on: ubuntu-latest
