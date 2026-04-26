@@ -1,7 +1,7 @@
 import type { Db, MongoClient } from 'mongodb'
 import type { ResolvedPoolConfig } from './types.js'
 
-const ensureCache = new Set<string>()
+const ensureCache = new Map<string, Promise<void>>()
 
 function cacheKey(dbName: string, collectionName: string, indexName: string): string {
   return `${dbName}::${collectionName}::${indexName}`
@@ -35,27 +35,18 @@ async function ensureCollectionExists(db: Db, name: string): Promise<void> {
   }
 }
 
-export async function ensureSearchIndex(
+async function doEnsure(
   client: MongoClient,
   dbName: string,
   pool: ResolvedPoolConfig,
 ): Promise<void> {
-  const key = cacheKey(dbName, pool.collectionName, pool.indexName)
-  if (ensureCache.has(key)) return
-
   const db = client.db(dbName)
   const collection = db.collection(pool.collectionName)
-
   const wantedDefinition = buildDefinition(pool)
 
-  let existing: Array<Record<string, unknown>>
-  try {
-    existing = (await collection.listSearchIndexes(pool.indexName).toArray()) as Array<
-      Record<string, unknown>
-    >
-  } catch {
-    existing = []
-  }
+  const existing = (await collection
+    .listSearchIndexes(pool.indexName)
+    .toArray()) as Array<Record<string, unknown>>
 
   const found = existing.find((idx) => idx.name === pool.indexName)
   if (found) {
@@ -67,11 +58,7 @@ export async function ensureSearchIndex(
           `[@payloadcms-vectorize/mongodb] Search index "${pool.indexName}" exists with different definition. Drop it manually with db.collection("${pool.collectionName}").dropSearchIndex("${pool.indexName}") before re-running.`,
         )
       }
-      if (status === 'READY') {
-        ensureCache.add(key)
-        return
-      }
-      // BUILDING: fall through to polling
+      if (status === 'READY') return
     } else {
       throw new Error(
         `[@payloadcms-vectorize/mongodb] Search index "${pool.indexName}" is in unexpected state "${status}". Drop and recreate.`,
@@ -86,17 +73,13 @@ export async function ensureSearchIndex(
     })
   }
 
-  // Poll for READY (≤ 60s)
   const deadline = Date.now() + 60_000
   while (Date.now() < deadline) {
-    const list = (await collection.listSearchIndexes(pool.indexName).toArray()) as Array<
-      Record<string, unknown>
-    >
+    const list = (await collection
+      .listSearchIndexes(pool.indexName)
+      .toArray()) as Array<Record<string, unknown>>
     const idx = list.find((i) => i.name === pool.indexName)
-    if (idx?.status === 'READY') {
-      ensureCache.add(key)
-      return
-    }
+    if (idx?.status === 'READY') return
     await new Promise((r) => setTimeout(r, 1000))
   }
   throw new Error(
@@ -104,7 +87,23 @@ export async function ensureSearchIndex(
   )
 }
 
-/** Test-only: clear the in-memory ensure cache. */
+export function ensureSearchIndex(
+  client: MongoClient,
+  dbName: string,
+  pool: ResolvedPoolConfig,
+): Promise<void> {
+  const key = cacheKey(dbName, pool.collectionName, pool.indexName)
+  let p = ensureCache.get(key)
+  if (!p) {
+    p = doEnsure(client, dbName, pool).catch((err) => {
+      ensureCache.delete(key)
+      throw err
+    })
+    ensureCache.set(key, p)
+  }
+  return p
+}
+
 export function __resetIndexCacheForTests(): void {
   ensureCache.clear()
 }
