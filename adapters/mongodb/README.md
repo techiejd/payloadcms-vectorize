@@ -1,6 +1,6 @@
 # @payloadcms-vectorize/mongodb
 
-MongoDB adapter for [`payloadcms-vectorize`](https://github.com/techiejd/payloadcms-vectorize). Targets both **MongoDB Atlas** (GA) and **self-hosted MongoDB Community 8.2+** (public preview) via a unified `$vectorSearch` API — connection string is the only difference.
+MongoDB adapter for [`payloadcms-vectorize`](https://github.com/techiejd/payloadcms-vectorize). Targets both **MongoDB Atlas** (GA) and **self-hosted MongoDB Community 8.2+** via a unified `$vectorSearch` API — connection string is the only difference.
 
 > **Status:** GA on MongoDB Atlas. Self-hosted MongoDB Community 8.2+ is supported and tracks upstream `mongot` maturity.
 

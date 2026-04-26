@@ -34,8 +34,7 @@
     "payloadcms",
     "mongodb",
     "vector-search",
-    "rag",
-    "experimental"
+    "rag"
   ],
   "peerDependencies": {
     "mongodb": ">=6.0.0",
