@@ -22,6 +22,7 @@ node_modules/
 /dist
 /adapters/pg/dist
 /adapters/cf/dist
+/adapters/mongodb/dist
 
 # misc
 .DS_Store
@@ -56,3 +57,6 @@ yarn-error.log*
 
 # Cursor
 .cursor/
+
+# Worktrees
+.worktrees/
