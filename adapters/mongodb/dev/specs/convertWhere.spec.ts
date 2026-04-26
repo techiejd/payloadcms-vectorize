@@ -363,3 +363,11 @@ describe('convertWhereToMongo — id mapping', () => {
     })
   })
 })
+
+describe('convertWhereToMongo — undeclared filter fields', () => {
+  test('throws when filtering on a field not in filterableFields and not reserved', () => {
+    expect(() =>
+      convertWhereToMongo({ unknown_field: { equals: 'x' } }, [], 'default'),
+    ).toThrow(/filterableFields/)
+  })
+})
