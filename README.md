@@ -52,10 +52,11 @@ A Payload CMS plugin that adds vector search capabilities to your collections. P
 
 This plugin requires a database adapter for vector storage. Available adapters:
 
-| Adapter              | Package                    | Database                    | Documentation                     |
-| -------------------- | -------------------------- | --------------------------- | --------------------------------- |
-| PostgreSQL           | `@payloadcms-vectorize/pg` | PostgreSQL with pgvector    | [README](./adapters/pg/README.md) |
-| Cloudflare Vectorize | `@payloadcms-vectorize/cf` | Cloudflare Vectorize index  | [README](./adapters/cf/README.md) |
+| Adapter              | Package                         | Database                                | Documentation                          |
+| -------------------- | ------------------------------- | --------------------------------------- | -------------------------------------- |
+| PostgreSQL           | `@payloadcms-vectorize/pg`      | PostgreSQL with pgvector                | [README](./adapters/pg/README.md)      |
+| Cloudflare Vectorize | `@payloadcms-vectorize/cf`      | Cloudflare Vectorize index              | [README](./adapters/cf/README.md)      |
+| MongoDB              | `@payloadcms-vectorize/mongodb` | MongoDB Atlas + self-hosted 8.2+        | [README](./adapters/mongodb/README.md) |
 
 See [adapters/README.md](./adapters/README.md) for information on creating custom adapters.
 
@@ -72,8 +73,9 @@ See [adapters/README.md](./adapters/README.md) for information on creating custo
 pnpm add payloadcms-vectorize
 
 # Install a database adapter (one of the following)
-pnpm add @payloadcms-vectorize/pg   # PostgreSQL + pgvector
-pnpm add @payloadcms-vectorize/cf   # Cloudflare Vectorize
+pnpm add @payloadcms-vectorize/pg        # PostgreSQL + pgvector
+pnpm add @payloadcms-vectorize/cf        # Cloudflare Vectorize
+pnpm add @payloadcms-vectorize/mongodb   # MongoDB Atlas + self-hosted 8.2+
 ```
 
 ## Quick Start
@@ -84,6 +86,7 @@ First, configure your database adapter. See the adapter-specific documentation:
 
 - **PostgreSQL**: [@payloadcms-vectorize/pg README](./adapters/pg/README.md) — pgvector setup, schema initialization, and migrations.
 - **Cloudflare Vectorize**: [@payloadcms-vectorize/cf README](./adapters/cf/README.md) — index creation, bindings, and known limitations.
+- **MongoDB**: [@payloadcms-vectorize/mongodb README](./adapters/mongodb/README.md) — Atlas / self-hosted 8.2+, `filterableFields`, and the `$vectorSearch` index lifecycle.
 
 ### 2. Configure the Plugin
 
@@ -222,6 +225,7 @@ Migration steps depend on your database adapter:
 
 - **PostgreSQL**: [@payloadcms-vectorize/pg README → Migrations](./adapters/pg/README.md#migrations)
 - **Cloudflare Vectorize**: index creation is a one-time setup step — see [@payloadcms-vectorize/cf README](./adapters/cf/README.md#1-create-vectorize-index).
+- **MongoDB**: no manual migration — the `$vectorSearch` index is auto-ensured on first write. See [@payloadcms-vectorize/mongodb README → Index lifecycle](./adapters/mongodb/README.md#index-lifecycle).
 
 ### 4. Search Your Content
 
@@ -298,6 +302,7 @@ Each adapter has its own configuration shape — this is where index parameters,
 
 - **PostgreSQL** (`dims`, `ivfflatLists`, schema initialization): [@payloadcms-vectorize/pg → Static Configuration](./adapters/pg/README.md#static-configuration)
 - **Cloudflare Vectorize** (`dims`, Vectorize binding): [@payloadcms-vectorize/cf → Configuration](./adapters/cf/README.md#configuration)
+- **MongoDB** (`uri`, `dbName`, per-pool `dimensions` / `similarity` / `filterableFields` / `numCandidates` / `forceExact`): [@payloadcms-vectorize/mongodb → API Reference](./adapters/mongodb/README.md#api-reference)
 
 The embeddings collection name in Payload will be the same as the knowledge pool name.
 
@@ -374,7 +379,7 @@ You can filter on:
 
 References to fields that don't exist on the embeddings table are silently dropped (the rest of the clause still applies).
 
-> **Adapter parity.** All operators are implemented in `@payloadcms-vectorize/pg`. The Cloudflare Vectorize adapter has narrower native filtering — see [@payloadcms-vectorize/cf → Known Limitations](./adapters/cf/README.md#metadata-filtering) for what is and isn't supported there.
+> **Adapter parity.** All operators are implemented in `@payloadcms-vectorize/pg`. The Cloudflare Vectorize adapter has narrower native filtering — see [@payloadcms-vectorize/cf → Known Limitations](./adapters/cf/README.md#metadata-filtering) for what is and isn't supported there. The MongoDB adapter splits the clause into a native `$vectorSearch` pre-filter and a JS post-filter — `like`/`contains`/`all` and any mixed-pre/post `or` are post-filtered, so they may return fewer than `limit` rows. See [@payloadcms-vectorize/mongodb → WHERE clause behavior](./adapters/mongodb/README.md#where-clause-behavior).
 
 ## Chunkers
 
@@ -1006,15 +1011,15 @@ Common scripts:
 **Already shipped:**
 
 - **Multiple Knowledge Pools** — independent configurations and embedding functions per pool.
-- **Database Adapter Architecture** — pluggable backends (PostgreSQL, Cloudflare Vectorize today).
+- **Database Adapter Architecture** — pluggable backends (PostgreSQL, Cloudflare Vectorize, MongoDB today).
 - **More expressive queries** — configurable limits, per-collection scoping, and full Payload-style metadata filtering (see [Metadata Filtering](#metadata-filtering-where)).
 - **Bulk Embed All** — admin button, provider callbacks, and run/batch tracking.
 - **Serverless-friendly job model** — bulk runs are split into small, requeueable units (`prepare-bulk-embedding` and `poll-or-complete-single-batch`) so individual jobs stay well under typical serverless time limits. The `batchLimit` option (see [CollectionVectorizeOption](#collectionvectorizeoption)) lets you cap docs-per-job to fit your platform. Tested locally and on Node-style hosts; deeper Vercel-specific integration testing is on the help-wanted list.
 - **Cloudflare Vectorize adapter** — `@payloadcms-vectorize/cf`.
+- **MongoDB adapter** — `@payloadcms-vectorize/mongodb` (Atlas + self-hosted Community 8.2+ via `$vectorSearch`).
 
 **Help wanted** (priority is driven by community demand — open or 👍 an issue to push something up):
 
-- **MongoDB adapter** — `@payloadcms-vectorize/mongodb` for MongoDB Atlas Vector Search.
 - **Additional adapters** — Pinecone, Qdrant, SQLite, etc. See [adapters/README.md](./adapters/README.md) for the `DbAdapter` contract.
 - **Vercel CI matrix** — exercising the serverless job model end-to-end on Vercel preview deployments.
 

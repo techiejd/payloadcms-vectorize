@@ -37,10 +37,11 @@
 
 ## Available Adapters
 
-| Adapter              | Package                                       | Database                   | Version  | Status      |
-| -------------------- | --------------------------------------------- | -------------------------- | -------- | ----------- |
-| PostgreSQL           | [`@payloadcms-vectorize/pg`](./pg/README.md)  | PostgreSQL with `pgvector` | `0.7.2`  | Stable      |
-| Cloudflare Vectorize | [`@payloadcms-vectorize/cf`](./cf/README.md)  | Cloudflare Vectorize index | `0.7.2`  | Beta        |
+| Adapter              | Package                                                       | Database                          | Version  | Status      |
+| -------------------- | ------------------------------------------------------------- | --------------------------------- | -------- | ----------- |
+| PostgreSQL           | [`@payloadcms-vectorize/pg`](./pg/README.md)                  | PostgreSQL with `pgvector`        | `0.7.2`  | Stable      |
+| Cloudflare Vectorize | [`@payloadcms-vectorize/cf`](./cf/README.md)                  | Cloudflare Vectorize index        | `0.7.2`  | Beta        |
+| MongoDB              | [`@payloadcms-vectorize/mongodb`](./mongodb/README.md)        | MongoDB Atlas + self-hosted 8.2+  | `0.7.2`  | Beta        |
 
 ## Architecture
 
