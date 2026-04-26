@@ -79,6 +79,62 @@ describe('ensureSearchIndex', () => {
     }
   })
 
+  test('treats existing index as equal when mongot returns reordered fields/keys', async () => {
+    const reorderedDefinition = {
+      fields: [
+        { path: 'docId', type: 'filter' },
+        { path: 'embeddingVersion', type: 'filter' },
+        { similarity: 'cosine', path: 'embedding', numDimensions: 4, type: 'vector' },
+        { path: 'sourceCollection', type: 'filter' },
+      ],
+    }
+    const create = vi.fn(async () => undefined)
+    const collection = {
+      listSearchIndexes: () => ({
+        toArray: async () => [
+          { name: POOL.indexName, status: 'READY', latestDefinition: reorderedDefinition },
+        ],
+      }),
+      createSearchIndex: create,
+    }
+    const client = {
+      db: () => ({
+        collection: () => collection,
+        listCollections: () => ({ toArray: async () => [] }),
+        createCollection: async () => undefined,
+      }),
+    } as any
+    await expect(ensureSearchIndex(client, 'db', POOL)).resolves.toBeUndefined()
+    expect(create).not.toHaveBeenCalled()
+  })
+
+  test('throws when existing index has a genuinely different definition', async () => {
+    const differentDefinition = {
+      fields: [
+        { type: 'vector', path: 'embedding', numDimensions: 4, similarity: 'euclidean' },
+        { type: 'filter', path: 'sourceCollection' },
+        { type: 'filter', path: 'docId' },
+        { type: 'filter', path: 'embeddingVersion' },
+      ],
+    }
+    const collection = {
+      listSearchIndexes: () => ({
+        toArray: async () => [
+          { name: POOL.indexName, status: 'READY', latestDefinition: differentDefinition },
+        ],
+      }),
+      createSearchIndex: async () => undefined,
+    }
+    const client = {
+      db: () => ({
+        collection: () => collection,
+        listCollections: () => ({ toArray: async () => [] }),
+        createCollection: async () => undefined,
+      }),
+    } as any
+    await expect(ensureSearchIndex(client, 'db', POOL)).rejects.toThrow(/different definition/)
+  })
+
   test('concurrent ensureSearchIndex calls share one createSearchIndex call', async () => {
     let createCount = 0
     const create = vi.fn(async () => {

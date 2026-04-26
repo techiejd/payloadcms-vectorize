@@ -25,7 +25,30 @@ function buildDefinition(pool: ResolvedPoolConfig): Record<string, unknown> {
 }
 
 function definitionsEqual(a: unknown, b: unknown): boolean {
-  return JSON.stringify(a) === JSON.stringify(b)
+  return canonicalize(a) === canonicalize(b)
+}
+
+function canonicalize(value: unknown): string {
+  return JSON.stringify(canonicalValue(value))
+}
+
+function canonicalValue(value: unknown): unknown {
+  if (value === null || typeof value !== 'object') return value
+  if (Array.isArray(value)) return value.map(canonicalValue)
+  const obj = value as Record<string, unknown>
+  const out: Record<string, unknown> = {}
+  for (const key of Object.keys(obj).sort()) {
+    let v = canonicalValue(obj[key])
+    if (key === 'fields' && Array.isArray(v)) {
+      v = [...v].sort((x, y) => {
+        const xs = JSON.stringify(x)
+        const ys = JSON.stringify(y)
+        return xs < ys ? -1 : xs > ys ? 1 : 0
+      })
+    }
+    out[key] = v
+  }
+  return out
 }
 
 async function ensureCollectionExists(db: Db, name: string): Promise<void> {
