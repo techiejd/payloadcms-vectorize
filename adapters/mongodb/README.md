@@ -2,7 +2,7 @@
 
 MongoDB adapter for [`payloadcms-vectorize`](https://github.com/techiejd/payloadcms-vectorize). Targets both **MongoDB Atlas** (GA) and **self-hosted MongoDB Community 8.2+** (public preview) via a unified `$vectorSearch` API — connection string is the only difference.
 
-> **Status:** experimental. Atlas behavior is GA-quality; self-hosted Community vector search is in public preview as of MongoDB 8.2.
+> **Status:** GA on MongoDB Atlas. Self-hosted MongoDB Community 8.2+ is supported and tracks upstream `mongot` maturity.
 
 ## Install
 
@@ -93,7 +93,7 @@ The adapter splits a Payload `Where` clause into two stages:
 
 - **Atlas M0/Flex:** development only. Free, but search index is a single shared replica with limited memory.
 - **Atlas M10+:** production. Use [Search Nodes](https://www.mongodb.com/docs/atlas/cluster-config/multi-cloud-distribution/) for dedicated `mongot` capacity.
-- **Self-hosted Community 8.2+:** preview-only. Production use waits on GA.
+- **Self-hosted Community 8.2+:** supported; `mongot` is upstream-preview, verify on your version.
 
 ## Limitations
 
