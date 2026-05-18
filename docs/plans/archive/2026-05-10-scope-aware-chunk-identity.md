@@ -1,8 +1,18 @@
 # Scope-Aware Chunk Identity
 
 **Date:** 2026-05-10
-**Status:** Design
+**Status:** Parked (archived 2026-05-13) — see note below
 **Topic:** Generalize the locale-scoping problem so a single source document can produce multiple independent chunk-sets along any user-declared dimension (locale, draft/published, tenant, version, audience), without re-embedding one slice wiping the others.
+
+---
+
+> **Archive note (2026-05-13)**
+>
+> This spec is preserved as a complete design but is **not scheduled for implementation**. After reviewing the actual use-case prevalence in the Payload ecosystem, we concluded that the locale case (the dominant motivator) is already solvable via the existing extension-field + `where` pattern — see the "Localization" section added to the README. The remaining motivator (draft/published with locale, per-tenant isolation, A/B variants) is real but rare enough that we are waiting for a user-filed issue before building.
+>
+> The **vectorize task reorder** described in this spec's "Vectorize Task Algorithm" section has independent value and has been extracted to [2026-05-13-vectorize-safety-and-localization-docs.md](../2026-05-13-vectorize-safety-and-localization-docs.md). That ships separately.
+>
+> When a user reports a workflow that requires scope isolation, revive this spec, re-validate the design against the reported use case, and proceed to writing-plans. The recommended shape at revival time is the **additive** variant (Alternative 2 in the brainstorming session): `scope?` optional everywhere, no breaking change. The "required-but-empty" purity in the design below should be relaxed at that point.
 
 ## Problem
 
