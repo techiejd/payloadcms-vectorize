@@ -383,6 +383,33 @@ References to fields that don't exist on the embeddings table are silently dropp
 
 > **Adapter parity.** All operators are implemented in `@payloadcms-vectorize/pg`. The Cloudflare Vectorize adapter has narrower native filtering — see [@payloadcms-vectorize/cf → Known Limitations](./adapters/cf/README.md#metadata-filtering) for what is and isn't supported there. The MongoDB adapter splits the clause into a native `$vectorSearch` pre-filter and a JS post-filter — `like`/`contains`/`all` and any mixed-pre/post `or` are post-filtered, so they may return fewer than `limit` rows. See [@payloadcms-vectorize/mongodb → WHERE clause behavior](./adapters/mongodb/README.md#where-clause-behavior).
 
+## Reranking (optional)
+
+Pass a `rerank` config on a pool's `embeddingConfig` to reorder candidates with your own reranker (e.g. Voyage, Cohere, a local cross-encoder):
+
+```ts
+embeddingConfig: {
+  version: 'v1',
+  queryFn,
+  realTimeIngestionFn,
+  rerank: {
+    // DB fetches Math.floor(limit * multiplier) candidates before reranking.
+    // Higher multiplier = better recall, more latency, more cost.
+    multiplier: 4,
+    callback: async (query, results) => {
+      const ranked = await myReranker.rerank({
+        query,
+        documents: results.map((r) => r.chunkText),
+      })
+      // Return VectorSearchResults in your desired order.
+      return ranked.map((r) => results[r.index])
+    },
+  },
+}
+```
+
+The plugin trims the callback's output to the caller's `limit`. Errors thrown by the callback propagate to the caller. `multiplier` must be a finite number `>= 1`; invalid configs are rejected at plugin init.
+
 ## Chunkers
 
 Use chunker helpers (see `dev/helpers/chunkers.ts`) to keep `toKnowledgePool` implementations focused on orchestration. A `toKnowledgePool` can combine multiple chunkers, enrich each chunk with metadata, and return everything the embeddings collection needs.
