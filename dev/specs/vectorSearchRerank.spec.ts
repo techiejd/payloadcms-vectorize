@@ -221,4 +221,17 @@ describe('rerank callback', () => {
 
     expect(out).toHaveLength(1)
   })
+
+  test('callback rejection propagates to the caller', async () => {
+    const callback = vi.fn(async () => {
+      throw new Error('reranker down')
+    })
+    const pools = buildPools({ multiplier: 2, callback })
+    const { adapter } = wrapAdapter(baseAdapter)
+    const handlers = createVectorSearchHandlers(pools, adapter)
+
+    await expect(handlers.vectorSearch(payload, 'alpha', 'default', 2)).rejects.toThrow(
+      'reranker down',
+    )
+  })
 })
