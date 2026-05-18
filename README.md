@@ -20,6 +20,7 @@ A Payload CMS plugin that adds vector search capabilities to your collections. P
 - 🧩 **Extensible Schema** — attach custom [`extensionFields`](#knowledge-pool-config) to the embeddings collection and persist values per chunk for querying.
 - 🌐 [**REST API**](#rest-endpoints) — built-in vector-search endpoint with Payload-style [`where` filtering](#metadata-filtering-where) and configurable limits.
 - 🏊 [**Multiple Knowledge Pools**](#knowledge-pool-config) — separate knowledge pools with independent configurations.
+- 🌍 [**Localization (i18n)**](#localization-i18n) — first-class pattern for embedding and searching multi-locale Payload content.
 
 ## Table of Contents
 
@@ -34,6 +35,7 @@ A Payload CMS plugin that adds vector search capabilities to your collections. P
   - [CollectionVectorizeOption](#collectionvectorizeoption)
 - [Metadata Filtering (`where`)](#metadata-filtering-where)
 - [Chunkers](#chunkers)
+- [Localization (i18n)](#localization-i18n)
 - [Bulk Embeddings API](#bulk-embeddings-api)
 - [Validation & Retries](#validation--retries)
 - [API Reference](#api-reference)
@@ -397,6 +399,55 @@ const postsToKnowledgePool: ToKnowledgePoolFn = async (doc, payload) => {
 ```
 
 Because you control the output, you can mix different field types, discard empty values, or inject any metadata that aligns with your `extensionFields`.
+
+## Localization (i18n)
+
+Payload's localization works with this plugin out of the box. There is no dedicated `locale` config — locale-aware embedding and search is a first-class supported workflow built on the existing `extensionFields` and [`where` filter](#metadata-filtering-where) primitives.
+
+The pattern in three steps:
+
+**1. Declare `locale` as a required extension field on your knowledge pool:**
+
+```typescript
+extensionFields: [
+  { name: 'locale', type: 'text', required: true },
+  // ...other fields
+],
+```
+
+**2. Iterate locales inside `toKnowledgePool`** and tag each chunk with the locale it came from:
+
+```typescript
+const postsToKnowledgePool: ToKnowledgePoolFn = async (doc, payload) => {
+  const result: Array<{ chunk: string; locale: string }> = []
+  for (const locale of ['en', 'es', 'fr']) {
+    const localized = await payload.findByID({
+      collection: 'posts',
+      id: doc.id,
+      locale,
+    })
+    const chunks = await chunkText(localized.title ?? '', payload)
+    for (const chunk of chunks) {
+      result.push({ chunk, locale })
+    }
+  }
+  return result
+}
+```
+
+**3. Filter at search time** by the visitor's locale using the existing [`where` filter](#metadata-filtering-where):
+
+```typescript
+const results = await vectorizedPayload.search({
+  query: 'product warranty terms',
+  knowledgePool: 'mainKnowledgePool',
+  where: { locale: { equals: req.locale } },
+})
+```
+
+Visitors get locale-accurate semantic search: an English query returns English chunks, a Spanish query returns Spanish chunks, and the two never mix.
+
+**Tradeoff to know.** Every document save re-embeds every locale together. For CMS workloads this is usually fine — edits are infrequent, embeddings are cheap. If your workflow can't tolerate this (e.g. per-locale incremental re-embedding to control cost), see the [Roadmap](#roadmap) entry on scope-aware chunk identity and open an issue with your use case.
 
 ## Bulk Embeddings API
 
@@ -1022,6 +1073,7 @@ Common scripts:
 
 - **Additional adapters** — Pinecone, Qdrant, SQLite, etc. See [adapters/README.md](./adapters/README.md) for the `DbAdapter` contract.
 - **Vercel CI matrix** — exercising the serverless job model end-to-end on Vercel preview deployments.
+- **Scope-aware chunk identity** — `(sourceCollection, docId, ...scopeFields)` as identity for advanced editorial workflows: draft/published with locale, per-tenant isolation, A/B variants. Design is drafted (see [`docs/plans/archive/2026-05-10-scope-aware-chunk-identity.md`](./docs/plans/archive/2026-05-10-scope-aware-chunk-identity.md)). Waiting on a real use case before building — open an issue if this would unblock you.
 
 Want one of these sooner? Star the repo and open an issue.
 
