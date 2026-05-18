@@ -95,13 +95,21 @@ describe('rerank callback', () => {
         }),
       ],
       secret: 'rerank-test-secret',
-      jobs: { tasks: [] },
+      jobs: {
+        tasks: [],
+        autoRun: [
+          {
+            cron: '*/5 * * * * *',
+            limit: 10,
+          },
+        ],
+      },
     })
 
     payload = await getPayload({
       config,
       key: `rerank-test-${Date.now()}`,
-      cron: false,
+      cron: true,
     })
 
     // Seed three posts so we have multiple results to reorder.
