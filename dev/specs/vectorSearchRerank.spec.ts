@@ -170,6 +170,18 @@ describe('rerank callback', () => {
     expect(calls[0].limit).toBe(15)
   })
 
+  test('rerank with omitted limit: adapter receives multiplier * 10 (default)', async () => {
+    const callback = vi.fn(async (_q: string, results: VectorSearchResult[]) => results)
+    const pools = buildPools({ multiplier: 2, callback })
+    const { adapter, calls } = wrapAdapter(baseAdapter)
+    const handlers = createVectorSearchHandlers(pools, adapter)
+
+    await handlers.vectorSearch(payload, 'alpha', 'default')
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0].limit).toBe(20)
+  })
+
   test('no rerank configured: adapter receives the unmodified limit', async () => {
     const pools = buildPools()
     const { adapter, calls } = wrapAdapter(baseAdapter)
