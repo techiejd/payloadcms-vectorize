@@ -56,16 +56,29 @@ Inside the existing `EmbeddingConfig` type, add as the last field:
   rerank?: RerankConfig
 ```
 
-- [ ] **Step 3: Verify type-only compile**
+- [ ] **Step 3: Re-export the new types from the package root**
+
+In `src/index.ts`, find the `export type { ... } from './types.js'` block (starts around line 38). Inside it, find the `// EmbeddingConfig` comment marker and add `RerankFn` and `RerankConfig` underneath the existing `BulkEmbeddingsFns` line, so that block reads:
+
+```ts
+  // EmbeddingConfig
+  EmbedQueryFn,
+  EmbedDocsFn,
+  BulkEmbeddingsFns,
+  RerankFn,
+  RerankConfig,
+```
+
+- [ ] **Step 4: Verify type-only compile**
 
 Run: `pnpm tsc --noEmit -p tsconfig.json`
 Expected: PASS (no errors). If the repo uses a different typecheck command (e.g. `pnpm typecheck`), use that.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add src/types.ts
-git commit -m "feat(types): add RerankFn and RerankConfig types"
+git add src/types.ts src/index.ts
+git commit -m "feat(types): add and re-export RerankFn and RerankConfig types"
 ```
 
 ---
@@ -204,12 +217,18 @@ describe('rerank callback', () => {
       // Reverse — proves the plugin honored the callback's order.
       return [...results].reverse()
     })
-    const pools = buildPools({ multiplier: 1, callback })
-    const { adapter } = wrapAdapter(baseAdapter)
-    const handlers = createVectorSearchHandlers(pools, adapter)
 
-    const baseline = await handlers.vectorSearch(payload, 'alpha', 'default', 3)
-    const reranked = await handlers.vectorSearch(payload, 'alpha', 'default', 3)
+    // Baseline: a separate handlers with NO rerank, so the callback only fires once total.
+    const baselinePools = buildPools()
+    const baselineAdapter = wrapAdapter(baseAdapter).adapter
+    const baselineHandlers = createVectorSearchHandlers(baselinePools, baselineAdapter)
+
+    const rerankPools = buildPools({ multiplier: 1, callback })
+    const { adapter: rerankAdapter } = wrapAdapter(baseAdapter)
+    const rerankHandlers = createVectorSearchHandlers(rerankPools, rerankAdapter)
+
+    const baseline = await baselineHandlers.vectorSearch(payload, 'alpha', 'default', 3)
+    const reranked = await rerankHandlers.vectorSearch(payload, 'alpha', 'default', 3)
 
     expect(callback).toHaveBeenCalledTimes(1)
     expect(callback.mock.calls[0][0]).toBe('alpha')
@@ -221,7 +240,7 @@ describe('rerank callback', () => {
 - [ ] **Step 2: Run the test and verify it fails**
 
 Run: `pnpm test dev/specs/vectorSearchRerank.spec.ts`
-Expected: FAIL — either a TypeScript error (`RerankFn` not exported) or the assertion fails because the callback is never called.
+Expected: FAIL on the assertion `expect(callback).toHaveBeenCalledTimes(1)` — the callback is never invoked because the wiring in `vectorSearch` doesn't exist yet. (Imports resolve because Task 1 already re-exports `RerankFn`.)
 
 - [ ] **Step 3: Commit the failing test**
 
@@ -256,10 +275,17 @@ Replace the body of the `vectorSearch` function in `src/endpoints/vectorSearch.t
     })()
 
     const rerank = poolConfig.embeddingConfig.rerank
+
+    // Non-rerank path: preserve existing behavior. Forward `limit` as-is
+    // (possibly undefined) so the adapter keeps deciding its own default.
+    if (!rerank) {
+      return adapter.search(payload, queryEmbedding, knowledgePool, limit, where)
+    }
+
+    // Rerank path: we must materialize a concrete fetch size, so apply the
+    // default of 10 only here.
     const effectiveLimit = limit ?? 10
-    const fetchLimit = rerank
-      ? Math.floor(effectiveLimit * rerank.multiplier)
-      : effectiveLimit
+    const fetchLimit = Math.floor(effectiveLimit * rerank.multiplier)
 
     const candidates = await adapter.search(
       payload,
@@ -269,35 +295,20 @@ Replace the body of the `vectorSearch` function in `src/endpoints/vectorSearch.t
       where,
     )
 
-    if (!rerank) return candidates
-
     const reranked = await rerank.callback(query, candidates)
     return reranked.slice(0, effectiveLimit)
   }
 ```
 
-- [ ] **Step 2: Re-export the new types from the package root**
-
-In `src/index.ts`, find the `export type { ... } from './types.js'` block (starts around line 38). Inside it, find the `// EmbeddingConfig` comment marker and add `RerankFn` and `RerankConfig` underneath the existing `BulkEmbeddingsFns` line, so that block reads:
-
-```ts
-  // EmbeddingConfig
-  EmbedQueryFn,
-  EmbedDocsFn,
-  BulkEmbeddingsFns,
-  RerankFn,
-  RerankConfig,
-```
-
-- [ ] **Step 3: Run the test and verify it passes**
+- [ ] **Step 2: Run the test and verify it passes**
 
 Run: `pnpm test dev/specs/vectorSearchRerank.spec.ts`
 Expected: PASS — the `'callback is invoked and its order is preserved'` test passes.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
-git add src/endpoints/vectorSearch.ts src/index.ts
+git add src/endpoints/vectorSearch.ts
 git commit -m "feat(rerank): wire rerank callback into vectorSearch pipeline"
 ```
 
