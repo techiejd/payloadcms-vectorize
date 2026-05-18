@@ -54,6 +54,8 @@ export type {
   EmbedQueryFn,
   EmbedDocsFn,
   BulkEmbeddingsFns,
+  RerankFn,
+  RerankConfig,
 
   // BulkEmbeddingsFns
   AddChunkArgs,

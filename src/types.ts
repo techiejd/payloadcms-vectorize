@@ -127,6 +127,18 @@ export type KnowledgePoolDynamicConfig = {
   embeddingConfig: EmbeddingConfig
 }
 
+export type RerankFn = (
+  query: string,
+  results: VectorSearchResult[],
+) => Promise<VectorSearchResult[]>
+
+export type RerankConfig = {
+  /** DB fetches Math.floor(limit * multiplier) candidates before reranking.
+   *  Must be a finite number >= 1. */
+  multiplier: number
+  callback: RerankFn
+}
+
 export type EmbeddingConfig = {
   /** Version string to track embedding model/version - stored in each embedding document */
   version: string
@@ -143,6 +155,10 @@ export type EmbeddingConfig = {
    */
   bulkEmbeddingsFns?: BulkEmbeddingsFns
   /** If both realTimeIngestionFn and bulkEmbeddingsConfig are not provided, then embedding for this knowledge pool is essentially disabled */
+  /** Optional reranker. When set, the search pipeline fetches
+   *  Math.floor(limit * rerank.multiplier) candidates, passes them
+   *  to rerank.callback, then trims to the requested limit. */
+  rerank?: RerankConfig
 }
 
 export type BulkEmbeddingRunStatus =
