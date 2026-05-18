@@ -19,14 +19,34 @@ export const createVectorSearchHandlers = (
     where?: Where,
   ) => {
     const poolConfig = knowledgePools[knowledgePool]
-    // Generate embedding for the query using pool-specific embedQuery
     const queryEmbedding = await (async () => {
       const qE = await poolConfig.embeddingConfig.queryFn(query)
       return Array.isArray(qE) ? qE : Array.from(qE)
     })()
 
-    // Perform cosine similarity search using Drizzle
-    return await adapter.search(payload, queryEmbedding, knowledgePool, limit, where)
+    const rerank = poolConfig.embeddingConfig.rerank
+
+    // Non-rerank path: preserve existing behavior. Forward `limit` as-is
+    // (possibly undefined) so the adapter keeps deciding its own default.
+    if (!rerank) {
+      return adapter.search(payload, queryEmbedding, knowledgePool, limit, where)
+    }
+
+    // Rerank path: we must materialize a concrete fetch size, so apply the
+    // default of 10 only here.
+    const effectiveLimit = limit ?? 10
+    const fetchLimit = Math.floor(effectiveLimit * rerank.multiplier)
+
+    const candidates = await adapter.search(
+      payload,
+      queryEmbedding,
+      knowledgePool,
+      fetchLimit,
+      where,
+    )
+
+    const reranked = await rerank.callback(query, candidates)
+    return reranked.slice(0, effectiveLimit)
   }
   const requestHandler: PayloadHandler = async (req) => {
     if (!req || !req.json) {
