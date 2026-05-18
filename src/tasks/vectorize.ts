@@ -92,11 +92,6 @@ async function runVectorizeTask(args: {
   }
   const toKnowledgePoolFn: ToKnowledgePoolFn = collectionConfig.toKnowledgePool
 
-  // Delete all existing embeddings for this document before creating new ones
-  // This ensures we replace old embeddings (potentially with a different embeddingVersion)
-  // and prevents duplicates when a document is updated
-  await adapter.deleteChunks(payload, poolName, collection, String(sourceDoc.id))
-
   // Get chunks from toKnowledgePoolFn
   const chunkData = await toKnowledgePoolFn(sourceDoc, payload)
 
@@ -105,6 +100,11 @@ async function runVectorizeTask(args: {
   // Extract chunk texts for embedding
   const chunkTexts = chunkData.map((item) => item.chunk)
   const vectors = await dynamicConfig.embeddingConfig.realTimeIngestionFn!(chunkTexts)
+
+  // Delete existing embeddings only after we have valid vectors ready to insert.
+  // If toKnowledgePool, validation, or the embedding API fails above, the doc's
+  // existing chunks remain intact for the next retry.
+  await adapter.deleteChunks(payload, poolName, collection, String(sourceDoc.id))
 
   // Create embedding documents with extension field values
   await Promise.all(
