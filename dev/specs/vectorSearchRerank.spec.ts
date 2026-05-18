@@ -172,4 +172,45 @@ describe('rerank callback', () => {
     expect(calls).toHaveLength(1)
     expect(calls[0].limit).toBe(4)
   })
+
+  test('callback returning more than limit: plugin trims to limit', async () => {
+    const syntheticResults: VectorSearchResult[] = Array.from({ length: 5 }, (_, i) => ({
+      id: String(i),
+      score: 1 - i * 0.1,
+      sourceCollection: 'posts',
+      docId: String(i),
+      chunkIndex: i,
+      chunkText: `chunk ${i}`,
+      embeddingVersion: 'test-v1',
+    }))
+    const callback = vi.fn(async (_q: string, _results: VectorSearchResult[]) => syntheticResults)
+    const pools = buildPools({ multiplier: 3, callback })
+    const { adapter } = wrapAdapter(baseAdapter)
+    const handlers = createVectorSearchHandlers(pools, adapter)
+
+    const out = await handlers.vectorSearch(payload, 'alpha', 'default', 2)
+
+    // Callback returns 5 synthetic results; plugin slices to limit=2.
+    expect(out).toHaveLength(2)
+  })
+
+  test('callback returning fewer than limit: plugin returns the smaller count', async () => {
+    const syntheticResult: VectorSearchResult = {
+      id: '0',
+      score: 0.9,
+      sourceCollection: 'posts',
+      docId: '0',
+      chunkIndex: 0,
+      chunkText: 'chunk 0',
+      embeddingVersion: 'test-v1',
+    }
+    const callback = vi.fn(async (_q: string, _results: VectorSearchResult[]) => [syntheticResult])
+    const pools = buildPools({ multiplier: 3, callback })
+    const { adapter } = wrapAdapter(baseAdapter)
+    const handlers = createVectorSearchHandlers(pools, adapter)
+
+    const out = await handlers.vectorSearch(payload, 'alpha', 'default', 3)
+
+    expect(out).toHaveLength(1)
+  })
 })
