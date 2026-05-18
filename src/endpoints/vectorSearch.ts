@@ -26,14 +26,10 @@ export const createVectorSearchHandlers = (
 
     const rerank = poolConfig.embeddingConfig.rerank
 
-    // Non-rerank path: preserve existing behavior. Forward `limit` as-is
-    // (possibly undefined) so the adapter keeps deciding its own default.
     if (!rerank) {
       return adapter.search(payload, queryEmbedding, knowledgePool, limit, where)
     }
 
-    // Rerank path: we must materialize a concrete fetch size, so apply the
-    // default of 10 only here.
     const effectiveLimit = limit ?? 10
     const fetchLimit = Math.floor(effectiveLimit * rerank.multiplier)
 
