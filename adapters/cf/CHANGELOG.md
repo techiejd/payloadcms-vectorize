@@ -1,5 +1,14 @@
 # @payloadcms-vectorize/cf
 
+## 0.7.4
+
+### Patch Changes
+
+- [#55](https://github.com/techiejd/payloadcms-vectorize/pull/55) [`b7862c7`](https://github.com/techiejd/payloadcms-vectorize/commit/b7862c77ba45a0867a337cf249c3cb8c8f71f511) Thanks [@techiejd](https://github.com/techiejd)! - Fix: reorder the vectorize task so existing chunks are deleted only after `toKnowledgePool` + embeddings succeed. Previously, a transient embedding-provider failure during re-vectorization would wipe a document's existing chunks before the new ones were ready, leaving the document temporarily unsearchable. Also documents a first-class Localization (i18n) pattern in the README.
+
+- Updated dependencies [[`b7862c7`](https://github.com/techiejd/payloadcms-vectorize/commit/b7862c77ba45a0867a337cf249c3cb8c8f71f511)]:
+  - payloadcms-vectorize@0.7.4
+
 ## 0.7.3
 
 ### Patch Changes
