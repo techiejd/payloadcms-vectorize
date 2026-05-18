@@ -137,4 +137,39 @@ describe('rerank callback', () => {
     expect(callback.mock.calls[0][0]).toBe('alpha')
     expect(reranked.map((r) => r.id)).toEqual([...baseline.map((r) => r.id)].reverse())
   })
+
+  test('multiplier=3 fetches limit*3 candidates from the adapter', async () => {
+    const callback = vi.fn(async (_q: string, results: VectorSearchResult[]) => results)
+    const pools = buildPools({ multiplier: 3, callback })
+    const { adapter, calls } = wrapAdapter(baseAdapter)
+    const handlers = createVectorSearchHandlers(pools, adapter)
+
+    await handlers.vectorSearch(payload, 'alpha', 'default', 2)
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0].limit).toBe(6)
+  })
+
+  test('float multiplier=1.5 with limit=10 fetches 15 candidates (Math.floor)', async () => {
+    const callback = vi.fn(async (_q: string, results: VectorSearchResult[]) => results)
+    const pools = buildPools({ multiplier: 1.5, callback })
+    const { adapter, calls } = wrapAdapter(baseAdapter)
+    const handlers = createVectorSearchHandlers(pools, adapter)
+
+    await handlers.vectorSearch(payload, 'alpha', 'default', 10)
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0].limit).toBe(15)
+  })
+
+  test('no rerank configured: adapter receives the unmodified limit', async () => {
+    const pools = buildPools()
+    const { adapter, calls } = wrapAdapter(baseAdapter)
+    const handlers = createVectorSearchHandlers(pools, adapter)
+
+    await handlers.vectorSearch(payload, 'alpha', 'default', 4)
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0].limit).toBe(4)
+  })
 })
