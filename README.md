@@ -408,7 +408,7 @@ embeddingConfig: {
 }
 ```
 
-The plugin trims the callback's output to the caller's `limit`. Errors thrown by the callback propagate to the caller. `multiplier` must be a finite number `>= 1`; invalid configs are rejected at plugin init.
+The plugin trims the callback's output to the caller's `limit`. Errors thrown by the callback propagate to the caller. `multiplier` must be a finite number `>= 1`; invalid configs are rejected at plugin init. If `limit` is omitted, the rerank branch falls back to a default of `10` for fetch sizing.
 
 ## Chunkers
 
