@@ -868,7 +868,7 @@ if (vectorizedPayload) {
 
 #### `vectorizedPayload.search(params)`
 
-Perform vector search programmatically without making an HTTP request. Parameters and result shape are identical to [POST `/api/vector-search`](#post-apivector-search).
+Perform vector search programmatically without making an HTTP request. Parameters and result shape are identical to [POST `/api/vector-search`](#post-apivector-search). If the pool has a [`rerank`](#reranking-optional) config, this call goes through the same rerank pipeline as the REST endpoint.
 
 **Returns:** `Promise<Array<VectorSearchResult>>` — the array that the REST endpoint wraps in `{ results }`.
 
