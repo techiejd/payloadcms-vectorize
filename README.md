@@ -19,6 +19,7 @@ A Payload CMS plugin that adds vector search capabilities to your collections. P
 - 🎯 [**Flexible Chunking**](#chunkers) — drive chunk creation yourself with `toKnowledgePool` functions so you can combine any fields or content types.
 - 🧩 **Extensible Schema** — attach custom [`extensionFields`](#knowledge-pool-config) to the embeddings collection and persist values per chunk for querying.
 - 🌐 [**REST API**](#rest-endpoints) — built-in vector-search endpoint with Payload-style [`where` filtering](#metadata-filtering-where) and configurable limits.
+- 🎚️ [**Optional Reranking**](#reranking-optional) — bring your own reranker (Voyage, Cohere, local cross-encoder) to reorder candidates after the vector search.
 - 🏊 [**Multiple Knowledge Pools**](#knowledge-pool-config) — separate knowledge pools with independent configurations.
 - 🌍 [**Localization (i18n)**](#localization-i18n) — first-class pattern for embedding and searching multi-locale Payload content.
 
@@ -34,6 +35,7 @@ A Payload CMS plugin that adds vector search capabilities to your collections. P
   - [Adapter Configuration](#adapter-configuration)
   - [CollectionVectorizeOption](#collectionvectorizeoption)
 - [Metadata Filtering (`where`)](#metadata-filtering-where)
+- [Reranking (optional)](#reranking-optional)
 - [Chunkers](#chunkers)
 - [Localization (i18n)](#localization-i18n)
 - [Bulk Embeddings API](#bulk-embeddings-api)
@@ -382,6 +384,40 @@ You can filter on:
 References to fields that don't exist on the embeddings table are silently dropped (the rest of the clause still applies).
 
 > **Adapter parity.** All operators are implemented in `@payloadcms-vectorize/pg`. The Cloudflare Vectorize adapter has narrower native filtering — see [@payloadcms-vectorize/cf → Known Limitations](./adapters/cf/README.md#metadata-filtering) for what is and isn't supported there. The MongoDB adapter splits the clause into a native `$vectorSearch` pre-filter and a JS post-filter — `like`/`contains`/`all` and any mixed-pre/post `or` are post-filtered, so they may return fewer than `limit` rows. See [@payloadcms-vectorize/mongodb → WHERE clause behavior](./adapters/mongodb/README.md#where-clause-behavior).
+
+## Reranking (optional)
+
+Pass a `rerank` config on a pool's `embeddingConfig` to reorder candidates with your own reranker (e.g. Voyage, Cohere, a local cross-encoder):
+
+```ts
+embeddingConfig: {
+  version: 'v1',
+  queryFn,
+  realTimeIngestionFn,
+  rerank: {
+    // DB fetches Math.floor(limit * multiplier) candidates before reranking.
+    // Higher multiplier = better recall, more latency, more cost.
+    multiplier: 4,
+    callback: async (query, results) => {
+      const ranked = await myReranker.rerank({
+        query,
+        documents: results.map((r) => r.chunkText),
+      })
+      return ranked
+        .map((r) => results[r.index])
+        .filter((r): r is (typeof results)[number] => r !== undefined)
+    },
+  },
+}
+```
+
+**Multiplier.** Use `1` when you only want reordering of the same candidate set. Use a higher value (3–5 is typical) when you also want to expand the candidate pool before reranking — higher = better recall, more latency, more cost.
+
+**Limit.** The plugin trims the callback's output to the caller's `limit`. If the callback returns fewer than `limit`, the smaller count is returned as-is. If `limit` is omitted, the rerank branch uses `10` for fetch sizing — note this differs from the non-rerank path, where an omitted `limit` is forwarded to the adapter and the adapter picks its own default.
+
+**Errors.** Errors thrown by the callback propagate to the caller — there is no silent fallback to unranked results.
+
+**Validation.** `multiplier` must be a finite number `>= 1` and `callback` must be a function; invalid configs are rejected at plugin init.
 
 ## Chunkers
 
@@ -832,7 +868,7 @@ if (vectorizedPayload) {
 
 #### `vectorizedPayload.search(params)`
 
-Perform vector search programmatically without making an HTTP request. Parameters and result shape are identical to [POST `/api/vector-search`](#post-apivector-search).
+Perform vector search programmatically without making an HTTP request. Parameters and result shape are identical to [POST `/api/vector-search`](#post-apivector-search). If the pool has a [`rerank`](#reranking-optional) config, this call goes through the same rerank pipeline as the REST endpoint.
 
 **Returns:** `Promise<Array<VectorSearchResult>>` — the array that the REST endpoint wraps in `{ results }`.
 

@@ -54,6 +54,8 @@ export type {
   EmbedQueryFn,
   EmbedDocsFn,
   BulkEmbeddingsFns,
+  RerankFn,
+  RerankConfig,
 
   // BulkEmbeddingsFns
   AddChunkArgs,
@@ -131,6 +133,24 @@ export default (pluginOptions: PayloadcmsVectorizeConfig) =>
           collectionToPools.set(collectionSlug, [])
         }
         collectionToPools.get(collectionSlug)!.push({ pool: poolName, dynamic: dynamicConfig })
+      }
+
+      const rerank = dynamicConfig.embeddingConfig.rerank
+      if (rerank !== undefined) {
+        if (
+          typeof rerank.multiplier !== 'number' ||
+          !Number.isFinite(rerank.multiplier) ||
+          rerank.multiplier < 1
+        ) {
+          throw new Error(
+            `[payloadcms-vectorize] Pool "${poolName}": rerank.multiplier must be a finite number >= 1 (got ${String(rerank.multiplier)}).`,
+          )
+        }
+        if (typeof rerank.callback !== 'function') {
+          throw new Error(
+            `[payloadcms-vectorize] Pool "${poolName}": rerank.callback must be a function.`,
+          )
+        }
       }
     }
 
