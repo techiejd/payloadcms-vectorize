@@ -1,5 +1,16 @@
 # @payloadcms-vectorize/mongodb
 
+## 1.0.0
+
+### Minor Changes
+
+- [#57](https://github.com/techiejd/payloadcms-vectorize/pull/57) [`19ea3a0`](https://github.com/techiejd/payloadcms-vectorize/commit/19ea3a0f2a0d2a94407c600000f8a46839d9c379) Thanks [@techiejd](https://github.com/techiejd)! - Add optional `rerank` callback on `EmbeddingConfig` for per-pool reranking. When configured, the plugin fetches `Math.floor(limit * multiplier)` candidates from the adapter, hands them to the user-supplied callback (`(query, results) => Promise<results>`), and trims the callback's output back down to the caller's `limit`. Provider-agnostic — bring your own Voyage / Cohere / local cross-encoder. `multiplier` must be a finite number `>= 1`; invalid configs are rejected at plugin init. Callback errors propagate to the caller.
+
+### Patch Changes
+
+- Updated dependencies [[`19ea3a0`](https://github.com/techiejd/payloadcms-vectorize/commit/19ea3a0f2a0d2a94407c600000f8a46839d9c379)]:
+  - payloadcms-vectorize@1.0.0
+
 ## 0.7.4
 
 ### Patch Changes
