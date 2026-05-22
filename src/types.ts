@@ -143,9 +143,7 @@ export type RerankConfig = {
 export type EmbeddingConfig = {
   /** Version string to track embedding model/version - stored in each embedding document */
   version: string
-  /** Embedding function for query provided by the user
-   * TODO(techiejd): Should be optional? Maybe if not provided then we can disable the search endpoint?
-   */
+  /** Embedding function for query provided by the user */
   queryFn: EmbedQueryFn
   /** Embedding function for real-time ingestion of documents provided by the user
    * If not provided, then there is no real-time ingestion of documents provided by the user
