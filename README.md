@@ -7,8 +7,6 @@
 
 A Payload CMS plugin that adds vector search capabilities to your collections. Perfect for building RAG (Retrieval-Augmented Generation) applications and semantic search features.
 
-> **Status:** `0.x` — pre-1.0. The public API is stabilizing but may still have breaking changes between minor releases. Track the [CHANGELOG](./CHANGELOG.md) before upgrading.
-
 ## Features
 
 - 🔍 [**Semantic Search**](#4-search-your-content) — vectorize any collection for intelligent content discovery.
