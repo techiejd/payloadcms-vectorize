@@ -30,6 +30,7 @@
     "payloadcms-vectorize": ">=1.0.0"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240000.0",
     "payloadcms-vectorize": "workspace:*"
   },
   "engines": {
