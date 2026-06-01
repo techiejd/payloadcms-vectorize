@@ -110,6 +110,7 @@ import type {
   KnowledgePoolDynamicConfig,
   StoreChunkData,
   VectorSearchResult,
+  EmbeddingRecord,
 } from 'payloadcms-vectorize'
 
 export type DbAdapter = {
@@ -150,6 +151,12 @@ export type DbAdapter = {
     limit?: number,
     where?: Where,
   ) => Promise<Array<VectorSearchResult>>
+
+  findByIds: (
+    payload: BasePayload,
+    poolName: KnowledgePoolName,
+    ids: string[],
+  ) => Promise<Array<EmbeddingRecord>>
 }
 ```
 
@@ -162,6 +169,7 @@ export type DbAdapter = {
 | `deleteChunks` | After a source document is deleted. | Remove every chunk where `sourceCollection === ... && docId === ...`. Must be safe to call when no chunks exist (no-op, no throw). |
 | `hasEmbeddingVersion` | During bulk-embed planning, per candidate document. | Return `true` iff at least one chunk exists with the matching `(sourceCollection, docId, embeddingVersion)` triple. Must filter on **all three** — older `0.7.0` adapters that ignored `embeddingVersion` caused stale embeddings on model bumps. |
 | `search` | Per `/vector-search` request and per `getVectorizedPayload().search()` call. | Translate `where` (Payload-style) into your store's filter language, perform a vector search using `queryEmbedding`, and return up to `limit` results sorted by descending relevance. |
+| `findByIds` | Per `getVectorizedPayload().findEmbeddingsByIds()` call. | Fetch stored embedding records by primary key, **including the raw `embedding` vector** (which `search` never returns). Look up by the same `id` your `search` returns as `result.id`. Misses are dropped (result length may be `< ids.length`); order is not guaranteed; empty `ids` returns `[]` without a backend call; unknown or malformed ids are treated as misses (dropped), not raised as errors. |
 
 ### Error contract
 
@@ -286,6 +294,12 @@ export const createYourDbVectorIntegration = (
       //       Return Array<VectorSearchResult> sorted by descending score.
       return []
     },
+
+    findByIds: async (payload, poolName, ids) => {
+      // TODO: fetch stored records by primary key, including the raw `embedding` vector.
+      //       Return Array<EmbeddingRecord>. Unknown ids are misses (drop them, don't throw).
+      return []
+    },
   }
 
   return { adapter }
@@ -361,6 +375,25 @@ export interface VectorSearchResult {
   /** Any extensionFields persisted via storeChunk must round-trip here. */
   [key: string]: any
 }
+
+export interface EmbeddingRecord {
+  /** Embedding record ID — the same value your adapter returns as VectorSearchResult.id. */
+  id: string
+  /** Source collection slug (echoed from StoreChunkData). */
+  sourceCollection: string
+  /** Source document ID (echoed from StoreChunkData). */
+  docId: string
+  /** Chunk index within the source document. */
+  chunkIndex: number
+  /** The original chunk text. */
+  chunkText: string
+  /** Embedding model/version string. */
+  embeddingVersion: string
+  /** The raw embedding vector — never returned by `search`. */
+  embedding: number[]
+  /** Any extensionFields persisted via storeChunk round-trip here. */
+  [key: string]: any
+}
 ```
 
 | Field | Required | Notes |
@@ -370,6 +403,8 @@ export interface VectorSearchResult {
 | `sourceCollection`, `docId`, `chunkIndex` | yes | Must round-trip from `StoreChunkData`. |
 | `chunkText`, `embeddingVersion` | yes | Same. |
 | `extensionFields.*` | optional | Whatever the user passed in `extensionFields` must be queryable via `where`. |
+
+> `EmbeddingRecord` (returned by `findByIds`) is `VectorSearchResult` without `score` and with the raw `embedding: number[]`.
 
 ## Testing your adapter
 
