@@ -76,6 +76,7 @@ export type {
 
   // For adapters
   VectorSearchResult,
+  EmbeddingRecord,
 } from './types.js'
 
 export { getVectorizedPayload } from './types.js'
