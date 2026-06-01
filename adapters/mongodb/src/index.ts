@@ -2,6 +2,7 @@ import type { DbAdapter } from 'payloadcms-vectorize'
 import { getMongoClient } from './client.js'
 import { storeChunkImpl } from './embed.js'
 import { searchImpl } from './search.js'
+import { findByIdsImpl } from './findByIds.js'
 import {
   resolvePoolConfig,
   type MongoVectorIntegrationConfig,
@@ -81,6 +82,8 @@ export const createMongoVectorIntegration = (
 
     search: (payload, queryEmbedding, poolName, limit, where) =>
       searchImpl(ctx, payload, queryEmbedding, poolName, limit, where),
+
+    findByIds: (payload, poolName, ids) => findByIdsImpl(ctx, payload, poolName, ids),
   }
 
   return { adapter }
