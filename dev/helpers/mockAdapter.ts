@@ -1,4 +1,4 @@
-import type { DbAdapter, KnowledgePoolName, KnowledgePoolDynamicConfig, StoreChunkData, VectorSearchResult } from 'payloadcms-vectorize'
+import type { DbAdapter, EmbeddingRecord, KnowledgePoolName, KnowledgePoolDynamicConfig, StoreChunkData, VectorSearchResult } from 'payloadcms-vectorize'
 import { createEmbeddingsCollection } from 'payloadcms-vectorize'
 import type { CollectionSlug, Payload, BasePayload, Where, Config } from 'payload'
 
@@ -194,6 +194,39 @@ export const createMockAdapter = (options: MockAdapterOptions = {}): DbAdapter =
         .sort((a, b) => b._score - a._score)
         .slice(0, limit)
         .map(({ _score, ...rest }) => rest)
+    },
+
+    findByIds: async (
+      payload: BasePayload,
+      poolName: KnowledgePoolName,
+      ids: string[],
+    ): Promise<EmbeddingRecord[]> => {
+      const records: EmbeddingRecord[] = []
+      for (const id of ids) {
+        const stored = storage.get(`${poolName}:${id}`)
+        if (!stored) continue
+        try {
+          const doc = await payload.findByID({
+            collection: poolName as CollectionSlug,
+            id: stored.id,
+          })
+          if (!doc) continue
+          const {
+            id: _id,
+            createdAt: _createdAt,
+            updatedAt: _updatedAt,
+            embedding: _embedding,
+            ...docFields
+          } = doc as any
+          records.push({
+            id: stored.id,
+            embedding: stored.embedding,
+            ...docFields,
+          } as EmbeddingRecord)
+        } catch (_e) {
+        }
+      }
+      return records
     },
   }
 }

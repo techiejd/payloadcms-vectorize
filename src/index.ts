@@ -357,6 +357,10 @@ export default (pluginOptions: PayloadcmsVectorizeConfig) =>
             params.limit,
             params.where,
           ),
+        findEmbeddingsByIds: (params: { knowledgePool: KnowledgePoolName; ids: string[] }) => {
+          if (params.ids.length === 0) return Promise.resolve([])
+          return pluginOptions.dbAdapter.findByIds(payload, params.knowledgePool, params.ids)
+        },
         queueEmbed: async (
           params:
             | {

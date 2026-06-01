@@ -200,6 +200,63 @@ describe('VectorizedPayload', () => {
     })
   })
 
+  describe('findEmbeddingsByIds method', () => {
+    let embeddingId: string
+
+    beforeAll(async () => {
+      const post = await payload.create({
+        collection: 'posts',
+        data: { title: 'FindByIds seed', content: markdownContent as unknown as any },
+      })
+      await waitForVectorizationJobs(payload)
+      const rows = await payload.find({
+        collection: 'default' as any,
+        where: { docId: { equals: String(post.id) } },
+        limit: 1,
+      })
+      embeddingId = String(rows.docs[0].id)
+    })
+
+    test('payload has findEmbeddingsByIds method', () => {
+      const vectorizedPayload = getVectorizedPayload(payload)
+      expect(typeof vectorizedPayload!.findEmbeddingsByIds).toBe('function')
+    })
+
+    test('returns the full EmbeddingRecord including the embedding vector', async () => {
+      const vectorizedPayload = getVectorizedPayload(payload)!
+      const records = await vectorizedPayload.findEmbeddingsByIds({
+        knowledgePool: 'default',
+        ids: [embeddingId],
+      })
+      expect(records).toHaveLength(1)
+      const [record] = records
+      expect(record.id).toBe(embeddingId)
+      expect(Array.isArray(record.embedding)).toBe(true)
+      expect(record.embedding.length).toBe(DIMS)
+      expect(typeof record.sourceCollection).toBe('string')
+      expect(typeof record.chunkText).toBe('string')
+    })
+
+    test('drops unknown ids (result length < ids length)', async () => {
+      const vectorizedPayload = getVectorizedPayload(payload)!
+      const records = await vectorizedPayload.findEmbeddingsByIds({
+        knowledgePool: 'default',
+        ids: [embeddingId, 'definitely-not-an-id-999999'],
+      })
+      expect(records).toHaveLength(1)
+      expect(records[0].id).toBe(embeddingId)
+    })
+
+    test('empty ids returns []', async () => {
+      const vectorizedPayload = getVectorizedPayload(payload)!
+      const records = await vectorizedPayload.findEmbeddingsByIds({
+        knowledgePool: 'default',
+        ids: [],
+      })
+      expect(records).toEqual([])
+    })
+  })
+
   describe('queueEmbed method', () => {
     test('payload has queueEmbed method', () => {
       const vectorizedPayload = getVectorizedPayload(payload)
