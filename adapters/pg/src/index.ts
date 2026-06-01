@@ -9,6 +9,7 @@ import { fileURLToPath } from 'url'
 import { dirname, resolve } from 'path'
 import embed from './embed.js'
 import search from './search.js'
+import findByIds from './findByIds.js'
 
 export type { KnowledgePoolsConfig as KnowledgePoolConfig }
 
@@ -93,6 +94,7 @@ export const createPostgresVectorIntegration = (
       }
     },
     search,
+    findByIds,
 
     storeChunk: async (payload, poolName, data) => {
       const embeddingArray = Array.isArray(data.embedding) ? data.embedding : Array.from(data.embedding)
