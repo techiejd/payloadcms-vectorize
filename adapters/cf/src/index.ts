@@ -39,10 +39,6 @@ interface CloudflareVectorizeConfig {
 export const createCloudflareVectorizeIntegration = (
   options: CloudflareVectorizeConfig,
 ): { adapter: DbAdapter } => {
-  if (!options.binding) {
-    throw new Error('[@payloadcms-vectorize/cf] Cloudflare Vectorize binding is required')
-  }
-
   const poolConfig = options.config
 
   const adapter: DbAdapter = {
