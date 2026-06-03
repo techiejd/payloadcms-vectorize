@@ -1,5 +1,18 @@
 # @payloadcms-vectorize/mongodb
 
+## 1.0.1
+
+### Patch Changes
+
+- [#65](https://github.com/techiejd/payloadcms-vectorize/pull/65) [`d8fea7a`](https://github.com/techiejd/payloadcms-vectorize/commit/d8fea7ad3b696285d9e7dada62704e25dd9760ba) Thanks [@techiejd](https://github.com/techiejd)! - Defer adapter config validation to call-time instead of throwing at construction.
+
+  The mongodb and cf adapter factories previously threw on missing config (e.g. `uri`, `dbName`, `binding`) the moment they were called, which happens while the Payload config is being built. That broke `payload generate:types` and `generate:importmap` in environments without runtime variables — such as CI that builds `payload-types` to publish as a separate package. Validation now runs when an adapter method is actually invoked, so config-time codegen no longer requires runtime credentials. Valid configurations behave exactly as before.
+
+  Closes #64.
+
+- Updated dependencies [[`d8fea7a`](https://github.com/techiejd/payloadcms-vectorize/commit/d8fea7ad3b696285d9e7dada62704e25dd9760ba)]:
+  - payloadcms-vectorize@1.0.1
+
 ## 1.0.0
 
 ### Minor Changes
