@@ -1,6 +1,8 @@
 ---
-"@payloadcms-vectorize/mongodb": patch
+"payloadcms-vectorize": patch
+"@payloadcms-vectorize/pg": patch
 "@payloadcms-vectorize/cf": patch
+"@payloadcms-vectorize/mongodb": patch
 ---
 
 Defer adapter config validation to call-time instead of throwing at construction.
