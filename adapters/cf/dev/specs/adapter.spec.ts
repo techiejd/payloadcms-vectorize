@@ -93,13 +93,25 @@ function createMockPayload(mockBinding: any, overrides: Record<string, any> = {}
 
 describe('createCloudflareVectorizeIntegration', () => {
   describe('validation', () => {
-    test('should throw if vectorize binding is missing', () => {
+    test('should NOT throw at construction if vectorize binding is missing', () => {
       expect(() => {
         createCloudflareVectorizeIntegration({
           config: { default: { dims: 384 } },
           binding: undefined as any,
         })
-      }).toThrow('Cloudflare Vectorize binding is required')
+      }).not.toThrow()
+    })
+
+    test('should throw at call-time if vectorize binding is missing', async () => {
+      const { adapter } = createCloudflareVectorizeIntegration({
+        config: { default: { dims: 384 } },
+        binding: undefined as any,
+      })
+      const payloadWithoutBinding = createMockPayload(undefined)
+
+      await expect(
+        adapter.deleteChunks(payloadWithoutBinding, 'default', 'col', 'doc-1'),
+      ).rejects.toThrow('Cloudflare Vectorize binding not found')
     })
 
     test('should create integration with valid config', () => {
