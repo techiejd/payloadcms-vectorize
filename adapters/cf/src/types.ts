@@ -3,12 +3,17 @@ import type { BasePayload } from 'payload'
 import { getVectorizedPayload } from 'payloadcms-vectorize'
 
 /**
+ * The subset of the Cloudflare `Vectorize` binding used by this adapter.
+ */
+export type VectorizeBinding = Pick<Vectorize, 'query' | 'upsert' | 'deleteByIds' | 'getByIds'>
+
+/**
  * Retrieve the Cloudflare Vectorize binding from a Payload instance.
  * Throws if the binding is not found.
  */
-export function getVectorizeBinding(payload: BasePayload): Vectorize {
+export function getVectorizeBinding(payload: BasePayload): VectorizeBinding {
   const binding = getVectorizedPayload(payload)?.getDbAdapterCustom()
-    ?._vectorizeBinding as Vectorize | undefined
+    ?._vectorizeBinding as VectorizeBinding | undefined
   if (!binding) {
     throw new Error('[@payloadcms-vectorize/cf] Cloudflare Vectorize binding not found')
   }
@@ -28,5 +33,5 @@ export interface CloudflareVectorizePoolConfig {
  */
 export type KnowledgePoolsConfig = Record<string, CloudflareVectorizePoolConfig>
 
-/** @deprecated Use the official `Vectorize` type from `@cloudflare/workers-types`. */
-export type CloudflareVectorizeBinding = Vectorize
+/** @deprecated Use {@link VectorizeBinding}. */
+export type CloudflareVectorizeBinding = VectorizeBinding
