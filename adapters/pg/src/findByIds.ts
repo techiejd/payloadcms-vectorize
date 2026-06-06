@@ -33,9 +33,6 @@ export default async (
     )
   }
 
-  const numericIds = ids.filter((id) => /^\d+$/.test(id)).map(Number)
-  if (numericIds.length === 0) return []
-
   const selectObj: Record<string, any> = {
     id: table.id,
   }
@@ -53,7 +50,7 @@ export default async (
     }
   }
 
-  const rows = await drizzle.select(selectObj).from(table).where(inArray(table.id, numericIds))
+  const rows = await drizzle.select(selectObj).from(table).where(inArray(table.id, ids))
   return mapRowsToRecords(rows, collectionConfig, populateEmbedding)
 }
 
