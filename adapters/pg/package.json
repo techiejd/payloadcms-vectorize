@@ -1,6 +1,6 @@
 {
   "name": "@payloadcms-vectorize/pg",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "PostgreSQL adapter for payloadcms-vectorize",
   "license": "MIT",
   "repository": {
@@ -27,7 +27,7 @@
   },
   "peerDependencies": {
     "payload": ">=3.0.0 <4.0.0",
-    "payloadcms-vectorize": ">=1.0.0",
+    "payloadcms-vectorize": ">=1.0.1",
     "@payloadcms/db-postgres": ">=3.0.0 <4.0.0"
   },
   "devDependencies": {

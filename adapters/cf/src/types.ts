@@ -1,13 +1,19 @@
+/// <reference types="@cloudflare/workers-types" />
 import type { BasePayload } from 'payload'
 import { getVectorizedPayload } from 'payloadcms-vectorize'
+
+/**
+ * The subset of the Cloudflare `Vectorize` binding used by this adapter.
+ */
+export type VectorizeBinding = Pick<Vectorize, 'query' | 'upsert' | 'deleteByIds' | 'getByIds'>
 
 /**
  * Retrieve the Cloudflare Vectorize binding from a Payload instance.
  * Throws if the binding is not found.
  */
-export function getVectorizeBinding(payload: BasePayload): CloudflareVectorizeBinding {
+export function getVectorizeBinding(payload: BasePayload): VectorizeBinding {
   const binding = getVectorizedPayload(payload)?.getDbAdapterCustom()
-    ?._vectorizeBinding as CloudflareVectorizeBinding | undefined
+    ?._vectorizeBinding as VectorizeBinding | undefined
   if (!binding) {
     throw new Error('[@payloadcms-vectorize/cf] Cloudflare Vectorize binding not found')
   }
@@ -27,39 +33,5 @@ export interface CloudflareVectorizePoolConfig {
  */
 export type KnowledgePoolsConfig = Record<string, CloudflareVectorizePoolConfig>
 
-/** A single vector match returned by a Vectorize query */
-export interface VectorizeMatch {
-  id: string
-  score?: number
-  metadata?: Record<string, unknown>
-}
-
-/** Result of a Vectorize query */
-export interface VectorizeQueryResult {
-  matches: VectorizeMatch[]
-  count: number
-}
-
-/** Vector to upsert into Vectorize */
-export interface VectorizeVector {
-  id: string
-  values: number[]
-  metadata?: Record<string, unknown>
-}
-
-/**
- * Cloudflare Vectorize binding interface.
- * Mirrors the subset of the Vectorize API we use.
- * For the full type, install `@cloudflare/workers-types`.
- */
-export interface CloudflareVectorizeBinding {
-  query(vector: number[], options?: {
-    topK?: number
-    returnMetadata?: boolean | 'indexed' | 'all'
-    filter?: Record<string, unknown>
-    /** Vectorize metadata filtering */
-    where?: Record<string, unknown>
-  }): Promise<VectorizeQueryResult>
-  upsert(vectors: VectorizeVector[]): Promise<unknown>
-  deleteByIds(ids: string[]): Promise<unknown>
-}
+/** @deprecated Use {@link VectorizeBinding}. */
+export type CloudflareVectorizeBinding = VectorizeBinding

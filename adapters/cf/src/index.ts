@@ -1,7 +1,7 @@
 import type { CollectionSlug } from 'payload'
 import type { DbAdapter } from 'payloadcms-vectorize'
 import { getVectorizeBinding } from './types.js'
-import type { CloudflareVectorizeBinding, KnowledgePoolsConfig } from './types.js'
+import type { CloudflareVectorizeBinding, KnowledgePoolsConfig, VectorizeBinding } from './types.js'
 import cfMappingsCollection, { CF_MAPPINGS_SLUG } from './collections/cfMappings.js'
 import embed from './embed.js'
 import search from './search.js'
@@ -13,7 +13,7 @@ interface CloudflareVectorizeConfig {
   /** Knowledge pools configuration with their dimensions */
   config: KnowledgePoolsConfig
   /** Cloudflare Vectorize binding for vector storage */
-  binding: CloudflareVectorizeBinding
+  binding: VectorizeBinding
 }
 
 /**
@@ -39,10 +39,6 @@ interface CloudflareVectorizeConfig {
 export const createCloudflareVectorizeIntegration = (
   options: CloudflareVectorizeConfig,
 ): { adapter: DbAdapter } => {
-  if (!options.binding) {
-    throw new Error('[@payloadcms-vectorize/cf] Cloudflare Vectorize binding is required')
-  }
-
   const poolConfig = options.config
 
   const adapter: DbAdapter = {
@@ -138,5 +134,5 @@ export const createCloudflareVectorizeIntegration = (
 }
 
 export { CF_MAPPINGS_SLUG } from './collections/cfMappings.js'
-export type { CloudflareVectorizeBinding, KnowledgePoolsConfig }
+export type { CloudflareVectorizeBinding, KnowledgePoolsConfig, VectorizeBinding }
 export type { KnowledgePoolsConfig as KnowledgePoolConfig }
