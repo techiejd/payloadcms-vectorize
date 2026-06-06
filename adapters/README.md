@@ -391,8 +391,9 @@ export interface EmbeddingRecord {
   chunkText: string
   /** Embedding model/version string. */
   embeddingVersion: string
-  /** The raw embedding vector — never returned by `search`. */
-  embedding: number[]
+  /** The raw embedding vector — never returned by `search`, and only present
+   *  when `findByIds` is called with `populateEmbedding: true`. */
+  embedding?: number[]
   /** Any extensionFields persisted via storeChunk round-trip here. */
   [key: string]: any
 }
