@@ -1,6 +1,8 @@
 import type { Payload } from 'payload'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { postgresAdapter } from '@payloadcms/db-postgres'
+import { eq } from '@payloadcms/db-postgres/drizzle'
+import { getEmbeddingsTable } from '../../src/drizzle.js'
 import { buildDummyConfig, integration, plugin, DIMS } from './constants.js'
 import { createTestDb, destroyPayload, waitForVectorizationJobs } from './utils.js'
 import { getPayload } from 'payload'
@@ -110,6 +112,21 @@ describe('pg findByIds', () => {
   test('empty ids returns []', async () => {
     const records = await integration.adapter.findByIds(payload, 'default', [])
     expect(records).toEqual([])
+  })
+
+  test('coerces null chunkText/embeddingVersion to "" (EmbeddingRecord type)', async () => {
+    // These columns are not required in the embeddings schema, so a row can have
+    // nulls. Set them directly and confirm findByIds returns '' (parity with cf/mongo),
+    // not null — which would violate EmbeddingRecord's `chunkText: string`.
+    const table = getEmbeddingsTable('default')!
+    await (payload.db as any).drizzle
+      .update(table)
+      .set({ chunkText: null, embeddingVersion: null })
+      .where(eq(table.id, Number(embeddingId)))
+
+    const [r] = await integration.adapter.findByIds(payload, 'default', [embeddingId])
+    expect(r.chunkText).toBe('')
+    expect(r.embeddingVersion).toBe('')
   })
 })
 
