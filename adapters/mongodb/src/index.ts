@@ -18,35 +18,42 @@ export type {
 export const createMongoVectorIntegration = (
   options: MongoVectorIntegrationConfig,
 ): { adapter: DbAdapter } => {
-  if (!options.uri) throw new Error('[@payloadcms-vectorize/mongodb] `uri` is required')
-  if (!options.dbName) throw new Error('[@payloadcms-vectorize/mongodb] `dbName` is required')
-  if (!options.pools || Object.keys(options.pools).length === 0) {
-    throw new Error('[@payloadcms-vectorize/mongodb] `pools` must contain at least one pool')
-  }
-
-  const resolvedPools: Record<string, ResolvedPoolConfig> = {}
-  for (const [name, p] of Object.entries(options.pools)) {
-    if (typeof p.dimensions !== 'number' || p.dimensions <= 0) {
-      throw new Error(
-        `[@payloadcms-vectorize/mongodb] pool "${name}" requires a positive numeric \`dimensions\``,
-      )
+  const resolvePools = (): Record<string, ResolvedPoolConfig> => {
+    const resolved: Record<string, ResolvedPoolConfig> = {}
+    for (const [name, p] of Object.entries(options.pools ?? {})) {
+      resolved[name] = resolvePoolConfig(name, p)
     }
-    resolvedPools[name] = resolvePoolConfig(name, p)
+    return resolved
   }
 
-  const ctx = { uri: options.uri, dbName: options.dbName, pools: resolvedPools }
+  const getCtx = () => {
+    if (!options.uri) throw new Error('[@payloadcms-vectorize/mongodb] `uri` is required')
+    if (!options.dbName) throw new Error('[@payloadcms-vectorize/mongodb] `dbName` is required')
+    if (!options.pools || Object.keys(options.pools).length === 0) {
+      throw new Error('[@payloadcms-vectorize/mongodb] `pools` must contain at least one pool')
+    }
+    for (const [name, p] of Object.entries(options.pools)) {
+      if (typeof p.dimensions !== 'number' || p.dimensions <= 0) {
+        throw new Error(
+          `[@payloadcms-vectorize/mongodb] pool "${name}" requires a positive numeric \`dimensions\``,
+        )
+      }
+    }
+    return { uri: options.uri, dbName: options.dbName, pools: resolvePools() }
+  }
 
   const adapter: DbAdapter = {
     getConfigExtension: () => ({
       custom: {
-        _mongoConfig: { dbName: options.dbName, pools: resolvedPools },
+        _mongoConfig: { dbName: options.dbName, pools: resolvePools() },
       },
     }),
 
     storeChunk: (payload, poolName, chunk) =>
-      storeChunkImpl(ctx, payload, poolName, chunk),
+      storeChunkImpl(getCtx(), payload, poolName, chunk),
 
     deleteChunks: async (_payload, poolName, sourceCollection, docId) => {
+      const ctx = getCtx()
       const cfg = ctx.pools[poolName]
       if (!cfg) {
         throw new Error(`[@payloadcms-vectorize/mongodb] Unknown pool "${poolName}"`)
@@ -65,6 +72,7 @@ export const createMongoVectorIntegration = (
       docId,
       embeddingVersion,
     ) => {
+      const ctx = getCtx()
       const cfg = ctx.pools[poolName]
       if (!cfg) {
         throw new Error(`[@payloadcms-vectorize/mongodb] Unknown pool "${poolName}"`)
@@ -81,9 +89,9 @@ export const createMongoVectorIntegration = (
     },
 
     search: (payload, queryEmbedding, poolName, limit, where) =>
-      searchImpl(ctx, payload, queryEmbedding, poolName, limit, where),
+      searchImpl(getCtx(), payload, queryEmbedding, poolName, limit, where),
 
-    findByIds: (payload, poolName, ids) => findByIdsImpl(ctx, payload, poolName, ids),
+    findByIds: (payload, poolName, ids) => findByIdsImpl(getCtx(), payload, poolName, ids),
   }
 
   return { adapter }
