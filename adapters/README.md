@@ -5,6 +5,7 @@
 > **If you just want to use an existing adapter**, jump to the package READMEs:
 > - [`@payloadcms-vectorize/pg`](./pg/README.md) — PostgreSQL + pgvector
 > - [`@payloadcms-vectorize/cf`](./cf/README.md) — Cloudflare Vectorize
+> - [`@payloadcms-vectorize/mongodb`](./mongodb/README.md) — MongoDB Atlas + self-hosted 8.2+
 > - Or see the [main README](../README.md) for end-to-end setup.
 
 ---
@@ -380,7 +381,7 @@ The dev harness in [`dev/`](../dev) runs the integration suite against any adapt
 3. Run the suites that matter:
    - `pnpm test:int` — full integration suite (real Payload, real DB).
    - `pnpm test:e2e` — Playwright E2E.
-   - `pnpm vitest adapters/pg/dev/specs/vectorSearchWhere.spec.ts` — the `where` operator suite (31 tests). **Every adapter should pass this.**
+   - `pnpm vitest adapters/pg/dev/specs/vectorSearchWhere.spec.ts` — the `where` operator suite (31 tests). **Every adapter should pass this** (or an equivalent — CF's equivalent is `where.spec.ts`).
 
 If your store doesn't support an operator, document it in [Adapter feature parity](#adapter-feature-parity) and have your `where` translation throw a clear error rather than silently returning wrong results.
 
@@ -398,14 +399,14 @@ If your store doesn't support an operator, document it in [Adapter feature parit
 
 ## Adapter feature parity
 
-| Feature | PG | CF | Notes |
-|---|---|---|---|
-| Real-time ingest (`storeChunk`) | ✅ | ✅ | |
-| Bulk ingest (`hasEmbeddingVersion` + `storeChunk`) | ✅ | ✅ | |
-| `where` operators | full | full | Both pass `vectorSearchWhere.spec.ts`. |
-| Server-side `like` regex | ✅ | ✅ (with regex escape — see CHANGELOG 0.7.1) | |
-| Migration CLI bin | ✅ (`vectorize:migrate`) | ❌ | CF uses indexes managed via Cloudflare API. |
-| Score range | `[0, 1]` (cosine similarity) | varies by index metric | Document yours. |
+| Feature | PG | CF | MongoDB | Notes |
+|---|---|---|---|---|
+| Real-time ingest (`storeChunk`) | ✅ | ✅ | ✅ | |
+| Bulk ingest (`hasEmbeddingVersion` + `storeChunk`) | ✅ | ✅ | ✅ | |
+| `where` operators | full | full | full | PG & MongoDB pass `vectorSearchWhere.spec.ts` (31 tests each); CF covers `where` in `where.spec.ts` (59 tests). MongoDB has documented pre/post-filter behavior — see [Limitations](./mongodb/README.md#limitations). |
+| Server-side `like` regex | ✅ | ✅ (with regex escape — see CHANGELOG 0.7.1) | ✅ | |
+| Migration CLI bin | ✅ (`vectorize:migrate`) | ❌ | ❌ | CF uses indexes managed via Cloudflare API. MongoDB creates search indexes at runtime via `ensureSearchIndex` (no bin). |
+| Score range | `[0, 1]` (cosine similarity) | varies by index metric | `vectorSearchScore`; range depends on the index similarity metric | Document yours. |
 
 If something here is out of date, please [open an issue](https://github.com/techiejd/payloadcms-vectorize/issues) — adapter parity drift is exactly what this table exists to surface.
 

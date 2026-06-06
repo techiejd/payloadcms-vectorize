@@ -5,6 +5,14 @@ import { convertWhereToMongo, evaluatePostFilter } from './convertWhere.js'
 import { ensureSearchIndex } from './indexes.js'
 import { RESERVED_FIELDS, type ResolvedPoolConfig } from './types.js'
 
+const RESERVED_AND_META = new Set<string>([
+  ...RESERVED_FIELDS,
+  '_id',
+  'score',
+  'createdAt',
+  'updatedAt',
+])
+
 export interface MongoSearchCtx {
   uri: string
   dbName: string
@@ -53,20 +61,10 @@ export async function searchImpl(
   if (pool.forceExact) vectorSearchStage.exact = true
   if (preFilter) vectorSearchStage.filter = preFilter
 
-  const projection: Record<string, unknown> = {
-    _id: 1,
-    score: { $meta: 'vectorSearchScore' },
-    sourceCollection: 1,
-    docId: 1,
-    chunkIndex: 1,
-    chunkText: 1,
-    embeddingVersion: 1,
-  }
-  for (const f of pool.filterableFields) projection[f] = 1
-
   const pipeline: Record<string, unknown>[] = [
     { $vectorSearch: vectorSearchStage },
-    { $project: projection },
+    { $addFields: { score: { $meta: 'vectorSearchScore' } } },
+    { $project: { embedding: 0 } },
   ]
 
   const collection = client.db(ctx.dbName).collection(pool.collectionName)
@@ -76,19 +74,19 @@ export async function searchImpl(
     ? rawDocs.filter((d) => evaluatePostFilter(d as Record<string, unknown>, postFilter!))
     : rawDocs
 
-  return filtered.map((d) => mapDocToResult(d as Record<string, unknown>, pool.filterableFields))
+  return filtered.map((d) => mapDocToResult(d as Record<string, unknown>))
 }
 
-function mapDocToResult(
-  doc: Record<string, unknown>,
-  filterable: string[],
-): VectorSearchResult {
+function mapDocToResult(doc: Record<string, unknown>): VectorSearchResult {
   if (typeof doc.score !== 'number') {
     throw new Error(
-      `[@payloadcms-vectorize/mongodb] Search result is missing numeric "score" field; ensure $project includes { score: { $meta: 'vectorSearchScore' } }`,
+      `[@payloadcms-vectorize/mongodb] Search result is missing numeric "score" field; ensure the pipeline adds { score: { $meta: 'vectorSearchScore' } }`,
     )
   }
-  const result: Record<string, unknown> = {
+  const extensionFields = Object.fromEntries(
+    Object.entries(doc).filter(([k]) => !RESERVED_AND_META.has(k)),
+  )
+  return {
     id: String(doc._id),
     score: doc.score,
     sourceCollection: String(doc.sourceCollection ?? ''),
@@ -97,11 +95,6 @@ function mapDocToResult(
       typeof doc.chunkIndex === 'number' ? doc.chunkIndex : Number(doc.chunkIndex ?? 0),
     chunkText: String(doc.chunkText ?? ''),
     embeddingVersion: String(doc.embeddingVersion ?? ''),
-  }
-  for (const f of filterable) {
-    if (f in doc && !(RESERVED_FIELDS as readonly string[]).includes(f)) {
-      result[f] = doc[f]
-    }
-  }
-  return result as VectorSearchResult
+    ...extensionFields,
+  } as VectorSearchResult
 }
