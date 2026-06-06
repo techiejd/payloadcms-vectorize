@@ -106,4 +106,24 @@ describe('Extension fields (mongodb)', () => {
     expect((hit as any).category).toBe('cat-a')
     expect((hit as any).priority).toBe(7)
   }, 90_000)
+
+  test('stored fields outside filterableFields are also returned by search (CF/PG parity)', async () => {
+    const target = Array(DIMS).fill(0.66)
+    await adapter.storeChunk(payload, 'default', {
+      sourceCollection: 'posts',
+      docId: 'doc-nonfilterable',
+      chunkIndex: 0,
+      chunkText: 'parity',
+      embeddingVersion: testEmbeddingVersion,
+      embedding: target,
+      extensionFields: { category: 'cat-a', priority: 9, note: 'not-a-filterable-field' },
+    })
+
+    await new Promise((r) => setTimeout(r, 1500))
+
+    const r = await adapter.search(payload, target, 'default', 5)
+    const hit = r.find((x) => x.docId === 'doc-nonfilterable')
+    expect(hit).toBeDefined()
+    expect((hit as any).note).toBe('not-a-filterable-field')
+  }, 90_000)
 })
