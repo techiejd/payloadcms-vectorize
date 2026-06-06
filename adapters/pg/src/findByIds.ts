@@ -8,6 +8,7 @@ export default async (
   payload: BasePayload,
   poolName: KnowledgePoolName,
   ids: string[],
+  populateEmbedding = false,
 ): Promise<Array<EmbeddingRecord>> => {
   if (ids.length === 0) return []
 
@@ -37,7 +38,9 @@ export default async (
 
   const selectObj: Record<string, any> = {
     id: table.id,
-    embedding: table.embedding,
+  }
+  if (populateEmbedding) {
+    selectObj.embedding = table.embedding
   }
   for (const field of collectionConfig.fields ?? []) {
     if (typeof field === 'object' && 'name' in field) {
@@ -51,12 +54,13 @@ export default async (
   }
 
   const rows = await drizzle.select(selectObj).from(table).where(inArray(table.id, numericIds))
-  return mapRowsToRecords(rows, collectionConfig)
+  return mapRowsToRecords(rows, collectionConfig, populateEmbedding)
 }
 
 function mapRowsToRecords(
   rows: Record<string, unknown>[],
   collectionConfig: SanitizedCollectionConfig,
+  populateEmbedding: boolean,
 ): Array<EmbeddingRecord> {
   const numberFields = new Set<string>()
   for (const field of collectionConfig.fields) {
@@ -75,7 +79,7 @@ function mapRowsToRecords(
       docId: String(rawDocId),
       chunkIndex:
         typeof rawChunkIndex === 'number' ? rawChunkIndex : parseInt(String(rawChunkIndex), 10),
-      embedding: parseEmbedding(row.embedding),
+      ...(populateEmbedding ? { embedding: parseEmbedding(row.embedding) } : {}),
     } as EmbeddingRecord
 
     for (const fieldName of numberFields) {

@@ -8,6 +8,7 @@ export default async (
   payload: BasePayload,
   _poolName: KnowledgePoolName,
   ids: string[],
+  populateEmbedding = false,
 ): Promise<Array<EmbeddingRecord>> => {
   if (ids.length === 0) return []
 
@@ -32,7 +33,7 @@ export default async (
             : parseInt(String(metadata.chunkIndex ?? '0'), 10),
         chunkText: String(metadata.chunkText ?? ''),
         embeddingVersion: String(metadata.embeddingVersion ?? ''),
-        embedding: Array.from(vector.values ?? []),
+        ...(populateEmbedding ? { embedding: Array.from(vector.values ?? []) } : {}),
         ...extensionFields,
       }
     })

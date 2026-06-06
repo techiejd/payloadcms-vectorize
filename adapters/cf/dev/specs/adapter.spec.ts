@@ -440,7 +440,7 @@ describe('createCloudflareVectorizeIntegration', () => {
   })
 
   describe('findByIds', () => {
-    test('returns full EmbeddingRecord including embedding values', async () => {
+    test('returns full EmbeddingRecord including embedding values when populateEmbedding is true', async () => {
       const mockBinding = createMockCloudflareBinding()
       const { adapter } = createCloudflareVectorizeIntegration({
         config: { default: { dims: DIMS } },
@@ -460,7 +460,7 @@ describe('createCloudflareVectorizeIntegration', () => {
       })
 
       const id = 'default:posts:doc-1:0'
-      const records = await adapter.findByIds(mockPayload, 'default', [id])
+      const records = await adapter.findByIds(mockPayload, 'default', [id], true)
       expect(records).toHaveLength(1)
       const [r] = records
       expect(r.id).toBe(id)
@@ -469,6 +469,34 @@ describe('createCloudflareVectorizeIntegration', () => {
       expect(r.docId).toBe('doc-1')
       expect(r.chunkText).toBe('find me')
       expect(r.embeddingVersion).toBe('v1')
+      expect((r as any).category).toBe('science')
+    })
+
+    test('omits embedding values by default', async () => {
+      const mockBinding = createMockCloudflareBinding()
+      const { adapter } = createCloudflareVectorizeIntegration({
+        config: { default: { dims: DIMS } },
+        binding: mockBinding as any,
+      })
+      const mockPayload = createMockPayload(mockBinding)
+
+      await adapter.storeChunk(mockPayload, 'default', {
+        sourceCollection: 'posts',
+        docId: 'doc-1',
+        chunkIndex: 0,
+        chunkText: 'find me',
+        embeddingVersion: 'v1',
+        embedding: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
+        extensionFields: { category: 'science' },
+      })
+
+      const id = 'default:posts:doc-1:0'
+      const records = await adapter.findByIds(mockPayload, 'default', [id])
+      expect(records).toHaveLength(1)
+      const [r] = records
+      expect(r.id).toBe(id)
+      expect(r.embedding).toBeUndefined()
+      expect(r.chunkText).toBe('find me')
       expect((r as any).category).toBe('science')
     })
 

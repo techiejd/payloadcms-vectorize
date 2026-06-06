@@ -57,9 +57,10 @@ export type VectorizedPayload = {
   _isBulkEmbedEnabled: (knowledgePool: KnowledgePoolName) => boolean
   getDbAdapterCustom: () => Record<string, any> | undefined
   search: (params: VectorSearchQuery) => Promise<Array<VectorSearchResult>>
-  findEmbeddingsByIds: (params: {
+  findByIds: (params: {
     knowledgePool: KnowledgePoolName
     ids: string[]
+    populateEmbedding?: boolean
   }) => Promise<Array<EmbeddingRecord>>
   queueEmbed: (
     params:
@@ -333,7 +334,7 @@ export interface EmbeddingRecord {
   chunkIndex: number
   chunkText: string
   embeddingVersion: string
-  embedding: number[]
+  embedding?: number[]
   [key: string]: any
 }
 
@@ -449,5 +450,6 @@ export type DbAdapter = {
     payload: BasePayload,
     poolName: KnowledgePoolName,
     ids: string[],
+    populateEmbedding?: boolean,
   ) => Promise<Array<EmbeddingRecord>>
 }

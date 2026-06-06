@@ -18,6 +18,7 @@ export async function findByIdsImpl(
   _payload: BasePayload,
   poolName: string,
   ids: string[],
+  populateEmbedding = false,
 ): Promise<EmbeddingRecord[]> {
   if (ids.length === 0) return []
 
@@ -35,13 +36,16 @@ export async function findByIdsImpl(
   const docs = await client
     .db(ctx.dbName)
     .collection(cfg.collectionName)
-    .find({ _id: { $in: objectIds } })
+    .find({ _id: { $in: objectIds } }, populateEmbedding ? {} : { projection: { embedding: 0 } })
     .toArray()
 
-  return docs.map((doc) => mapDocToRecord(doc as Record<string, unknown>))
+  return docs.map((doc) => mapDocToRecord(doc as Record<string, unknown>, populateEmbedding))
 }
 
-function mapDocToRecord(doc: Record<string, unknown>): EmbeddingRecord {
+function mapDocToRecord(
+  doc: Record<string, unknown>,
+  populateEmbedding: boolean,
+): EmbeddingRecord {
   const extensionFields = Object.fromEntries(
     Object.entries(doc).filter(([k]) => !RESERVED_AND_META.has(k)),
   )
@@ -53,7 +57,9 @@ function mapDocToRecord(doc: Record<string, unknown>): EmbeddingRecord {
       typeof doc.chunkIndex === 'number' ? doc.chunkIndex : Number(doc.chunkIndex ?? 0),
     chunkText: String(doc.chunkText ?? ''),
     embeddingVersion: String(doc.embeddingVersion ?? ''),
-    embedding: Array.isArray(doc.embedding) ? (doc.embedding as number[]) : [],
+    ...(populateEmbedding
+      ? { embedding: Array.isArray(doc.embedding) ? (doc.embedding as number[]) : [] }
+      : {}),
     ...extensionFields,
   }
 }

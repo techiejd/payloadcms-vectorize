@@ -200,7 +200,7 @@ describe('VectorizedPayload', () => {
     })
   })
 
-  describe('findEmbeddingsByIds method', () => {
+  describe('findByIds method', () => {
     let embeddingId: string
 
     beforeAll(async () => {
@@ -217,29 +217,44 @@ describe('VectorizedPayload', () => {
       embeddingId = String(rows.docs[0].id)
     })
 
-    test('payload has findEmbeddingsByIds method', () => {
+    test('payload has findByIds method', () => {
       const vectorizedPayload = getVectorizedPayload(payload)
-      expect(typeof vectorizedPayload!.findEmbeddingsByIds).toBe('function')
+      expect(typeof vectorizedPayload!.findByIds).toBe('function')
     })
 
-    test('returns the full EmbeddingRecord including the embedding vector', async () => {
+    test('returns the full EmbeddingRecord including the embedding vector when populateEmbedding is true', async () => {
       const vectorizedPayload = getVectorizedPayload(payload)!
-      const records = await vectorizedPayload.findEmbeddingsByIds({
+      const records = await vectorizedPayload.findByIds({
+        knowledgePool: 'default',
+        ids: [embeddingId],
+        populateEmbedding: true,
+      })
+      expect(records).toHaveLength(1)
+      const [record] = records
+      expect(record.id).toBe(embeddingId)
+      expect(Array.isArray(record.embedding)).toBe(true)
+      expect(record.embedding!.length).toBe(DIMS)
+      expect(typeof record.sourceCollection).toBe('string')
+      expect(typeof record.chunkText).toBe('string')
+    })
+
+    test('omits the embedding vector by default', async () => {
+      const vectorizedPayload = getVectorizedPayload(payload)!
+      const records = await vectorizedPayload.findByIds({
         knowledgePool: 'default',
         ids: [embeddingId],
       })
       expect(records).toHaveLength(1)
       const [record] = records
       expect(record.id).toBe(embeddingId)
-      expect(Array.isArray(record.embedding)).toBe(true)
-      expect(record.embedding.length).toBe(DIMS)
+      expect(record.embedding).toBeUndefined()
       expect(typeof record.sourceCollection).toBe('string')
       expect(typeof record.chunkText).toBe('string')
     })
 
     test('drops unknown ids (result length < ids length)', async () => {
       const vectorizedPayload = getVectorizedPayload(payload)!
-      const records = await vectorizedPayload.findEmbeddingsByIds({
+      const records = await vectorizedPayload.findByIds({
         knowledgePool: 'default',
         ids: [embeddingId, 'definitely-not-an-id-999999'],
       })
@@ -249,7 +264,7 @@ describe('VectorizedPayload', () => {
 
     test('empty ids returns []', async () => {
       const vectorizedPayload = getVectorizedPayload(payload)!
-      const records = await vectorizedPayload.findEmbeddingsByIds({
+      const records = await vectorizedPayload.findByIds({
         knowledgePool: 'default',
         ids: [],
       })

@@ -200,6 +200,7 @@ export const createMockAdapter = (options: MockAdapterOptions = {}): DbAdapter =
       payload: BasePayload,
       poolName: KnowledgePoolName,
       ids: string[],
+      populateEmbedding = false,
     ): Promise<EmbeddingRecord[]> => {
       const records: EmbeddingRecord[] = []
       for (const id of ids) {
@@ -220,7 +221,7 @@ export const createMockAdapter = (options: MockAdapterOptions = {}): DbAdapter =
           } = doc as any
           records.push({
             id: stored.id,
-            embedding: stored.embedding,
+            ...(populateEmbedding ? { embedding: stored.embedding } : {}),
             ...docFields,
           } as EmbeddingRecord)
         } catch (_e) {

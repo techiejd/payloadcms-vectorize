@@ -91,7 +91,8 @@ export const createMongoVectorIntegration = (
     search: (payload, queryEmbedding, poolName, limit, where) =>
       searchImpl(getCtx(), payload, queryEmbedding, poolName, limit, where),
 
-    findByIds: (payload, poolName, ids) => findByIdsImpl(getCtx(), payload, poolName, ids),
+    findByIds: (payload, poolName, ids, populateEmbedding) =>
+      findByIdsImpl(getCtx(), payload, poolName, ids, populateEmbedding),
   }
 
   return { adapter }

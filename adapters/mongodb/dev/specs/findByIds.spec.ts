@@ -54,17 +54,27 @@ describe('mongodb findByIds', () => {
     await teardownDbs(payload, MONGO_URI, DB)
   })
 
-  test('returns full EmbeddingRecord including numeric embedding array', async () => {
-    const records = await adapter.findByIds(payload, 'default', [embeddingId])
+  test('returns full EmbeddingRecord including numeric embedding array when populateEmbedding is true', async () => {
+    const records = await adapter.findByIds(payload, 'default', [embeddingId], true)
     expect(records).toHaveLength(1)
     const [r] = records
     expect(r.id).toBe(embeddingId)
     expect(Array.isArray(r.embedding)).toBe(true)
-    expect(r.embedding.length).toBe(DIMS)
-    expect(r.embedding.every((n) => typeof n === 'number')).toBe(true)
+    expect(r.embedding!.length).toBe(DIMS)
+    expect(r.embedding!.every((n) => typeof n === 'number')).toBe(true)
     expect(r.sourceCollection).toBe('posts')
     expect(r.chunkText).toBe('find me')
     expect(r.embeddingVersion).toBe(testEmbeddingVersion)
+  })
+
+  test('omits the embedding array by default', async () => {
+    const records = await adapter.findByIds(payload, 'default', [embeddingId])
+    expect(records).toHaveLength(1)
+    const [r] = records
+    expect(r.id).toBe(embeddingId)
+    expect(r.embedding).toBeUndefined()
+    expect(r.sourceCollection).toBe('posts')
+    expect(r.chunkText).toBe('find me')
   })
 
   test('includes extension fields', async () => {
