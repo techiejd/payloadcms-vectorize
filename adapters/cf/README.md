@@ -233,38 +233,52 @@ A pool maps 1:1 to a Vectorize index — there is no parameter to share an index
 
 ## Multiple Knowledge Pools
 
-Each pool needs its own Vectorize index, created with the matching dimension:
+> **Today the Cloudflare adapter is effectively single-pool.** Each `createCloudflareVectorizeIntegration` call takes **one** `binding`, the plugin accepts **one** `dbAdapter`, and that single adapter serves *every* knowledge pool you configure — all through the same binding/index. There is currently no way to give different pools different bindings in one Payload app: a second `payloadcmsVectorize(...)` invocation overwrites the first's adapter, so you can't combine two integrations.
+
+What that means in practice:
+
+- **One pool on Cloudflare → no caveats.** This is the common, fully-supported setup.
+- **Multiple pools on one binding → reads are NOT isolated.** `search` and `findByIds` ignore `knowledgePool` (they hit the shared binding directly), so a `poolA` read can return `poolB`'s vectors. Those pools must also share the index's single fixed dimension. (`deleteChunks` and `hasEmbeddingVersion` *are* pool-scoped, via the mappings collection — and the `pg`/`mongodb` adapters isolate reads by pool because each pool is a separate table/collection. Cloudflare is the outlier.)
+
+So for a single pool, just point the integration at one index:
 
 ```bash
 wrangler vectorize create posts-index --dimensions=1024 --metric=cosine
-wrangler vectorize create images-index --dimensions=1024 --metric=cosine
 ```
 
 ```toml
 [[vectorize]]
-binding = "VECTORIZE_POSTS"
+binding = "VECTORIZE"
 index_name = "posts-index"
-
-[[vectorize]]
-binding = "VECTORIZE_IMAGES"
-index_name = "images-index"
 ```
-
-Because the adapter takes a single binding, each pool gets its own integration:
 
 ```typescript
-const postsIntegration = createCloudflareVectorizeIntegration({
+const { adapter } = createCloudflareVectorizeIntegration({
   config: { posts: { dims: 1024 } },
-  binding: env.VECTORIZE_POSTS,
-})
-
-const imagesIntegration = createCloudflareVectorizeIntegration({
-  config: { images: { dims: 1024 } },
-  binding: env.VECTORIZE_IMAGES,
+  binding: env.VECTORIZE,
 })
 ```
 
-> **Note:** the current adapter API takes a single binding per integration. To register multiple pools against a single integration call, all pools must share one binding/index — which is not how Vectorize is designed to be used. Prefer one integration per pool, and pass the *combined* `dbAdapter` into `payloadcmsVectorize` only once. If you need multi-pool support inside a single integration, please [open an issue](https://github.com/techiejd/payloadcms-vectorize/issues).
+If you genuinely need multiple pools on Cloudflare today, you have two options:
+
+- **Separate Payload deployments** — each with its own Vectorize index/binding and a single pool. This is the only setup with *true* isolation: the pools never share an index.
+- **Filter at the application layer** — keep them on one binding but scope reads yourself. Every vector id is prefixed with its pool (`${poolName}:${sourceCollection}:${docId}:${chunkIndex}`), so you can drop foreign hits with e.g. `results.filter((r) => r.id.startsWith('posts:'))` — request a higher `limit` to offset what you trim, since `topK` is applied *before* your filter. For a sturdier filter, store a discriminator in `extensionFields` (e.g. `{ pool: 'posts' }`) and pass it in `search`'s `where` so it's applied at query time. (`findByIds` has no `where`, so scope it by only passing ids from the intended pool, or checking the id prefix on the way out.)
+
+### 🙏 Help wanted — native multi-pool via a binding map
+
+The clean fix is to let `createCloudflareVectorizeIntegration` accept a `{ knowledgePool: binding }` map instead of a single `binding`, so one integration can route each pool to its own index:
+
+```typescript
+createCloudflareVectorizeIntegration({
+  config: { posts: { dims: 1024 }, images: { dims: 768 } },
+  bindings: {
+    posts: env.VECTORIZE_POSTS,
+    images: env.VECTORIZE_IMAGES,
+  },
+})
+```
+
+`poolName` would select the right binding, giving real per-pool isolation **and** per-pool dimensions for free — no id-prefix or metadata workaround needed. Bindings can't be created at runtime (they're injected by the Workers runtime from `wrangler.toml`/`wrangler.jsonc`, so you'd still declare each one — the adapter would just route to it). If you'd find this useful, contributions are very welcome: please [open an issue or PR](https://github.com/techiejd/payloadcms-vectorize/issues).
 
 ## Embedding Providers
 
@@ -385,7 +399,7 @@ These come from Vectorize itself; the adapter inherits them. The authoritative r
 
 ### Adapter-specific gaps
 
-- **Multi-pool through one integration** — the current API takes a single binding per call to `createCloudflareVectorizeIntegration`. See [Multiple Knowledge Pools](#multiple-knowledge-pools).
+- **Reads are not pool-isolated on a shared binding** — `search` and `findByIds` ignore `knowledgePool`, so multiple pools sharing one binding/index are **not** read-isolated (a query for one pool can return another pool's vectors). Use one binding per pool. Details, and a proposed `{ knowledgePool: binding }` map to fix it natively, in [Multiple Knowledge Pools](#multiple-knowledge-pools) — contributions welcome.
 - **Test parity with the PG adapter** — the project's top-level integration suite (`dev/specs/`) exercises `@payloadcms-vectorize/pg` against a real database. CF has its own suite under [`adapters/cf/dev/specs/`](./dev/specs/) covering the `DbAdapter` interface (`compliance.spec.ts`), filter splitting and post-filtering (`where.spec.ts`), and adapter wiring (`adapter.spec.ts`) — but with the Vectorize binding mocked, since there is no local Vectorize emulator. Full e2e parity against a live index is tracked in the [issue tracker](https://github.com/techiejd/payloadcms-vectorize/issues).
 
 ## Troubleshooting
