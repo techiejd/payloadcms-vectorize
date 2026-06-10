@@ -157,7 +157,7 @@ export type DbAdapter = {
     poolName: KnowledgePoolName,
     ids: string[],
     populateEmbedding?: boolean,
-  ) => Promise<Array<EmbeddingRecord>>
+  ) => Promise<Record<string, EmbeddingRecord | undefined>>
 }
 ```
 
@@ -170,7 +170,7 @@ export type DbAdapter = {
 | `deleteChunks` | After a source document is deleted. | Remove every chunk where `sourceCollection === ... && docId === ...`. Must be safe to call when no chunks exist (no-op, no throw). |
 | `hasEmbeddingVersion` | During bulk-embed planning, per candidate document. | Return `true` iff at least one chunk exists with the matching `(sourceCollection, docId, embeddingVersion)` triple. Must filter on **all three** — older `0.7.0` adapters that ignored `embeddingVersion` caused stale embeddings on model bumps. |
 | `search` | Per `/vector-search` request and per `getVectorizedPayload().search()` call. | Translate `where` (Payload-style) into your store's filter language, perform a vector search using `queryEmbedding`, and return up to `limit` results sorted by descending relevance. |
-| `findByIds` | Per `getVectorizedPayload().findByIds()` call. | Fetch stored embedding records by primary key. The raw `embedding` vector is **only included when `populateEmbedding` is `true`** (default `false`) — omit it otherwise so callers that only need text/metadata don't pay for it. Where possible, skip reading the vector at the source (pg: don't select the column; MongoDB: `{ projection: { embedding: 0 } }`); CF's `getByIds` always returns values, so omit them post-fetch. Look up by the same `id` your `search` returns as `result.id`. Well-formed but nonexistent ids are dropped (result length may be `< ids.length`); order is not guaranteed; empty `ids` returns `[]` without a backend call. Whether a *malformed* id (wrong shape for the key type) is dropped or surfaces an error is adapter-specific: an adapter that validates the id shape itself (MongoDB drops non-24-hex ids via an `ObjectId` guard) treats it as a miss; an adapter that forwards ids straight to the backend (pg passes them to the `IN` query, supporting both integer and `uuid` PKs; CF forwards its composite vector id) lets the backend reject a malformed id, which may surface as an error. |
+| `findByIds` | Per `getVectorizedPayload().findByIds()` call. | Fetch stored embedding records by primary key. **Return an object keyed by the ids you were given:** every requested id must be present as a key, with a found record as the value and `undefined` for any id that didn't resolve. The raw `embedding` vector is **only included when `populateEmbedding` is `true`** (default `false`) — omit it otherwise so callers that only need text/metadata don't pay for it. Where possible, skip reading the vector at the source (pg: don't select the column; MongoDB: `{ projection: { embedding: 0 } }`); CF's `getByIds` always returns values, so omit them post-fetch. Look up by the same `id` your `search` returns as `result.id`. Unknown **and** malformed ids must map to `undefined` — never throw for a bad id. Validate the id shape against your key type before querying so a malformed id can't error the whole batch (MongoDB drops non-24-hex ids; pg drops ids that don't match the PK column type — numeric for integer PKs, uuid-shaped for `uuid` PKs — before the `IN` query; CF's ids are arbitrary strings, so an unknown one is simply absent from `getByIds`). Empty `ids` returns `{}` without a backend call. |
 
 ### Error contract
 
@@ -299,8 +299,9 @@ export const createYourDbVectorIntegration = (
     findByIds: async (payload, poolName, ids, populateEmbedding = false) => {
       // TODO: fetch stored records by primary key. Include the raw `embedding` vector
       //       only when `populateEmbedding` is true (default false); skip reading it otherwise.
-      //       Return Array<EmbeddingRecord>. Unknown ids are misses (drop them, don't throw).
-      return []
+      //       Return an object keyed by every requested id: a record for hits, `undefined`
+      //       for unknown or malformed ids (never throw for a bad id).
+      return Object.fromEntries(ids.map((id) => [id, undefined]))
     },
   }
 

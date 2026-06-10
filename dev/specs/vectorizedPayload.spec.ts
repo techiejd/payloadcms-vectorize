@@ -229,8 +229,8 @@ describe('VectorizedPayload', () => {
         ids: [embeddingId],
         populateEmbedding: true,
       })
-      expect(records).toHaveLength(1)
-      const [record] = records
+      expect(Object.keys(records)).toEqual([embeddingId])
+      const record = records[embeddingId]!
       expect(record.id).toBe(embeddingId)
       expect(Array.isArray(record.embedding)).toBe(true)
       expect(record.embedding!.length).toBe(DIMS)
@@ -244,31 +244,34 @@ describe('VectorizedPayload', () => {
         knowledgePool: 'default',
         ids: [embeddingId],
       })
-      expect(records).toHaveLength(1)
-      const [record] = records
+      expect(Object.keys(records)).toEqual([embeddingId])
+      const record = records[embeddingId]!
       expect(record.id).toBe(embeddingId)
       expect(record.embedding).toBeUndefined()
       expect(typeof record.sourceCollection).toBe('string')
       expect(typeof record.chunkText).toBe('string')
     })
 
-    test('drops unknown ids (result length < ids length)', async () => {
+    test('maps unknown ids to undefined (every requested id is a key)', async () => {
       const vectorizedPayload = getVectorizedPayload(payload)!
       const records = await vectorizedPayload.findByIds({
         knowledgePool: 'default',
         ids: [embeddingId, 'definitely-not-an-id-999999'],
       })
-      expect(records).toHaveLength(1)
-      expect(records[0].id).toBe(embeddingId)
+      expect(Object.keys(records).sort()).toEqual(
+        [embeddingId, 'definitely-not-an-id-999999'].sort(),
+      )
+      expect(records[embeddingId]!.id).toBe(embeddingId)
+      expect(records['definitely-not-an-id-999999']).toBeUndefined()
     })
 
-    test('empty ids returns []', async () => {
+    test('empty ids returns {}', async () => {
       const vectorizedPayload = getVectorizedPayload(payload)!
       const records = await vectorizedPayload.findByIds({
         knowledgePool: 'default',
         ids: [],
       })
-      expect(records).toEqual([])
+      expect(records).toEqual({})
     })
   })
 

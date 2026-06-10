@@ -61,7 +61,7 @@ export type VectorizedPayload = {
     knowledgePool: KnowledgePoolName
     ids: string[]
     populateEmbedding?: boolean
-  }) => Promise<Array<EmbeddingRecord>>
+  }) => Promise<Record<string, EmbeddingRecord | undefined>>
   queueEmbed: (
     params:
       | {
@@ -451,5 +451,5 @@ export type DbAdapter = {
     poolName: KnowledgePoolName,
     ids: string[],
     populateEmbedding?: boolean,
-  ) => Promise<Array<EmbeddingRecord>>
+  ) => Promise<Record<string, EmbeddingRecord | undefined>>
 }

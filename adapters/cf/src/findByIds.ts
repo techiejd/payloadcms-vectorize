@@ -9,21 +9,23 @@ export default async (
   _poolName: KnowledgePoolName,
   ids: string[],
   populateEmbedding = false,
-): Promise<Array<EmbeddingRecord>> => {
-  if (ids.length === 0) return []
+): Promise<Record<string, EmbeddingRecord | undefined>> => {
+  const result: Record<string, EmbeddingRecord | undefined> = {}
+  for (const id of ids) result[id] = undefined
+  if (ids.length === 0) return result
 
   const binding = getVectorizeBinding(payload)
 
   try {
     const vectors = await binding.getByIds(ids)
-    if (!vectors) return []
+    if (!vectors) return result
 
-    return vectors.map((vector) => {
+    for (const vector of vectors) {
       const metadata = (vector.metadata || {}) as Record<string, unknown>
       const extensionFields = Object.fromEntries(
         Object.entries(metadata).filter(([k]) => !RESERVED_METADATA.includes(k)),
       )
-      return {
+      result[vector.id] = {
         id: vector.id,
         sourceCollection: String(metadata.sourceCollection ?? ''),
         docId: String(metadata.docId ?? ''),
@@ -36,7 +38,8 @@ export default async (
         ...(populateEmbedding ? { embedding: Array.from(vector.values ?? []) } : {}),
         ...extensionFields,
       }
-    })
+    }
+    return result
   } catch (e) {
     const errorMessage = e instanceof Error ? e.message : String(e)
     payload.logger.error(`[@payloadcms-vectorize/cf] findByIds failed: ${errorMessage}`)

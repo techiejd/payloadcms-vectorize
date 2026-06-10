@@ -78,8 +78,8 @@ describe('pg findByIds', () => {
 
   test('returns full EmbeddingRecord including numeric embedding array when populateEmbedding is true', async () => {
     const records = await integration.adapter.findByIds(payload, 'default', [embeddingId], true)
-    expect(records).toHaveLength(1)
-    const [r] = records
+    expect(Object.keys(records)).toEqual([embeddingId])
+    const r = records[embeddingId]!
     expect(r.id).toBe(embeddingId)
     expect(Array.isArray(r.embedding)).toBe(true)
     expect(r.embedding!.length).toBe(DIMS)
@@ -91,27 +91,35 @@ describe('pg findByIds', () => {
 
   test('omits the embedding array by default', async () => {
     const records = await integration.adapter.findByIds(payload, 'default', [embeddingId])
-    expect(records).toHaveLength(1)
-    const [r] = records
+    expect(Object.keys(records)).toEqual([embeddingId])
+    const r = records[embeddingId]!
     expect(r.id).toBe(embeddingId)
     expect(r.embedding).toBeUndefined()
     expect(r.sourceCollection).toBe('posts')
   })
 
   test('includes extension fields when the pool defines them', async () => {
-    const [r] = await integration.adapter.findByIds(payload, 'default', [embeddingId])
-    expect((r as any).category).toBe('science')
+    const records = await integration.adapter.findByIds(payload, 'default', [embeddingId])
+    expect((records[embeddingId] as any).category).toBe('science')
   })
 
-  test('drops misses', async () => {
+  test('maps a well-formed but nonexistent id to undefined', async () => {
     const records = await integration.adapter.findByIds(payload, 'default', [embeddingId, '999999'])
-    expect(records).toHaveLength(1)
-    expect(records[0].id).toBe(embeddingId)
+    expect(Object.keys(records).sort()).toEqual([embeddingId, '999999'].sort())
+    expect(records[embeddingId]!.id).toBe(embeddingId)
+    expect(records['999999']).toBeUndefined()
   })
 
-  test('empty ids returns []', async () => {
+  test('maps a malformed (non-numeric) id to undefined instead of throwing', async () => {
+    const records = await integration.adapter.findByIds(payload, 'default', [embeddingId, 'not-an-id'])
+    expect(Object.keys(records).sort()).toEqual([embeddingId, 'not-an-id'].sort())
+    expect(records[embeddingId]!.id).toBe(embeddingId)
+    expect(records['not-an-id']).toBeUndefined()
+  })
+
+  test('empty ids returns {}', async () => {
     const records = await integration.adapter.findByIds(payload, 'default', [])
-    expect(records).toEqual([])
+    expect(records).toEqual({})
   })
 
   test('coerces null chunkText/embeddingVersion to "" (EmbeddingRecord type)', async () => {
@@ -124,7 +132,7 @@ describe('pg findByIds', () => {
       .set({ chunkText: null, embeddingVersion: null })
       .where(eq(table.id, Number(embeddingId)))
 
-    const [r] = await integration.adapter.findByIds(payload, 'default', [embeddingId])
+    const r = (await integration.adapter.findByIds(payload, 'default', [embeddingId]))[embeddingId]!
     expect(r.chunkText).toBe('')
     expect(r.embeddingVersion).toBe('')
   })
@@ -206,20 +214,30 @@ describe('pg findByIds (uuid idType)', () => {
 
   test('findByIds resolves a uuid id (regression: numeric-only filter dropped uuids)', async () => {
     const records = await integration.adapter.findByIds(payload, 'default', [embeddingId], true)
-    expect(records).toHaveLength(1)
-    const [r] = records
+    expect(Object.keys(records)).toEqual([embeddingId])
+    const r = records[embeddingId]!
     expect(r.id).toBe(embeddingId)
     expect(Array.isArray(r.embedding)).toBe(true)
     expect(r.embedding!.length).toBe(DIMS)
     expect((r as any).category).toBe('science')
   })
 
-  test('drops a well-formed but nonexistent uuid', async () => {
+  test('maps a well-formed but nonexistent uuid to undefined', async () => {
     const records = await integration.adapter.findByIds(payload, 'default', [
       embeddingId,
       '00000000-0000-0000-0000-000000000000',
     ])
-    expect(records).toHaveLength(1)
-    expect(records[0].id).toBe(embeddingId)
+    expect(Object.keys(records).sort()).toEqual(
+      [embeddingId, '00000000-0000-0000-0000-000000000000'].sort(),
+    )
+    expect(records[embeddingId]!.id).toBe(embeddingId)
+    expect(records['00000000-0000-0000-0000-000000000000']).toBeUndefined()
+  })
+
+  test('maps a malformed (non-uuid) id to undefined instead of throwing', async () => {
+    const records = await integration.adapter.findByIds(payload, 'default', [embeddingId, '999999'])
+    expect(Object.keys(records).sort()).toEqual([embeddingId, '999999'].sort())
+    expect(records[embeddingId]!.id).toBe(embeddingId)
+    expect(records['999999']).toBeUndefined()
   })
 })

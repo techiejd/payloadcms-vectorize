@@ -56,8 +56,8 @@ describe('mongodb findByIds', () => {
 
   test('returns full EmbeddingRecord including numeric embedding array when populateEmbedding is true', async () => {
     const records = await adapter.findByIds(payload, 'default', [embeddingId], true)
-    expect(records).toHaveLength(1)
-    const [r] = records
+    expect(Object.keys(records)).toEqual([embeddingId])
+    const r = records[embeddingId]!
     expect(r.id).toBe(embeddingId)
     expect(Array.isArray(r.embedding)).toBe(true)
     expect(r.embedding!.length).toBe(DIMS)
@@ -69,8 +69,8 @@ describe('mongodb findByIds', () => {
 
   test('omits the embedding array by default', async () => {
     const records = await adapter.findByIds(payload, 'default', [embeddingId])
-    expect(records).toHaveLength(1)
-    const [r] = records
+    expect(Object.keys(records)).toEqual([embeddingId])
+    const r = records[embeddingId]!
     expect(r.id).toBe(embeddingId)
     expect(r.embedding).toBeUndefined()
     expect(r.sourceCollection).toBe('posts')
@@ -78,22 +78,26 @@ describe('mongodb findByIds', () => {
   })
 
   test('includes extension fields', async () => {
-    const [r] = await adapter.findByIds(payload, 'default', [embeddingId])
-    expect((r as any).category).toBe('science')
+    const records = await adapter.findByIds(payload, 'default', [embeddingId])
+    expect((records[embeddingId] as any).category).toBe('science')
   })
 
-  test('drops misses and invalid ids without throwing', async () => {
+  test('maps misses and invalid ids to undefined without throwing', async () => {
     const records = await adapter.findByIds(payload, 'default', [
       embeddingId,
       '000000000000000000000000',
       'not-an-object-id',
     ])
-    expect(records).toHaveLength(1)
-    expect(records[0].id).toBe(embeddingId)
+    expect(Object.keys(records).sort()).toEqual(
+      [embeddingId, '000000000000000000000000', 'not-an-object-id'].sort(),
+    )
+    expect(records[embeddingId]!.id).toBe(embeddingId)
+    expect(records['000000000000000000000000']).toBeUndefined()
+    expect(records['not-an-object-id']).toBeUndefined()
   })
 
-  test('empty ids returns []', async () => {
+  test('empty ids returns {}', async () => {
     const records = await adapter.findByIds(payload, 'default', [])
-    expect(records).toEqual([])
+    expect(records).toEqual({})
   })
 })

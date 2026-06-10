@@ -9,8 +9,10 @@ export default async (
   poolName: KnowledgePoolName,
   ids: string[],
   populateEmbedding = false,
-): Promise<Array<EmbeddingRecord>> => {
-  if (ids.length === 0) return []
+): Promise<Record<string, EmbeddingRecord | undefined>> => {
+  const result: Record<string, EmbeddingRecord | undefined> = {}
+  for (const id of ids) result[id] = undefined
+  if (ids.length === 0) return result
 
   const isPostgres = payload.db?.pool?.query || payload.db?.drizzle
   if (!isPostgres) {
@@ -33,6 +35,12 @@ export default async (
     )
   }
 
+  // Drop ids that can't match the primary-key column type before querying, so a
+  // malformed id is treated as a miss instead of making Postgres reject the cast
+  // and throw for the whole batch.
+  const queryableIds = ids.filter((id) => idMatchesPkType(table.id, id))
+  if (queryableIds.length === 0) return result
+
   const selectObj: Record<string, any> = {
     id: table.id,
   }
@@ -50,8 +58,24 @@ export default async (
     }
   }
 
-  const rows = await drizzle.select(selectObj).from(table).where(inArray(table.id, ids))
-  return mapRowsToRecords(rows, collectionConfig, populateEmbedding)
+  const rows = await drizzle.select(selectObj).from(table).where(inArray(table.id, queryableIds))
+  for (const record of mapRowsToRecords(rows, collectionConfig, populateEmbedding)) {
+    result[record.id] = record
+  }
+  return result
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function idMatchesPkType(idColumn: { getSQLType?: () => string }, id: string): boolean {
+  const sqlType = idColumn.getSQLType?.() ?? ''
+  if (sqlType === 'integer' || sqlType === 'serial' || sqlType === 'bigint' || sqlType === 'bigserial') {
+    return /^\d+$/.test(id)
+  }
+  if (sqlType === 'uuid') {
+    return UUID.test(id)
+  }
+  return true
 }
 
 function mapRowsToRecords(

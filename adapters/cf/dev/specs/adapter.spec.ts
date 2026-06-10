@@ -461,8 +461,8 @@ describe('createCloudflareVectorizeIntegration', () => {
 
       const id = 'default:posts:doc-1:0'
       const records = await adapter.findByIds(mockPayload, 'default', [id], true)
-      expect(records).toHaveLength(1)
-      const [r] = records
+      expect(Object.keys(records)).toEqual([id])
+      const r = records[id]!
       expect(r.id).toBe(id)
       expect(r.embedding).toEqual(embedding)
       expect(r.sourceCollection).toBe('posts')
@@ -492,15 +492,15 @@ describe('createCloudflareVectorizeIntegration', () => {
 
       const id = 'default:posts:doc-1:0'
       const records = await adapter.findByIds(mockPayload, 'default', [id])
-      expect(records).toHaveLength(1)
-      const [r] = records
+      expect(Object.keys(records)).toEqual([id])
+      const r = records[id]!
       expect(r.id).toBe(id)
       expect(r.embedding).toBeUndefined()
       expect(r.chunkText).toBe('find me')
       expect((r as any).category).toBe('science')
     })
 
-    test('drops misses', async () => {
+    test('maps misses to undefined', async () => {
       const mockBinding = createMockCloudflareBinding()
       const { adapter } = createCloudflareVectorizeIntegration({
         config: { default: { dims: DIMS } },
@@ -520,11 +520,14 @@ describe('createCloudflareVectorizeIntegration', () => {
         'default:posts:doc-1:0',
         'default:posts:nope:0',
       ])
-      expect(records).toHaveLength(1)
-      expect(records[0].id).toBe('default:posts:doc-1:0')
+      expect(Object.keys(records).sort()).toEqual(
+        ['default:posts:doc-1:0', 'default:posts:nope:0'].sort(),
+      )
+      expect(records['default:posts:doc-1:0']!.id).toBe('default:posts:doc-1:0')
+      expect(records['default:posts:nope:0']).toBeUndefined()
     })
 
-    test('empty ids returns []', async () => {
+    test('empty ids returns {}', async () => {
       const mockBinding = createMockCloudflareBinding()
       const { adapter } = createCloudflareVectorizeIntegration({
         config: { default: { dims: DIMS } },
@@ -532,7 +535,7 @@ describe('createCloudflareVectorizeIntegration', () => {
       })
       const mockPayload = createMockPayload(mockBinding)
       const records = await adapter.findByIds(mockPayload, 'default', [])
-      expect(records).toEqual([])
+      expect(records).toEqual({})
     })
   })
 })

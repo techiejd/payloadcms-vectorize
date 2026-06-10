@@ -19,8 +19,10 @@ export async function findByIdsImpl(
   poolName: string,
   ids: string[],
   populateEmbedding = false,
-): Promise<EmbeddingRecord[]> {
-  if (ids.length === 0) return []
+): Promise<Record<string, EmbeddingRecord | undefined>> {
+  const result: Record<string, EmbeddingRecord | undefined> = {}
+  for (const id of ids) result[id] = undefined
+  if (ids.length === 0) return result
 
   const cfg = ctx.pools[poolName]
   if (!cfg) {
@@ -30,7 +32,7 @@ export async function findByIdsImpl(
   }
 
   const objectIds = ids.filter((id) => HEX24.test(id)).map((id) => new ObjectId(id))
-  if (objectIds.length === 0) return []
+  if (objectIds.length === 0) return result
 
   const client = await getMongoClient(ctx.uri)
   const docs = await client
@@ -39,7 +41,11 @@ export async function findByIdsImpl(
     .find({ _id: { $in: objectIds } }, populateEmbedding ? {} : { projection: { embedding: 0 } })
     .toArray()
 
-  return docs.map((doc) => mapDocToRecord(doc as Record<string, unknown>, populateEmbedding))
+  for (const doc of docs) {
+    const record = mapDocToRecord(doc as Record<string, unknown>, populateEmbedding)
+    result[record.id] = record
+  }
+  return result
 }
 
 function mapDocToRecord(

@@ -889,24 +889,26 @@ Fetch stored embedding records by primary key. The `id` of each record is whatev
 
 **Params:** `{ knowledgePool: string; ids: string[]; populateEmbedding?: boolean }` (`populateEmbedding` defaults to `false`).
 
-**Returns:** `Promise<Array<EmbeddingRecord>>` — `EmbeddingRecord` is the search result shape without `score` and with an optional `embedding?: number[]`, present only when `populateEmbedding: true`.
+**Returns:** `Promise<Record<string, EmbeddingRecord | undefined>>` — an object keyed by the ids you passed in. Each requested id is present as a key; a found record is the value, and an unknown or malformed id maps to `undefined`. `EmbeddingRecord` is the search result shape without `score` and with an optional `embedding?: number[]`, present only when `populateEmbedding: true`.
 
 **Example:**
 
 ```typescript
-const [record] = await vectorizedPayload.findByIds({
+const id = '<an id from a previous search result>'
+const records = await vectorizedPayload.findByIds({
   knowledgePool: 'mainKnowledgePool',
-  ids: ['<an id from a previous search result>'],
+  ids: [id],
   populateEmbedding: true,
 })
 
+const record = records[id]
 if (record) {
   // record.embedding is the raw number[] vector — feed it back into search for "more like this"
   console.log(record.embedding!.length, record.chunkText)
 }
 ```
 
-Misses are dropped (the result may be shorter than `ids`), order is not guaranteed, and an empty `ids` array returns `[]` without touching the backend.
+Because the result is keyed by id, a search result round-trips directly (`records[searchHit.id]`) and there's no positional alignment to worry about — look records up by id rather than relying on key order. Unknown or malformed ids map to `undefined` (never throw), and an empty `ids` array returns `{}` without touching the backend.
 
 #### `vectorizedPayload.queueEmbed(params)`
 

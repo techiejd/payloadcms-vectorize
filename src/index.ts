@@ -362,7 +362,7 @@ export default (pluginOptions: PayloadcmsVectorizeConfig) =>
           ids: string[]
           populateEmbedding?: boolean
         }) => {
-          if (params.ids.length === 0) return Promise.resolve([])
+          if (params.ids.length === 0) return Promise.resolve({})
           return pluginOptions.dbAdapter.findByIds(
             payload,
             params.knowledgePool,
