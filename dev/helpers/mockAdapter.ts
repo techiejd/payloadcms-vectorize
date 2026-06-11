@@ -1,4 +1,4 @@
-import type { DbAdapter, KnowledgePoolName, KnowledgePoolDynamicConfig, StoreChunkData, VectorSearchResult } from 'payloadcms-vectorize'
+import type { DbAdapter, EmbeddingRecord, KnowledgePoolName, KnowledgePoolDynamicConfig, StoreChunkData, VectorSearchResult } from 'payloadcms-vectorize'
 import { createEmbeddingsCollection } from 'payloadcms-vectorize'
 import type { CollectionSlug, Payload, BasePayload, Where, Config } from 'payload'
 
@@ -194,6 +194,46 @@ export const createMockAdapter = (options: MockAdapterOptions = {}): DbAdapter =
         .sort((a, b) => b._score - a._score)
         .slice(0, limit)
         .map(({ _score, ...rest }) => rest)
+    },
+
+    findByIds: async (
+      payload: BasePayload,
+      poolName: KnowledgePoolName,
+      ids: string[],
+      populateEmbedding = false,
+    ): Promise<Record<string, EmbeddingRecord | undefined>> => {
+      const records: Record<string, EmbeddingRecord | undefined> = {}
+      for (const id of ids) {
+        records[id] = undefined
+        const stored = storage.get(`${poolName}:${id}`)
+        if (!stored) continue
+        let doc: Record<string, any> | null
+        try {
+          doc = (await payload.findByID({
+            collection: poolName as CollectionSlug,
+            id: stored.id,
+          })) as Record<string, any> | null
+        } catch (e) {
+          if (e instanceof Error && e.name === 'NotFound') {
+            continue
+          }
+          throw e
+        }
+        if (!doc) continue
+        const {
+          id: _id,
+          createdAt: _createdAt,
+          updatedAt: _updatedAt,
+          embedding: _embedding,
+          ...docFields
+        } = doc
+        records[id] = {
+          id: stored.id,
+          ...(populateEmbedding ? { embedding: stored.embedding } : {}),
+          ...docFields,
+        } as EmbeddingRecord
+      }
+      return records
     },
   }
 }
