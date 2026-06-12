@@ -832,7 +832,7 @@ curl -X POST http://localhost:3000/api/vector-retry-failed-batch \
 
 ### Local API
 
-The plugin provides a `getVectorizedPayload(payload)` function which returns a `vectorizedPayload` object exposing `search`, `queueEmbed`, `bulkEmbed`, and `retryFailedBatch` methods.
+The plugin provides a `getVectorizedPayload(payload)` function which returns a `vectorizedPayload` object exposing `search`, `findByIds`, `queueEmbed`, `bulkEmbed`, and `retryFailedBatch` methods.
 
 #### Getting the Vectorized Payload Object
 
@@ -882,6 +882,33 @@ const results = await vectorizedPayload.search({
   limit: 5,
 })
 ```
+
+#### `vectorizedPayload.findByIds(params)`
+
+Fetch stored embedding records by primary key. The `id` of each record is whatever [`search()`](#vectorizedpayloadsearchparams) returns as `result.id`, so a search result round-trips directly. Pass `populateEmbedding: true` to also get the raw embedding vector back (the normal search/query API never returns it) — the building block for "more like this" flows. It defaults to `false`, so by default you get the record's text and metadata without the heavy vector.
+
+**Params:** `{ knowledgePool: string; ids: string[]; populateEmbedding?: boolean }` (`populateEmbedding` defaults to `false`).
+
+**Returns:** `Promise<Record<string, EmbeddingRecord | undefined>>` — an object keyed by the ids you passed in. Each requested id is present as a key; a found record is the value, and an unknown or malformed id maps to `undefined`. `EmbeddingRecord` is the search result shape without `score` and with an optional `embedding?: number[]`, present only when `populateEmbedding: true`.
+
+**Example:**
+
+```typescript
+const id = '<an id from a previous search result>'
+const records = await vectorizedPayload.findByIds({
+  knowledgePool: 'mainKnowledgePool',
+  ids: [id],
+  populateEmbedding: true,
+})
+
+const record = records[id]
+if (record) {
+  // record.embedding is the raw number[] vector — feed it back into search for "more like this"
+  console.log(record.embedding!.length, record.chunkText)
+}
+```
+
+Because the result is keyed by id, a search result round-trips directly (`records[searchHit.id]`) and there's no positional alignment to worry about — look records up by id rather than relying on key order. Unknown or malformed ids map to `undefined` (never throw), and an empty `ids` array returns `{}` without touching the backend.
 
 #### `vectorizedPayload.queueEmbed(params)`
 

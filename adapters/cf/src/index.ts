@@ -5,6 +5,7 @@ import type { CloudflareVectorizeBinding, KnowledgePoolsConfig, VectorizeBinding
 import cfMappingsCollection, { CF_MAPPINGS_SLUG } from './collections/cfMappings.js'
 import embed from './embed.js'
 import search from './search.js'
+import findByIds from './findByIds.js'
 
 /**
  * Configuration for Cloudflare Vectorize integration
@@ -112,6 +113,8 @@ export const createCloudflareVectorizeIntegration = (
         throw new Error(`[@payloadcms-vectorize/cf] Failed to delete embeddings: ${errorMessage}`)
       }
     },
+
+    findByIds,
 
     hasEmbeddingVersion: async (payload, poolName, sourceCollection, docId, embeddingVersion) => {
       const result = await payload.find({

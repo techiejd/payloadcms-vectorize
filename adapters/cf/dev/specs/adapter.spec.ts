@@ -61,6 +61,13 @@ function createMockCloudflareBinding() {
       }
     }),
 
+    getByIds: vi.fn(async (ids: string[]) => {
+      return ids
+        .map((id) => storage.get(id))
+        .filter((v): v is { id: string; values: number[]; metadata: any } => v !== undefined)
+        .map((v) => ({ id: v.id, values: v.values, metadata: v.metadata }))
+    }),
+
     list: vi.fn(async (options: any) => {
       const vectors = Array.from(storage.values()).map((item) => ({
         id: item.id,
@@ -429,6 +436,106 @@ describe('createCloudflareVectorizeIntegration', () => {
         },
         limit: 1,
       })
+    })
+  })
+
+  describe('findByIds', () => {
+    test('returns full EmbeddingRecord including embedding values when populateEmbedding is true', async () => {
+      const mockBinding = createMockCloudflareBinding()
+      const { adapter } = createCloudflareVectorizeIntegration({
+        config: { default: { dims: DIMS } },
+        binding: mockBinding as any,
+      })
+      const mockPayload = createMockPayload(mockBinding)
+      const embedding = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
+
+      await adapter.storeChunk(mockPayload, 'default', {
+        sourceCollection: 'posts',
+        docId: 'doc-1',
+        chunkIndex: 0,
+        chunkText: 'find me',
+        embeddingVersion: 'v1',
+        embedding,
+        extensionFields: { category: 'science' },
+      })
+
+      const id = 'default:posts:doc-1:0'
+      const records = await adapter.findByIds(mockPayload, 'default', [id], true)
+      expect(Object.keys(records)).toEqual([id])
+      const r = records[id]!
+      expect(r.id).toBe(id)
+      expect(r.embedding).toEqual(embedding)
+      expect(r.sourceCollection).toBe('posts')
+      expect(r.docId).toBe('doc-1')
+      expect(r.chunkText).toBe('find me')
+      expect(r.embeddingVersion).toBe('v1')
+      expect((r as any).category).toBe('science')
+    })
+
+    test('omits embedding values by default', async () => {
+      const mockBinding = createMockCloudflareBinding()
+      const { adapter } = createCloudflareVectorizeIntegration({
+        config: { default: { dims: DIMS } },
+        binding: mockBinding as any,
+      })
+      const mockPayload = createMockPayload(mockBinding)
+
+      await adapter.storeChunk(mockPayload, 'default', {
+        sourceCollection: 'posts',
+        docId: 'doc-1',
+        chunkIndex: 0,
+        chunkText: 'find me',
+        embeddingVersion: 'v1',
+        embedding: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
+        extensionFields: { category: 'science' },
+      })
+
+      const id = 'default:posts:doc-1:0'
+      const records = await adapter.findByIds(mockPayload, 'default', [id])
+      expect(Object.keys(records)).toEqual([id])
+      const r = records[id]!
+      expect(r.id).toBe(id)
+      expect(r.embedding).toBeUndefined()
+      expect(r.chunkText).toBe('find me')
+      expect((r as any).category).toBe('science')
+    })
+
+    test('maps misses to undefined', async () => {
+      const mockBinding = createMockCloudflareBinding()
+      const { adapter } = createCloudflareVectorizeIntegration({
+        config: { default: { dims: DIMS } },
+        binding: mockBinding as any,
+      })
+      const mockPayload = createMockPayload(mockBinding)
+      await adapter.storeChunk(mockPayload, 'default', {
+        sourceCollection: 'posts',
+        docId: 'doc-1',
+        chunkIndex: 0,
+        chunkText: 'x',
+        embeddingVersion: 'v1',
+        embedding: [0, 0, 0, 0, 0, 0, 0, 0],
+        extensionFields: {},
+      })
+      const records = await adapter.findByIds(mockPayload, 'default', [
+        'default:posts:doc-1:0',
+        'default:posts:nope:0',
+      ])
+      expect(Object.keys(records).sort()).toEqual(
+        ['default:posts:doc-1:0', 'default:posts:nope:0'].sort(),
+      )
+      expect(records['default:posts:doc-1:0']!.id).toBe('default:posts:doc-1:0')
+      expect(records['default:posts:nope:0']).toBeUndefined()
+    })
+
+    test('empty ids returns {}', async () => {
+      const mockBinding = createMockCloudflareBinding()
+      const { adapter } = createCloudflareVectorizeIntegration({
+        config: { default: { dims: DIMS } },
+        binding: mockBinding as any,
+      })
+      const mockPayload = createMockPayload(mockBinding)
+      const records = await adapter.findByIds(mockPayload, 'default', [])
+      expect(records).toEqual({})
     })
   })
 })

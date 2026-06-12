@@ -303,10 +303,13 @@ function mapRowsToResults(
     const result = {
       ...row,
       id: String(row.id),
-      docId: String(rawDocId),
+      sourceCollection: String(row.sourceCollection ?? ''),
+      docId: String(rawDocId ?? ''),
       score: typeof rawScore === 'number' ? rawScore : parseFloat(String(rawScore)),
       chunkIndex:
         typeof rawChunkIndex === 'number' ? rawChunkIndex : parseInt(String(rawChunkIndex), 10),
+      chunkText: String(row.chunkText ?? ''),
+      embeddingVersion: String(row.embeddingVersion ?? ''),
     } as VectorSearchResult
 
     // Ensure any number fields from the schema are numbers in the result
