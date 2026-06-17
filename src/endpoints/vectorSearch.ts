@@ -44,6 +44,18 @@ export const createVectorSearchHandlers = (
     const reranked = await rerank.callback(query, candidates)
     return reranked.slice(0, effectiveLimit)
   }
+
+  const searchByEmbedding = async (
+    payload: BasePayload,
+    embedding: number[],
+    knowledgePool: KnowledgePoolName,
+    limit?: number,
+    where?: Where,
+  ) => {
+    // searchByEmbedding does not support reranking because rerankers need text, not vectors
+    return adapter.search(payload, embedding, knowledgePool, limit, where)
+  }
+
   const requestHandler: PayloadHandler = async (req) => {
     if (!req || !req.json) {
       return Response.json({ error: 'Request is required' }, { status: 400 })
@@ -77,5 +89,5 @@ export const createVectorSearchHandlers = (
       return Response.json({ error: `Internal server error: ${error}` }, { status: 500 })
     }
   }
-  return { vectorSearch, requestHandler }
+  return { vectorSearch, searchByEmbedding, requestHandler }
 }
