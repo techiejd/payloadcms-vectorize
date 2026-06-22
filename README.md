@@ -866,7 +866,9 @@ if (vectorizedPayload) {
 
 #### `vectorizedPayload.search(params)`
 
-Perform vector search programmatically without making an HTTP request. Parameters and result shape are identical to [POST `/api/vector-search`](#post-apivector-search). If the pool has a [`rerank`](#reranking-optional) config, this call goes through the same rerank pipeline as the REST endpoint.
+Perform vector search programmatically without making an HTTP request. The result shape is identical to [POST `/api/vector-search`](#post-apivector-search). If the pool has a [`rerank`](#reranking-optional) config, this call goes through the same rerank pipeline as the REST endpoint.
+
+**Params:** `{ knowledgePool: string; query: string; where?: Where; limit?: number; populateEmbedding?: boolean }` (`limit` defaults to `10`, `populateEmbedding` to `false`). Set `populateEmbedding: true` to include each result's raw `embedding` vector — handy for feeding straight into [`searchByEmbedding()`](#vectorizedpayloadsearchbyembeddingparams). This option is **Local API only**: the REST endpoint never returns vectors, so it is the one parameter not shared with [POST `/api/vector-search`](#post-apivector-search).
 
 **Returns:** `Promise<Array<VectorSearchResult>>` — the array that the REST endpoint wraps in `{ results }`.
 
@@ -891,7 +893,7 @@ Unlike [`search()`](#vectorizedpayloadsearchparams), this method does **not** ru
 
 There is no REST equivalent; `searchByEmbedding` is Local API only.
 
-**Params:** `{ knowledgePool: string; embedding: number[]; where?: Where; limit?: number }` (`limit` defaults to `10`).
+**Params:** `{ knowledgePool: string; embedding: number[]; where?: Where; limit?: number; populateEmbedding?: boolean }` (`limit` defaults to `10`, `populateEmbedding` to `false`). As with [`search()`](#vectorizedpayloadsearchparams), `populateEmbedding: true` includes each result's raw `embedding` vector and is Local API only.
 
 **Returns:** `Promise<Array<VectorSearchResult>>` — the same array shape as `search()`.
 
@@ -916,7 +918,7 @@ if (seed?.embedding) {
 
 #### `vectorizedPayload.findByIds(params)`
 
-Fetch stored embedding records by primary key. The `id` of each record is whatever [`search()`](#vectorizedpayloadsearchparams) returns as `result.id`, so a search result round-trips directly. Pass `populateEmbedding: true` to also get the raw embedding vector back (the normal search/query API never returns it) — the building block for "more like this" flows. It defaults to `false`, so by default you get the record's text and metadata without the heavy vector.
+Fetch stored embedding records by primary key. The `id` of each record is whatever [`search()`](#vectorizedpayloadsearchparams) returns as `result.id`, so a search result round-trips directly. Pass `populateEmbedding: true` to also get the raw embedding vector back (it is omitted by default) — the building block for "more like this" flows. It defaults to `false`, so by default you get the record's text and metadata without the heavy vector.
 
 **Params:** `{ knowledgePool: string; ids: string[]; populateEmbedding?: boolean }` (`populateEmbedding` defaults to `false`).
 
