@@ -358,6 +358,7 @@ export default (pluginOptions: PayloadcmsVectorizeConfig) =>
             params.knowledgePool,
             params.limit,
             params.where,
+            params.populateEmbedding,
           ),
         searchByEmbedding: (params: VectorSearchEmbeddingQuery) =>
           vectorSearchHandlers.searchByEmbedding(
@@ -366,6 +367,7 @@ export default (pluginOptions: PayloadcmsVectorizeConfig) =>
             params.knowledgePool,
             params.limit,
             params.where,
+            params.populateEmbedding,
           ),
         findByIds: (params: {
           knowledgePool: KnowledgePoolName

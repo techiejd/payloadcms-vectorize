@@ -221,6 +221,25 @@ describe('Postgres Adapter Compliance Tests', () => {
 
       expect(results.length).toBeLessThanOrEqual(1)
     })
+
+    test('includes the embedding vector on each result when populateEmbedding is true', async () => {
+      const results = await adapter.search(payload, targetEmbedding, 'default', 10, undefined, true)
+
+      expect(results.length).toBeGreaterThan(0)
+      for (const result of results) {
+        expect(Array.isArray(result.embedding)).toBe(true)
+        expect((result.embedding as number[]).length).toBe(DIMS)
+      }
+    })
+
+    test('omits the embedding vector by default', async () => {
+      const results = await adapter.search(payload, targetEmbedding, 'default', 10)
+
+      expect(results.length).toBeGreaterThan(0)
+      for (const result of results) {
+        expect(result.embedding).toBeUndefined()
+      }
+    })
   })
 
   describe('deleteChunks()', () => {

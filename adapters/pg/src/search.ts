@@ -26,6 +26,7 @@ export default async (
   poolName: KnowledgePoolName,
   limit: number = 10,
   where?: Where,
+  populateEmbedding = false,
 ): Promise<Array<VectorSearchResult>> => {
   const isPostgres = payload.db?.pool?.query || payload.db?.drizzle
 
@@ -100,6 +101,9 @@ export default async (
     id: table.id, // ensure we select id explicitly
     score: sql<number>`1 - (${distanceExpr})`,
   }
+  if (populateEmbedding) {
+    selectObj.embedding = table.embedding
+  }
 
   // Add reserved + extension fields from collection config
   for (const field of collectionConfig.fields ?? []) {
@@ -127,7 +131,7 @@ export default async (
   // Execute the query
   const result = await query
 
-  return mapRowsToResults(result, collectionConfig)
+  return mapRowsToResults(result, collectionConfig, populateEmbedding)
 }
 
 /**
@@ -284,6 +288,7 @@ function convertWhereToDrizzle(where: Where, table: DrizzleTable, fields: Flatte
 function mapRowsToResults(
   rows: Record<string, unknown>[],
   collectionConfig: SanitizedCollectionConfig,
+  populateEmbedding: boolean,
 ): Array<VectorSearchResult> {
   // Collect names of fields that are typed as number on the collection
   const numberFields = new Set<string>()
@@ -310,6 +315,7 @@ function mapRowsToResults(
         typeof rawChunkIndex === 'number' ? rawChunkIndex : parseInt(String(rawChunkIndex), 10),
       chunkText: String(row.chunkText ?? ''),
       embeddingVersion: String(row.embeddingVersion ?? ''),
+      ...(populateEmbedding ? { embedding: parseEmbedding(row.embedding) } : {}),
     } as VectorSearchResult
 
     // Ensure any number fields from the schema are numbers in the result
@@ -325,4 +331,17 @@ function mapRowsToResults(
 
     return result
   })
+}
+
+function parseEmbedding(value: unknown): number[] {
+  if (Array.isArray(value)) return value as number[]
+  if (typeof value === 'string') {
+    return value
+      .replace(/^\[/, '')
+      .replace(/\]$/, '')
+      .split(',')
+      .filter((s) => s.length > 0)
+      .map((s) => Number(s))
+  }
+  return []
 }

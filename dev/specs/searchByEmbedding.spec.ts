@@ -167,6 +167,42 @@ describe('searchByEmbedding method tests', () => {
     expectResultsOrderedByScore(results)
   })
 
+  test('searchByEmbedding includes the embedding vector when populateEmbedding is true', async () => {
+    const queryEmbedding = await embedFn(titleAndQuery)
+    const embeddingArray = Array.isArray(queryEmbedding)
+      ? queryEmbedding
+      : Array.from(queryEmbedding)
+
+    const results = await vectorizedPayload.searchByEmbedding({
+      knowledgePool: 'default',
+      embedding: embeddingArray,
+      populateEmbedding: true,
+    })
+
+    expect(results.length).toBeGreaterThan(0)
+    for (const r of results) {
+      expect(Array.isArray(r.embedding)).toBe(true)
+      expect((r.embedding as number[]).length).toBe(DIMS)
+    }
+  })
+
+  test('searchByEmbedding omits the embedding vector by default', async () => {
+    const queryEmbedding = await embedFn(titleAndQuery)
+    const embeddingArray = Array.isArray(queryEmbedding)
+      ? queryEmbedding
+      : Array.from(queryEmbedding)
+
+    const results = await vectorizedPayload.searchByEmbedding({
+      knowledgePool: 'default',
+      embedding: embeddingArray,
+    })
+
+    expect(results.length).toBeGreaterThan(0)
+    for (const r of results) {
+      expect(r.embedding).toBeUndefined()
+    }
+  })
+
   test('searchByEmbedding respects limit parameter', async () => {
     // Get the embedding for our query
     const queryEmbedding = await embedFn(titleAndQuery)

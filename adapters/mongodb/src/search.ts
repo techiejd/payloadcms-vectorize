@@ -26,6 +26,7 @@ export async function searchImpl(
   poolName: string,
   limit: number = 10,
   where?: Where,
+  populateEmbedding = false,
 ): Promise<VectorSearchResult[]> {
   const pool = ctx.pools[poolName]
   if (!pool) {
@@ -64,7 +65,7 @@ export async function searchImpl(
   const pipeline: Record<string, unknown>[] = [
     { $vectorSearch: vectorSearchStage },
     { $addFields: { score: { $meta: 'vectorSearchScore' } } },
-    { $project: { embedding: 0 } },
+    ...(populateEmbedding ? [] : [{ $project: { embedding: 0 } }]),
   ]
 
   const collection = client.db(ctx.dbName).collection(pool.collectionName)
@@ -74,10 +75,13 @@ export async function searchImpl(
     ? rawDocs.filter((d) => evaluatePostFilter(d as Record<string, unknown>, postFilter!))
     : rawDocs
 
-  return filtered.map((d) => mapDocToResult(d as Record<string, unknown>))
+  return filtered.map((d) => mapDocToResult(d as Record<string, unknown>, populateEmbedding))
 }
 
-function mapDocToResult(doc: Record<string, unknown>): VectorSearchResult {
+function mapDocToResult(
+  doc: Record<string, unknown>,
+  populateEmbedding: boolean,
+): VectorSearchResult {
   if (typeof doc.score !== 'number') {
     throw new Error(
       `[@payloadcms-vectorize/mongodb] Search result is missing numeric "score" field; ensure the pipeline adds { score: { $meta: 'vectorSearchScore' } }`,
@@ -95,6 +99,9 @@ function mapDocToResult(doc: Record<string, unknown>): VectorSearchResult {
       typeof doc.chunkIndex === 'number' ? doc.chunkIndex : Number(doc.chunkIndex ?? 0),
     chunkText: String(doc.chunkText ?? ''),
     embeddingVersion: String(doc.embeddingVersion ?? ''),
+    ...(populateEmbedding
+      ? { embedding: Array.isArray(doc.embedding) ? (doc.embedding as number[]) : [] }
+      : {}),
     ...extensionFields,
   } as VectorSearchResult
 }

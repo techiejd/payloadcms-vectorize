@@ -198,6 +198,38 @@ describe('VectorizedPayload', () => {
 
       expectResultsContainTitle(results, titleAndQuery, postId, testEmbeddingVersion)
     })
+
+    test('includes the embedding vector on each result when populateEmbedding is true', async () => {
+      const vectorizedPayload = getVectorizedPayload(payload)!
+
+      const results = await vectorizedPayload.search({
+        query: titleAndQuery,
+        knowledgePool: 'default',
+        limit: 5,
+        populateEmbedding: true,
+      })
+
+      expect(results.length).toBeGreaterThan(0)
+      for (const r of results) {
+        expect(Array.isArray(r.embedding)).toBe(true)
+        expect((r.embedding as number[]).length).toBe(DIMS)
+      }
+    })
+
+    test('omits the embedding vector by default', async () => {
+      const vectorizedPayload = getVectorizedPayload(payload)!
+
+      const results = await vectorizedPayload.search({
+        query: titleAndQuery,
+        knowledgePool: 'default',
+        limit: 5,
+      })
+
+      expect(results.length).toBeGreaterThan(0)
+      for (const r of results) {
+        expect(r.embedding).toBeUndefined()
+      }
+    })
   })
 
   describe('findByIds method', () => {

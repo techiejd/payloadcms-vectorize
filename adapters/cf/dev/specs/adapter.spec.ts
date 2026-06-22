@@ -14,7 +14,7 @@ function createMockCloudflareBinding() {
 
   return {
     query: vi.fn(async (queryVector: number[], options: any) => {
-      const { topK = 10, returnMetadata = false, where } = options
+      const { topK = 10, returnMetadata = false, returnValues = false, where } = options
 
       const results = Array.from(storage.values())
         .filter((item) => {
@@ -36,6 +36,7 @@ function createMockCloudflareBinding() {
           return {
             id: item.id,
             score,
+            values: returnValues ? item.values : undefined,
             metadata: returnMetadata ? item.metadata : undefined,
           }
         })
@@ -436,6 +437,66 @@ describe('createCloudflareVectorizeIntegration', () => {
         },
         limit: 1,
       })
+    })
+  })
+
+  describe('search', () => {
+    test('includes the embedding vector on each result when populateEmbedding is true', async () => {
+      const mockBinding = createMockCloudflareBinding()
+      const { adapter } = createCloudflareVectorizeIntegration({
+        config: { default: { dims: DIMS } },
+        binding: mockBinding as any,
+      })
+      const mockPayload = createMockPayload(mockBinding)
+      const embedding = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
+
+      await adapter.storeChunk(mockPayload, 'default', {
+        sourceCollection: 'posts',
+        docId: 'doc-1',
+        chunkIndex: 0,
+        chunkText: 'find me',
+        embeddingVersion: 'v1',
+        embedding,
+        extensionFields: { category: 'science' },
+      })
+
+      const results = await adapter.search(mockPayload, embedding, 'default', 10, undefined, true)
+      expect(results).toHaveLength(1)
+      expect(results[0].embedding).toEqual(embedding)
+      expect(results[0].chunkText).toBe('find me')
+      expect((results[0] as any).category).toBe('science')
+      expect(mockBinding.query).toHaveBeenCalledWith(
+        embedding,
+        expect.objectContaining({ returnValues: true }),
+      )
+    })
+
+    test('omits the embedding vector by default', async () => {
+      const mockBinding = createMockCloudflareBinding()
+      const { adapter } = createCloudflareVectorizeIntegration({
+        config: { default: { dims: DIMS } },
+        binding: mockBinding as any,
+      })
+      const mockPayload = createMockPayload(mockBinding)
+      const embedding = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
+
+      await adapter.storeChunk(mockPayload, 'default', {
+        sourceCollection: 'posts',
+        docId: 'doc-1',
+        chunkIndex: 0,
+        chunkText: 'find me',
+        embeddingVersion: 'v1',
+        embedding,
+        extensionFields: {},
+      })
+
+      const results = await adapter.search(mockPayload, embedding, 'default')
+      expect(results).toHaveLength(1)
+      expect(results[0].embedding).toBeUndefined()
+      expect(mockBinding.query).not.toHaveBeenCalledWith(
+        embedding,
+        expect.objectContaining({ returnValues: true }),
+      )
     })
   })
 
