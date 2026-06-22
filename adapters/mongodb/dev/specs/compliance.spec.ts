@@ -136,6 +136,34 @@ describe('Mongo Adapter Compliance Tests', () => {
       const results = await adapter.search(payload, target, 'default', 1)
       expect(results.length).toBeLessThanOrEqual(1)
     })
+
+    // Atlas vector search is eventually consistent: a freshly-seeded doc may not be
+    // queryable immediately, so poll until the index surfaces it before asserting.
+    const searchUntilNonEmpty = async (populateEmbedding: boolean) => {
+      for (let attempt = 0; attempt < 30; attempt++) {
+        const results = await adapter.search(payload, target, 'default', 10, undefined, populateEmbedding)
+        if (results.length > 0) return results
+        await new Promise((resolve) => setTimeout(resolve, 500))
+      }
+      return adapter.search(payload, target, 'default', 10, undefined, populateEmbedding)
+    }
+
+    test('includes the embedding vector on each result when populateEmbedding is true', async () => {
+      const results = await searchUntilNonEmpty(true)
+      expect(results.length).toBeGreaterThan(0)
+      for (const r of results) {
+        expect(Array.isArray(r.embedding)).toBe(true)
+        expect(r.embedding?.length).toBe(DIMS)
+      }
+    })
+
+    test('omits the embedding vector by default', async () => {
+      const results = await searchUntilNonEmpty(false)
+      expect(results.length).toBeGreaterThan(0)
+      for (const r of results) {
+        expect(r.embedding).toBeUndefined()
+      }
+    })
   })
 
   describe('deleteChunks()', () => {

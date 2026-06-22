@@ -17,6 +17,7 @@ export const createVectorSearchHandlers = (
     knowledgePool: KnowledgePoolName,
     limit?: number,
     where?: Where,
+    populateEmbedding?: boolean,
   ) => {
     const poolConfig = knowledgePools[knowledgePool]
     const queryEmbedding = await (async () => {
@@ -27,7 +28,7 @@ export const createVectorSearchHandlers = (
     const rerank = poolConfig.embeddingConfig.rerank
 
     if (!rerank) {
-      return adapter.search(payload, queryEmbedding, knowledgePool, limit, where)
+      return adapter.search(payload, queryEmbedding, knowledgePool, limit, where, populateEmbedding)
     }
 
     const effectiveLimit = limit ?? 10
@@ -39,6 +40,7 @@ export const createVectorSearchHandlers = (
       knowledgePool,
       fetchLimit,
       where,
+      populateEmbedding,
     )
 
     const reranked = await rerank.callback(query, candidates)
@@ -51,8 +53,9 @@ export const createVectorSearchHandlers = (
     knowledgePool: KnowledgePoolName,
     limit?: number,
     where?: Where,
+    populateEmbedding?: boolean,
   ) => {
-    return adapter.search(payload, embedding, knowledgePool, limit, where)
+    return adapter.search(payload, embedding, knowledgePool, limit, where, populateEmbedding)
   }
 
   const requestHandler: PayloadHandler = async (req) => {
@@ -81,6 +84,8 @@ export const createVectorSearchHandlers = (
 
       const payload = req.payload
 
+      // populateEmbedding is intentionally not exposed over HTTP — it's a programmatic-only
+      // option, kept out of the REST response to avoid shipping large vectors over the wire.
       const results = await vectorSearch(payload, query, knowledgePool, limit, where)
 
       return Response.json({ results })

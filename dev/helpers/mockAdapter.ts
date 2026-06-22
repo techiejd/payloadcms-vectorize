@@ -145,6 +145,7 @@ export const createMockAdapter = (options: MockAdapterOptions = {}): DbAdapter =
       poolName: string,
       limit: number = 10,
       where?: Where,
+      populateEmbedding = false,
     ): Promise<VectorSearchResult[]> => {
       const results: Array<VectorSearchResult & { _score: number }> = []
 
@@ -181,6 +182,7 @@ export const createMockAdapter = (options: MockAdapterOptions = {}): DbAdapter =
               id: stored.id,
               score,
               _score: score, // For sorting
+              ...(populateEmbedding ? { embedding: stored.embedding } : {}),
               ...docFields, // Includes sourceCollection, docId, chunkText, embeddingVersion, AND extension fields
             })
           }

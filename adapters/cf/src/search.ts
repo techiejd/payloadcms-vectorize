@@ -8,6 +8,7 @@ export default async (
   poolName: KnowledgePoolName,
   limit: number = 10,
   where?: Where,
+  populateEmbedding = false,
 ): Promise<Array<VectorSearchResult>> => {
   const vectorizeBinding = getVectorizeBinding(payload)
 
@@ -15,6 +16,7 @@ export default async (
     const queryOptions: Record<string, any> = {
       topK: limit,
       returnMetadata: 'all' as const,
+      ...(populateEmbedding ? { returnValues: true } : {}),
     }
 
     let postFilter: Where | null = null
@@ -48,6 +50,7 @@ export default async (
         chunkIndex: typeof metadata.chunkIndex === 'number' ? metadata.chunkIndex : parseInt(String(metadata.chunkIndex || '0'), 10),
         chunkText: String(metadata.chunkText || ''),
         embeddingVersion: String(metadata.embeddingVersion || ''),
+        ...(populateEmbedding ? { embedding: Array.from(match.values ?? []) } : {}),
         ...extensionFields,
       }
     })

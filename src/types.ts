@@ -325,6 +325,7 @@ export interface VectorSearchResult {
   chunkIndex: number // The index of this chunk
   chunkText: string // The original text that was vectorized
   embeddingVersion: string // The version of the embedding model used
+  embedding?: number[] // Present only when the query requested populateEmbedding
   [key: string]: any // Extension fields and other dynamic fields
 }
 
@@ -348,6 +349,8 @@ export interface VectorSearchQuery {
   where?: Where
   /** Optional limit for number of results (default: 10) */
   limit?: number
+  /** When true, include the embedding vector on each result (default: false) */
+  populateEmbedding?: boolean
 }
 
 export interface VectorSearchEmbeddingQuery {
@@ -359,6 +362,8 @@ export interface VectorSearchEmbeddingQuery {
   where?: Where
   /** Optional limit for number of results (default: 10) */
   limit?: number
+  /** When true, include the embedding vector on each result (default: false) */
+  populateEmbedding?: boolean
 }
 
 // ==========================================
@@ -457,6 +462,7 @@ export type DbAdapter = {
     poolName: KnowledgePoolName,
     limit?: number,
     where?: Where,
+    populateEmbedding?: boolean,
   ) => Promise<Array<VectorSearchResult>>
   findByIds: (
     payload: BasePayload,

@@ -88,8 +88,8 @@ export const createMongoVectorIntegration = (
       return count > 0
     },
 
-    search: (payload, queryEmbedding, poolName, limit, where) =>
-      searchImpl(getCtx(), payload, queryEmbedding, poolName, limit, where),
+    search: (payload, queryEmbedding, poolName, limit, where, populateEmbedding) =>
+      searchImpl(getCtx(), payload, queryEmbedding, poolName, limit, where, populateEmbedding),
 
     findByIds: (payload, poolName, ids, populateEmbedding) =>
       findByIdsImpl(getCtx(), payload, poolName, ids, populateEmbedding),
