@@ -3,6 +3,7 @@ import { BasePayload, SanitizedCollectionConfig } from 'payload'
 import { KnowledgePoolName, EmbeddingRecord } from 'payloadcms-vectorize'
 import toSnakeCase from 'to-snake-case'
 import { getEmbeddingsTable } from './drizzle.js'
+import { parseEmbedding } from './parseEmbedding.js'
 
 export default async (
   payload: BasePayload,
@@ -118,17 +119,4 @@ function mapRowsToRecords(
 
     return record
   })
-}
-
-function parseEmbedding(value: unknown): number[] {
-  if (Array.isArray(value)) return value as number[]
-  if (typeof value === 'string') {
-    return value
-      .replace(/^\[/, '')
-      .replace(/\]$/, '')
-      .split(',')
-      .filter((s) => s.length > 0)
-      .map((s) => Number(s))
-  }
-  return []
 }

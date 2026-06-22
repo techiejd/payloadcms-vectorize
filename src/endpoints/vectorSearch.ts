@@ -84,6 +84,8 @@ export const createVectorSearchHandlers = (
 
       const payload = req.payload
 
+      // populateEmbedding is intentionally not exposed over HTTP — it's a programmatic-only
+      // option, kept out of the REST response to avoid shipping large vectors over the wire.
       const results = await vectorSearch(payload, query, knowledgePool, limit, where)
 
       return Response.json({ results })

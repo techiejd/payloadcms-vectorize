@@ -212,7 +212,7 @@ describe('VectorizedPayload', () => {
       expect(results.length).toBeGreaterThan(0)
       for (const r of results) {
         expect(Array.isArray(r.embedding)).toBe(true)
-        expect((r.embedding as number[]).length).toBe(DIMS)
+        expect(r.embedding?.length).toBe(DIMS)
       }
     })
 

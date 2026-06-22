@@ -325,6 +325,7 @@ export interface VectorSearchResult {
   chunkIndex: number // The index of this chunk
   chunkText: string // The original text that was vectorized
   embeddingVersion: string // The version of the embedding model used
+  embedding?: number[] // Present only when the query requested populateEmbedding
   [key: string]: any // Extension fields and other dynamic fields
 }
 

@@ -228,7 +228,7 @@ describe('Postgres Adapter Compliance Tests', () => {
       expect(results.length).toBeGreaterThan(0)
       for (const result of results) {
         expect(Array.isArray(result.embedding)).toBe(true)
-        expect((result.embedding as number[]).length).toBe(DIMS)
+        expect(result.embedding?.length).toBe(DIMS)
       }
     })
 
