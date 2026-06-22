@@ -52,7 +52,6 @@ export const createVectorSearchHandlers = (
     limit?: number,
     where?: Where,
   ) => {
-    // searchByEmbedding does not support reranking because rerankers need text, not vectors
     return adapter.search(payload, embedding, knowledgePool, limit, where)
   }
 

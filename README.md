@@ -832,7 +832,7 @@ curl -X POST http://localhost:3000/api/vector-retry-failed-batch \
 
 ### Local API
 
-The plugin provides a `getVectorizedPayload(payload)` function which returns a `vectorizedPayload` object exposing `search`, `findByIds`, `queueEmbed`, `bulkEmbed`, and `retryFailedBatch` methods.
+The plugin provides a `getVectorizedPayload(payload)` function which returns a `vectorizedPayload` object exposing `search`, `searchByEmbedding`, `findByIds`, `queueEmbed`, `bulkEmbed`, and `retryFailedBatch` methods.
 
 #### Getting the Vectorized Payload Object
 
@@ -883,6 +883,37 @@ const results = await vectorizedPayload.search({
 })
 ```
 
+#### `vectorizedPayload.searchByEmbedding(params)`
+
+Perform vector search with a raw embedding vector you already have, skipping the query-embedding step. This is the "more like this" primitive: take the `embedding` returned by [`findByIds({ populateEmbedding: true })`](#vectorizedpayloadfindbyidsparams) and feed it straight back in to find similar content. The result shape is identical to [`search()`](#vectorizedpayloadsearchparams), and the same [`where` filter](#metadata-filtering-where) applies before similarity ranking.
+
+Unlike [`search()`](#vectorizedpayloadsearchparams), this method does **not** run [reranking](#reranking-optional) even when the pool has a `rerank` config — rerankers operate on the original query text, which isn't available when you start from a vector.
+
+There is no REST equivalent; `searchByEmbedding` is Local API only.
+
+**Params:** `{ knowledgePool: string; embedding: number[]; where?: Where; limit?: number }` (`limit` defaults to `10`).
+
+**Returns:** `Promise<Array<VectorSearchResult>>` — the same array shape as `search()`.
+
+**Example:**
+
+```typescript
+const records = await vectorizedPayload.findByIds({
+  knowledgePool: 'mainKnowledgePool',
+  ids: ['<an id from a previous search result>'],
+  populateEmbedding: true,
+})
+
+const seed = Object.values(records)[0]
+if (seed?.embedding) {
+  const similar = await vectorizedPayload.searchByEmbedding({
+    knowledgePool: 'mainKnowledgePool',
+    embedding: seed.embedding,
+    limit: 5,
+  })
+}
+```
+
 #### `vectorizedPayload.findByIds(params)`
 
 Fetch stored embedding records by primary key. The `id` of each record is whatever [`search()`](#vectorizedpayloadsearchparams) returns as `result.id`, so a search result round-trips directly. Pass `populateEmbedding: true` to also get the raw embedding vector back (the normal search/query API never returns it) — the building block for "more like this" flows. It defaults to `false`, so by default you get the record's text and metadata without the heavy vector.
@@ -903,7 +934,7 @@ const records = await vectorizedPayload.findByIds({
 
 const record = records[id]
 if (record) {
-  // record.embedding is the raw number[] vector — feed it back into search for "more like this"
+  // record.embedding is the raw number[] vector — feed it into searchByEmbedding() for "more like this"
   console.log(record.embedding!.length, record.chunkText)
 }
 ```
