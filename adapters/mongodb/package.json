@@ -1,6 +1,6 @@
 {
   "name": "@payloadcms-vectorize/mongodb",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "MongoDB Atlas + self-hosted vectorSearch adapter for payloadcms-vectorize",
   "license": "MIT",
   "repository": {
